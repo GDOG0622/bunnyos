@@ -3,7 +3,7 @@
     const text = input.value.trim();
     if (!text || !state.activeChatId) return;
     input.value = '';
-    await appendChatMessage({ role: 'user', type: 'text', text, created_at: Date.now() });
+    await appendChatMessage({ role: 'user', type: parseVoiceText(text) ? 'voice' : 'text', text, created_at: Date.now() });
 }
 
 let isGenerating = false;

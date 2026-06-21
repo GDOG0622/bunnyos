@@ -1852,6 +1852,8 @@ function qqMessageToText(msg) {
             return '[图片]';
         case 'transfer':
             return `[🧧${msg.currency || ''}${msg.amount || ''}${msg.note ? `|${msg.note}` : '|'}]`;
+        case 'voice':
+            return String(msg.text || '');
         case 'link': {
             const t = String(msg.title || '').trim();
             const d = String(msg.description || '').trim();

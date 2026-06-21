@@ -37,6 +37,10 @@ function messageSummaryText(msg) {
     if (!msg) return '';
     if (msg.type === 'image') return '[图片]';
     if (msg.type === 'sticker') return `[${msg.text || '表情'}]`;
+    if (msg.type === 'voice') {
+        const voice = parseVoiceText(msg.text);
+        return voice ? `[语音 ${voice.duration}] ${voice.content}` : '[语音]';
+    }
     if (msg.type === 'transfer') {
         const amount = `${msg.currency || ''}${msg.amount || ''}`.trim();
         return `转账${amount ? ` ${amount}` : ''}${msg.note ? ` ${msg.note}` : ''}`;
@@ -44,6 +48,8 @@ function messageSummaryText(msg) {
     if (msg.type === 'link') {
         return `[链接] ${msg.title || msg.siteName || msg.url || ''}`;
     }
+    const voice = parseVoiceText(activeMessageText(msg));
+    if (voice) return `[语音 ${voice.duration}] ${voice.content}`;
     return String(activeMessageText(msg) || '').replace(/\s+/g, ' ').slice(0, 80);
 }
 
@@ -72,6 +78,15 @@ function escapeHtml(s) {
 
 function escapeAttr(s) {
     return escapeHtml(s).replace(/`/g, '&#96;');
+}
+
+function parseVoiceText(text) {
+    const m = String(text || '').trim().match(/^=([^|=\n]{1,16})\|([\s\S]*?)=$/);
+    if (!m) return null;
+    const duration = m[1].trim();
+    const content = m[2].trim();
+    if (!duration || !content) return null;
+    return { duration, content };
 }
 
 function clamp(value, min, max) {

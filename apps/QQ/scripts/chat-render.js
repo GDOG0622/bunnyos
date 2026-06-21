@@ -143,6 +143,21 @@ function messageContentHtml(msg, idx) {
         const href = escapeAttr(msg.url || '');
         return `<div class="qq-message qq-link-card">${reply}<a class="qq-link-card-inner" href="${href}" target="_blank" rel="noopener noreferrer">${img}<div class="qq-link-body"><div class="qq-link-title">${t}</div>${d}<div class="qq-link-site">${site}</div></div></a></div>`;
     }
+    const voice = parseVoiceText(activeMessageText(msg));
+    if (voice) {
+        return `<div class="qq-message qq-voice-message">${reply}
+            <details class="qq-voice-details">
+                <summary class="qq-voice-summary">
+                    <span class="qq-voice-play"><i class="bi bi-play-fill"></i></span>
+                    <span class="qq-voice-wave" aria-hidden="true">
+                        <span></span><span></span><span></span><span></span><span></span><span></span>
+                    </span>
+                    <span class="qq-voice-duration">${escapeHtml(voice.duration)}</span>
+                </summary>
+                <div class="qq-voice-text">${escapeHtml(voice.content)}</div>
+            </details>
+        </div>`;
+    }
     return `<div class="qq-message">${reply}${escapeHtml(activeMessageText(msg))}</div>`;
 }
 
