@@ -648,19 +648,31 @@ let settings = {};
         }
 
         async function requestUserMicPermission() {
+            const statusEl = document.getElementById('userMic_status');
+            const button = document.getElementById('userMic_request');
+            if (statusEl) statusEl.textContent = '正在申请...';
+            if (button) button.disabled = true;
             if (!window.isSecureContext) {
                 alert('麦克风权限需要 HTTPS 域名或 localhost。');
                 await refreshUserMicStatus();
-                return;
-            }
-            if (!navigator.mediaDevices?.getUserMedia) {
-                alert('当前浏览器不支持麦克风权限申请。');
-                await refreshUserMicStatus();
+                if (button) button.disabled = false;
                 return;
             }
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                stream.getTracks().forEach(track => track.stop());
+                const parentRequest = window.parent !== window ? window.parent?.bunnyosRequestMicrophonePermission : null;
+                const result = typeof parentRequest === 'function'
+                    ? await parentRequest()
+                    : await (async () => {
+                        if (!navigator.mediaDevices?.getUserMedia) {
+                            return { ok: false, error: '当前浏览器不支持麦克风权限申请。' };
+                        }
+                        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                        stream.getTracks().forEach(track => track.stop());
+                        return { ok: true };
+                    })();
+                if (!result?.ok) {
+                    throw new Error(result?.error || '权限未允许');
+                }
                 settings.userMicPermissionGranted = true;
                 await saveData();
                 await refreshUserMicStatus();
@@ -670,6 +682,8 @@ let settings = {};
                 await saveData();
                 await refreshUserMicStatus();
                 alert('麦克风权限未允许：' + (e?.message || e?.name || '未知错误'));
+            } finally {
+                if (button) button.disabled = false;
             }
         }
 

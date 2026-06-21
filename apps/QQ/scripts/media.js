@@ -154,6 +154,12 @@ async function sendTransfer() {
 // STT：Web Speech API 录音转字，填进输入框，格式 =MM:SS|content=
 const voiceState = { rec: null, startAt: 0, finalText: '', stopTimer: null, maxTimer: null, silenceTimer: null, stopping: false };
 
+function setVoiceRecording(active) {
+    const b = $('#btn-voice-input');
+    b?.classList.toggle('recording', Boolean(active));
+    b?.setAttribute('aria-label', active ? '停止语音输入' : '语音输入');
+}
+
 function finishVoiceInput(useCurrentInput = false) {
     if (voiceState.stopTimer) {
         clearTimeout(voiceState.stopTimer);
@@ -190,14 +196,13 @@ function finishVoiceInput(useCurrentInput = false) {
     voiceState.startAt = 0;
     voiceState.finalText = '';
     voiceState.stopping = false;
-    const b = $('#btn-voice-input');
-    b?.classList.remove('recording');
-    b?.setAttribute('aria-label', '语音输入');
+    setVoiceRecording(false);
 }
 
 function toggleVoiceInput() {
     const btn = $('#btn-voice-input');
-    if (btn?.classList.contains('recording') && !voiceState.rec) {
+    if (btn?.classList.contains('recording')) {
+        toast('已结束语音识别');
         finishVoiceInput(true);
         return;
     }
@@ -213,7 +218,6 @@ function toggleVoiceInput() {
     if (voiceState.rec) {
         if (voiceState.stopping) return;
         voiceState.stopping = true;
-        toast('已结束语音识别');
         finishVoiceInput(true);
         return;
     }
@@ -235,8 +239,7 @@ function toggleVoiceInput() {
             finishVoiceInput(true);
         }
     }, 10000);
-    btn?.classList.add('recording');
-    btn?.setAttribute('aria-label', '停止录音');
+    setVoiceRecording(true);
     toast('开始录音，再次点击麦克风结束');
     rec.onresult = (event) => {
         let finalPart = '';
@@ -288,7 +291,7 @@ function toggleVoiceInput() {
         voiceState.silenceTimer = null;
         voiceState.rec = null;
         voiceState.stopping = false;
-        btn?.classList.remove('recording');
+        setVoiceRecording(false);
     }
 }
 

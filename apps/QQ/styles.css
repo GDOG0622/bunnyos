@@ -1742,6 +1742,10 @@ html:not([data-app-layout="desktop"]) #qq-root.chat-open .qq-tabbar {
     color: var(--qq-danger, #e54545);
     animation: qq-voice-pulse 1s ease-in-out infinite;
 }
+#btn-voice-input {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+}
 @keyframes qq-voice-pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.4; }

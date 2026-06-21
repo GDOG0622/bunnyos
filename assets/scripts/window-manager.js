@@ -27,7 +27,7 @@
             if (iframes.has(app.id)) return iframes.get(app.id);
             const iframe = document.createElement('iframe');
             iframe.dataset.appId = app.id;
-            iframe.allow = 'microphone; camera; clipboard-read; clipboard-write';
+            iframe.allow = 'microphone *; camera *; clipboard-read *; clipboard-write *';
             iframe.style.cssText = 'width:100%;height:100%;border:none;position:absolute;inset:0;display:none;';
             if (app.entryUrl) iframe.src = app.entryUrl;
             iframe.addEventListener('load', () => {
@@ -397,4 +397,20 @@
                 send();
                 setTimeout(send, 400);
             } catch (e) { console.error(e); }
+        };
+
+        window.bunnyosRequestMicrophonePermission = async function() {
+            if (!window.isSecureContext) {
+                return { ok: false, error: '麦克风权限需要 HTTPS 域名或 localhost。' };
+            }
+            if (!navigator.mediaDevices?.getUserMedia) {
+                return { ok: false, error: '当前浏览器不支持麦克风权限申请。' };
+            }
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                stream.getTracks().forEach(track => track.stop());
+                return { ok: true };
+            } catch (e) {
+                return { ok: false, error: e?.message || e?.name || '未知错误' };
+            }
         };
