@@ -567,7 +567,7 @@ postimages 的免登录 API 不如 catbox 稳；是否要换成别的（如 0x0.
 - [ ] **S24** 气泡模块：基本同 S11~S17，但编辑页有 userCss + charCss 两个 textarea；CSS 注入两个独立 style 节点
 - [ ] **S25** 气泡：chat-render.js 给 `.qq-message` 加 `bunny-qq-bubble` + `-user/-char`
 - [ ] **S26** 聊天设置面板加气泡下拉
-- [ ] **S27** 背景图模块：编辑页用**文件上传**（仿设置 App），调 `POST /api/qq/beauties/backgrounds/:id/image` 覆盖式存盘 → 回填 url；mockup 直接设 background-image
+- [ ] **S27** 背景图模块：编辑页**完全仿 [apps/settings/index.html:453](apps/settings/index.html:453) 的 `.wallpaper-pick` 大方块按钮**（默认 `+`、有图后 `.has-image` + `background-image` 缩略），点按钮 → 隐藏 `<input type="file">` → `POST /api/qq/beauties/backgrounds/:id/image` 覆盖式存盘 → 回填 url；**不要 URL 输入框**；mockup 直接设 background-image
 - [ ] **S28** 聊天设置面板加聊天背景下拉
 - [ ] **S29** ~~头像模块~~ 已删（§7.1 决策：头像不算美化模块）
 - [ ] **S30** 皮肤模块：编辑页和气泡类似（单 CSS）；mockup 区改成"全屏临时预览"按钮；预览功能 = 套 CSS 到 body + 显示"退出预览"浮窗
