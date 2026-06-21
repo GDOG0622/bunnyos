@@ -737,25 +737,81 @@ function replaceReplyGroupWithVersion(chat, group, versionIndex) {
     chat.messages.splice(group.start, group.end - group.start + 1, ...nextMessages);
 }
 
+// 解析 AI 输出的红包/领取语法。详见 QQ美化系统计划.md §1.2
+// 支持：[🧧¥10|备注] / [🧧¥10|] / [🧧领取]
+const TRANSFER_SEG_RE = /^\s*\[🧧(?!领取\])([^\d|\]]*)([\d.]+)\|([^\]]*)\]\s*$/;
+const TRANSFER_RECEIVE_RE = /^\s*\[🧧领取\]\s*$/;
+function parseAssistantSegment(text) {
+    if (TRANSFER_RECEIVE_RE.test(text)) return { kind: 'receive' };
+    const m = text.match(TRANSFER_SEG_RE);
+    if (m) {
+        return {
+            kind: 'transfer',
+            currency: (m[1] || '').trim(),
+            amount: m[2],
+            note: (m[3] || '').trim()
+        };
+    }
+    return { kind: 'text' };
+}
+
+function markLatestPendingUserTransferReceived(chat) {
+    const msgs = chat.messages || [];
+    for (let j = msgs.length - 1; j >= 0; j--) {
+        const t = msgs[j];
+        if (t && t.role === 'user' && t.type === 'transfer' && t.status === 'pending') {
+            t.status = 'received';
+            t.settled_at = Date.now();
+            return true;
+        }
+    }
+    return false;
+}
+
 async function appendAssistantReplySegments(chat, segments) {
     const cleanSegments = normalizeReplySegments(segments);
     if (!cleanSegments.length) return;
     const groupId = createReplyGroupId();
     const createdAt = Date.now();
     const versions = [{ segments: cleanSegments, created_at: createdAt }];
+    let firstStructured = true;
     for (let i = 0; i < cleanSegments.length; i++) {
-        if (i > 0) await sleep(Math.min(1400, 350 + cleanSegments[i].length * 45));
-        chat.messages.push({
+        const segText = cleanSegments[i];
+        const parsed = parseAssistantSegment(segText);
+
+        if (parsed.kind === 'receive') {
+            // [🧧领取] 不入消息，只动作：把最近一个 pending user→char 红包标 received
+            markLatestPendingUserTransferReceived(chat);
+            chat.updated_at = Date.now();
+            renderChats();
+            renderActiveChat();
+            continue;
+        }
+
+        if (i > 0) await sleep(Math.min(1400, 350 + segText.length * 45));
+
+        const base = {
             role: 'assistant',
-            type: 'text',
-            text: cleanSegments[i],
             created_at: Date.now(),
             reply_group_id: groupId,
             reply_group_version_index: 0,
-            reply_group_versions: i === 0 ? versions : undefined
-        });
-        if (chat.messages[chat.messages.length - 1].reply_group_versions === undefined) {
-            delete chat.messages[chat.messages.length - 1].reply_group_versions;
+        };
+        if (firstStructured) base.reply_group_versions = versions;
+        firstStructured = false;
+
+        if (parsed.kind === 'transfer') {
+            chat.messages.push({
+                ...base,
+                type: 'transfer',
+                text: `转账 ${parsed.currency}${parsed.amount}${parsed.note ? ` ${parsed.note}` : ''}`,
+                amount: parsed.amount,
+                currency: parsed.currency,
+                note: parsed.note,
+                status: 'pending',
+                settled_at: null,
+            });
+        } else {
+            chat.messages.push({ ...base, type: 'text', text: segText });
         }
         chat.updated_at = Date.now();
         renderChats();

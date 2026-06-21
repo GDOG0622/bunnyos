@@ -598,7 +598,9 @@ Templates（必须严格遵守符号）：
 - 语音： =\${MM:SS}|\${content}=
 - 表情包： [\${name}]  方括号包裹，name 取自 <stickers> 列表
 - 撤回： -\${内容}-
-- 红包： [🧧\${Currency}\${Amount}|\${Note}]
+- 红包： [🧧\${Currency}\${Amount}|\${Note}]   仅你（{{char}}）发给 {{user}} 时使用，单独一行；Note 可空但 | 必须保留
+- 领取红包： [🧧领取]   单独一行；用于明确接受 {{user}} 刚刚发给你的红包。不写就视为没收，10 轮后自动退回 {{user}}
+- 历史中红包带状态后缀：[🧧¥10|备注|未领]、[🧧¥10|备注|已领]、[🧧¥10|备注|已自动退回]，仅供你判断对方红包状态，你输出时**不要带状态段**
 - 系统提示： +\${BUNNY meta 消息}+  仅 {{user}} 与 BUNNY 元交流，{{char}} 不可见、不应基于此内容反应
 
 **绝对禁止回复表情包内容**——表情包仅辅助理解感受，使用具有随机性。
@@ -634,7 +636,7 @@ const ONLINE_GROUP_CHAT_PROTOCOL = `<Group_Chat_Protocol>
 function buildBuiltinPromptContent(identifier, character, userPersona, variables, chatType) {
     switch (identifier) {
         case 'bunnyosRealtime':
-            return '当前现实时间：{{now}}（{{timezone}}）\n今天是{{date}}，{{weekday}}，现在{{time}}。';
+            return '当前现实时间：{{now}}（{{timezone}}）\n今天是{{date}}，{{weekday}}，现在{{time}}。\n你必须以此时间为锚回复：作息、用餐、是否在上班/睡觉、能否立刻响应等都基于上述真实时间和星期判断，不要凭空假设当前是别的时段。';
         case 'charDescription':
             return buildCharacterInfoPrompt(character);
         case 'personaDescription':
@@ -2097,7 +2099,8 @@ app.get('/app-icon', (req, res) => {
 // ========== QQ AI 回复路由（转发员） ==========
 
 // 把单条 QQ 消息转成给大模型看的纯文本，遵循「线上提示词」格式约定
-// 文字 → "content"   表情包 → "[name]"   红包 → [🧧¥10|备注]
+// 文字 → "content"   表情包 → "[name]"   红包 → [🧧¥10|备注|状态]
+// 状态段：user→char pending=未领 / returned=已自动退回；char→user pending=未领 / received=已领
 // 图片不走文字 wrap，单独走 multimodal image_url（在 /api/qq/reply 里处理）
 function qqMessageToText(msg) {
     if (!msg) return '';
@@ -2106,8 +2109,15 @@ function qqMessageToText(msg) {
             return `[${msg.text || '表情'}]`;
         case 'image':
             return '[图片]';
-        case 'transfer':
-            return `[🧧${msg.currency || ''}${msg.amount || ''}${msg.note ? `|${msg.note}` : '|'}]`;
+        case 'transfer': {
+            const note = msg.note || '';
+            const status = msg.status;
+            let label = '';
+            if (status === 'pending')  label = '未领';
+            else if (status === 'received') label = '已领';
+            else if (status === 'returned') label = '已自动退回';
+            return `[🧧${msg.currency || ''}${msg.amount || ''}|${note}${label ? `|${label}` : ''}]`;
+        }
         case 'voice':
             return String(msg.text || '');
         case 'link': {
