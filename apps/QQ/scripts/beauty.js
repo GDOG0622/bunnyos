@@ -2,9 +2,9 @@
 // 详见 QQ美化系统计划.md §1.4。
 //
 // tab 顺序：皮肤 / 头像 / 头像框 / 气泡 / 背景图
+// 头像不算美化模块（用户决策 2026-06-21）。tab 顺序：皮肤 / 头像框 / 气泡 / 背景图
 const BEAUTY_TAB_DEFS = [
     { type: 'skins',       label: '皮肤',   price: 20 },
-    { type: 'avatars',     label: '头像',   price: 0 },
     { type: 'frames',      label: '头像框', price: 5 },
     { type: 'bubbles',     label: '气泡',   price: 5 },
     { type: 'backgrounds', label: '背景图', price: 0 },

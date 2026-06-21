@@ -66,7 +66,7 @@
 | M2 美化库后端+商城骨架 | 完成 | `7af2b5c` | S5-S10：beauties/char-beauty 端点 + #me-beauty 入口 + 5 tab 骨架 |
 | M3 头像框跑通（样板模块） | 未开始 | — | — |
 | M4 套到 char + 三个点菜单 | 未开始 | — | — |
-| M5 复制到其他 4 个模块 | 未开始 | — | 含 S29 头像模块需先确认 §7.1 |
+| M5 复制到其他 3 个模块 | 未开始 | — | 皮肤/气泡/背景图；头像已剔除（§7.1 已决） |
 | M7 教程 + 图床 + 全局背景 | 未开始 | — | 含 S40 需先确认 §7.3 |
 | M8 对话框管理 + 收尾 | 未开始 | — | 含 S47 需先确认 §7.2 |
 
@@ -167,15 +167,14 @@ publish-github.cmd 会自动 git add + commit + push 到 origin/main，GitHub we
 - 美化页顶部常驻一条余额状态条
 
 ### 1.4 商城结构
-4 个模块 tab：**皮肤 / 头像框 / 气泡 / 背景图 / 头像**（顺序：皮肤、头像、头像框、气泡、背景图）
+4 个模块 tab：**皮肤 / 头像框 / 气泡 / 背景图**（顺序如左）。**头像不算美化模块**（用户 2026-06-21 决策）。
 
 | 模块 | 创建价 | 顶部预览 | 数据结构单元 |
 |---|---|---|---|
 | 皮肤 | 20cc | "全屏临时预览"按钮（套入 QQ 多页切一圈，含退出按钮） | 单 CSS |
-| 头像 | 0cc | mockup | 图片直链 |
 | 头像框 | 5cc | mockup | 单 CSS |
 | 气泡 | 5cc | mockup | **一组 = userCss + charCss 两个字段** |
-| 背景图 | 0cc | mockup | 图片直链 |
+| 背景图 | 0cc | mockup | 上传文件，**覆盖式存到 `data/qq/beauty-backgrounds/<id>.<ext>`**（同 id 旧文件先删，参考设置 App 的 `removeBackgroundSlot`），写回 `url` |
 
 每模块内自上而下：
 1. **顶部 mockup 预览**（皮肤除外，是按钮）。mockup 是固定布局的虚拟聊天场景（含 user/char 头像、reply_to 一例、文本气泡若干、转账气泡示例），实时套用"当前选中槽位"的 CSS / 图。
@@ -217,7 +216,6 @@ publish-github.cmd 会自动 git add + commit + push 到 origin/main，GitHub we
   ```json
   {
     "skins":     [{ "id", "name", "preview", "css" }],
-    "avatars":   [{ "id", "name", "preview", "url" }],
     "frames":    [{ "id", "name", "preview", "css" }],
     "bubbles":   [{ "id", "name", "preview", "userCss", "charCss" }],
     "backgrounds":[{ "id", "name", "preview", "url" }]
@@ -229,7 +227,6 @@ publish-github.cmd 会自动 git add + commit + push 到 origin/main，GitHub we
   ```json
   {
     "<characterId>": {
-      "avatarId":      "default",
       "frameId":       "default",
       "bubbleId":      "default",
       "backgroundId":  "default"
@@ -237,6 +234,8 @@ publish-github.cmd 会自动 git add + commit + push 到 origin/main，GitHub we
   }
   ```
   缺省视为全 default。
+
+- `data/qq/beauty-backgrounds/<beautyId>.<ext>` → 背景图实际文件，**每次上传覆盖同 id 旧文件**，不在后端累积。上传端点 `POST /api/qq/beauties/backgrounds/:id/image` body `{dataUrl}`，参考设置 App 背景的 `removeBackgroundSlot` 写法。
 
 **应用入口**：进入 char 聊天 → 标题栏右侧新增三个点按钮（**目前 QQ 聊天页没有这个按钮，需要从零加**） → 弹出"聊天设置"面板，含：
 - 三个紧凑下拉：头像框 ↓ / 气泡组 ↓ / 聊天背景 ↓ （头像目前在聊天页用的是角色卡 avatar；这里的"头像"槽位是给 user 头像吗？← **看 7.1**）
@@ -499,13 +498,8 @@ publish-github.cmd 会自动 git add + commit + push 到 origin/main，GitHub we
 
 ## 7. 待用户决策（不要替他决定）
 
-### 7.1 头像模块的归属
-"独立于角色卡的聊天页小头像"——但聊天里有 user 头像和 char 头像两侧。这个"头像"槽位：
-- (a) 只是 user 头像？user 选一个换自己在 QQ 里的小头像（覆盖人设 avatar）？
-- (b) 是给 char 套的"聊天页用头像"，覆盖角色卡 avatar（仅在 QQ 聊天页生效，角色卡里 avatar 不变）？
-- (c) 两个都做？
-
-**当前 plan 默认按 (b) 实施**——和头像框/气泡一样在 char-beauty 里挂 avatarId。开发到 C2 之前必须找用户确认。
+### 7.1 头像模块的归属 · 已决（2026-06-21）
+**头像不算美化模块**。从 BEAUTY_TYPES / char-beauty / 商城 tab 中全部移除。用户若要换头像走原有的角色卡 / 人设 avatar 流程。
 
 ### 7.2 隐藏聊天的恢复入口
 1.9 提到"显示隐藏的聊天"开关。放在哪？
@@ -573,9 +567,9 @@ postimages 的免登录 API 不如 catbox 稳；是否要换成别的（如 0x0.
 - [ ] **S24** 气泡模块：基本同 S11~S17，但编辑页有 userCss + charCss 两个 textarea；CSS 注入两个独立 style 节点
 - [ ] **S25** 气泡：chat-render.js 给 `.qq-message` 加 `bunny-qq-bubble` + `-user/-char`
 - [ ] **S26** 聊天设置面板加气泡下拉
-- [ ] **S27** 背景图模块：编辑页用图片 URL 输入框代替 CSS；mockup 直接设 background-image
+- [ ] **S27** 背景图模块：编辑页用**文件上传**（仿设置 App），调 `POST /api/qq/beauties/backgrounds/:id/image` 覆盖式存盘 → 回填 url；mockup 直接设 background-image
 - [ ] **S28** 聊天设置面板加聊天背景下拉
-- [ ] **S29** 头像模块（按 §7.1 决策落地，**做前再问用户一次**）
+- [ ] **S29** ~~头像模块~~ 已删（§7.1 决策：头像不算美化模块）
 - [ ] **S30** 皮肤模块：编辑页和气泡类似（单 CSS）；mockup 区改成"全屏临时预览"按钮；预览功能 = 套 CSS 到 body + 显示"退出预览"浮窗
 - [ ] **S31** 皮肤的"应用"逻辑：写入 `data/qq/settings.json.currentSkinId`，QQ 启动时拉并注入
   - 验证：5 个模块都能跑全流程

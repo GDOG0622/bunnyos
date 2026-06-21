@@ -89,13 +89,14 @@ const WALLET_FILE = path.join(DATA_DIR, 'wallet.json');
 const WALLET_INITIAL_BALANCE = 20000;
 const QQ_BEAUTIES_FILE = path.join(QQ_DIR, 'beauties.json');
 const QQ_CHAR_BEAUTY_FILE = path.join(QQ_DIR, 'char-beauty.json');
-// 美化分类 + 创建价（cc）。详见 QQ美化系统计划.md §1.4
-const BEAUTY_TYPES = ['skins', 'avatars', 'frames', 'bubbles', 'backgrounds'];
-const BEAUTY_PRICES = { skins: 20, avatars: 0, frames: 5, bubbles: 5, backgrounds: 0 };
+const QQ_BEAUTY_BG_DIR = path.join(QQ_DIR, 'beauty-backgrounds');
+// 美化分类 + 创建价（cc）。详见 QQ美化系统计划.md §1.4。头像不算美化模块。
+const BEAUTY_TYPES = ['skins', 'frames', 'bubbles', 'backgrounds'];
+const BEAUTY_PRICES = { skins: 20, frames: 5, bubbles: 5, backgrounds: 0 };
 function defaultBeautyItem(type) {
     const base = { id: 'default', name: '默认', preview: '' };
     if (type === 'bubbles') return { ...base, userCss: '', charCss: '' };
-    if (type === 'avatars' || type === 'backgrounds') return { ...base, url: '' };
+    if (type === 'backgrounds') return { ...base, url: '' };
     return { ...base, css: '' };
 }
 function defaultBeautiesData() {
@@ -147,6 +148,7 @@ ensureFileExist(PUSH_SUBSCRIPTIONS_FILE, []);
 ensureFileExist(WALLET_FILE, { balance: WALLET_INITIAL_BALANCE, updated_at: Date.now() });
 ensureFileExist(QQ_BEAUTIES_FILE, defaultBeautiesData());
 ensureFileExist(QQ_CHAR_BEAUTY_FILE, {});
+fs.mkdirSync(QQ_BEAUTY_BG_DIR, { recursive: true });
 // 兜底：若文件存在但缺类目或缺 default 项，补齐
 {
     const cur = readJsonFile(QQ_BEAUTIES_FILE, {});
@@ -1024,7 +1026,6 @@ function readCharBeauty() {
 }
 function beautySlotKey(type) {
     if (type === 'skins') return 'skinId';
-    if (type === 'avatars') return 'avatarId';
     if (type === 'frames') return 'frameId';
     if (type === 'bubbles') return 'bubbleId';
     if (type === 'backgrounds') return 'backgroundId';
@@ -1108,6 +1109,12 @@ app.delete('/api/qq/beauties/:type/:id', (req, res) => {
         list.splice(idx, 1);
         data[type] = list;
         writeJsonFile(QQ_BEAUTIES_FILE, data);
+        // 背景类顺手清掉本地图片文件
+        if (type === 'backgrounds' && fs.existsSync(QQ_BEAUTY_BG_DIR)) {
+            fs.readdirSync(QQ_BEAUTY_BG_DIR)
+                .filter(f => f === id || f.startsWith(`${id}.`))
+                .forEach(f => fs.rmSync(path.join(QQ_BEAUTY_BG_DIR, f), { force: true }));
+        }
         // 解绑 char-beauty
         const slot = beautySlotKey(type);
         if (slot) {
@@ -1133,7 +1140,6 @@ app.get('/api/qq/char-beauty/:characterId', (req, res) => {
         const cb = readCharBeauty();
         const cur = cb[req.params.characterId] || {};
         res.set('Cache-Control', 'no-store').json({
-            avatarId:     cur.avatarId     || 'default',
             frameId:      cur.frameId      || 'default',
             bubbleId:     cur.bubbleId     || 'default',
             backgroundId: cur.backgroundId || 'default',
@@ -1147,7 +1153,7 @@ app.put('/api/qq/char-beauty/:characterId', (req, res) => {
         const cb = readCharBeauty();
         const cur = cb[cid] || {};
         const body = req.body || {};
-        ['avatarId', 'frameId', 'bubbleId', 'backgroundId'].forEach(k => {
+        ['frameId', 'bubbleId', 'backgroundId'].forEach(k => {
             if (k in body && typeof body[k] === 'string') cur[k] = body[k];
         });
         cb[cid] = cur;
@@ -1156,6 +1162,41 @@ app.put('/api/qq/char-beauty/:characterId', (req, res) => {
     } catch (e) {
         console.error('[CHAR-BEAUTY PUT]', e);
         res.status(500).json({ error: '更新 char 美化绑定失败' });
+    }
+});
+
+// 背景图专用上传：每次上传覆盖同 id 的旧文件，不在后端累积
+// body: { dataUrl }  →  返回 { url: '/data/qq/beauty-backgrounds/<id>.<ext>?v=<ts>' } 并写回 beauties.json
+app.post('/api/qq/beauties/backgrounds/:id/image', (req, res) => {
+    const id = req.params.id;
+    if (id === 'default') return res.status(400).json({ error: '默认项不可上传' });
+    try {
+        const data = readBeauties();
+        const list = data.backgrounds || [];
+        const idx = list.findIndex(x => x && x.id === id);
+        if (idx < 0) return res.status(404).json({ error: '未找到背景项' });
+        const parsed = parseDataUrl(req.body?.dataUrl);
+        if (!parsed || !parsed.mime.startsWith('image/')) {
+            return res.status(400).json({ error: '只支持图片 Data URL' });
+        }
+        // 删旧文件（仿 removeBackgroundSlot 覆盖式）
+        if (fs.existsSync(QQ_BEAUTY_BG_DIR)) {
+            fs.readdirSync(QQ_BEAUTY_BG_DIR)
+                .filter(f => f === id || f.startsWith(`${id}.`))
+                .forEach(f => fs.rmSync(path.join(QQ_BEAUTY_BG_DIR, f), { force: true }));
+        }
+        const ext = extensionFromMime(parsed.mime);
+        const fileName = `${id}.${ext}`;
+        fs.writeFileSync(path.join(QQ_BEAUTY_BG_DIR, fileName), parsed.buffer);
+        const version = Date.now();
+        const url = `/data/qq/beauty-backgrounds/${fileName}?v=${version}`;
+        list[idx] = { ...list[idx], url };
+        data.backgrounds = list;
+        writeJsonFile(QQ_BEAUTIES_FILE, data);
+        res.json(list[idx]);
+    } catch (e) {
+        console.error('[BEAUTY BG UPLOAD]', e);
+        res.status(500).json({ error: '背景上传失败' });
     }
 });
 
