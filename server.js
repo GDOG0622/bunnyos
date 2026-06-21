@@ -1220,6 +1220,15 @@ app.post('/api/qq/link-preview', async (req, res) => {
             if (isXhsHost(hostname)) return '小红书';
             return hostname || '链接';
         };
+        const isGenericPreviewText = (text, hostname = host) => {
+            const value = String(text || '').trim().replace(/\s+/g, ' ');
+            if (!value) return true;
+            if (isXhsHost(hostname)) {
+                return /^(小红书|小红书 - 你的生活指南|小红书 - 标记我的生活|xiaohongshu|xhs)$/i.test(value)
+                    || /登录|访问链接异常|正在跳转|安全验证|验证码/.test(value);
+            }
+            return false;
+        };
         const cleanSharedText = (text) => {
             return String(text || '')
                 .replace(/https?:\/\/[^\s"'<>，。！？、；）)】\]]+/gi, '')
@@ -1352,7 +1361,9 @@ app.post('/api/qq/link-preview', async (req, res) => {
             }
         }
         const earlyJinaPreview = isXhsHost(host) ? await tryJinaReader(u.toString(), jinaToken) : null;
-        if (earlyJinaPreview) return res.json(earlyJinaPreview);
+        if (earlyJinaPreview && (earlyJinaPreview.description || !isGenericPreviewText(earlyJinaPreview.title, host))) {
+            return res.json(earlyJinaPreview);
+        }
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 10000);
         let resp;
@@ -1418,9 +1429,24 @@ app.post('/api/qq/link-preview', async (req, res) => {
         const imageRaw = metaContent('og:image') || metaContent('twitter:image');
         const image = imageRaw ? new URL(imageRaw, finalUrl).toString() : '';
         const siteName = metaContent('og:site_name') || inferSiteName(new URL(finalUrl).hostname);
-        if (!title && !description) {
+        const finalHost = new URL(finalUrl).hostname;
+        const sharedText = cleanSharedText(rawText);
+        const hasUsefulPreview = Boolean(description || image || (title && !isGenericPreviewText(title, finalHost)));
+        if (!hasUsefulPreview) {
             const jinaPreview = await tryJinaReader(finalUrl, jinaToken);
-            return res.json(jinaPreview || fallbackPreview(finalUrl, '该页面未提供可解析摘要'));
+            if (jinaPreview && (jinaPreview.description || !isGenericPreviewText(jinaPreview.title, finalHost))) {
+                return res.json(jinaPreview);
+            }
+            if (sharedText) {
+                return res.json({
+                    url: finalUrl,
+                    title: sharedText.slice(0, 200),
+                    description: sharedText.slice(0, 1200),
+                    image: image || jinaPreview?.image || '',
+                    siteName: inferSiteName(finalHost)
+                });
+            }
+            return res.json(fallbackPreview(finalUrl, '该页面未提供可解析摘要'));
         }
         res.json({
             url: finalUrl,

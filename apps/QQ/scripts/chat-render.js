@@ -98,6 +98,33 @@ function renderActiveChat() {
         box.appendChild(item);
     }
     box.scrollTop = box.scrollHeight;
+    logChatLayoutDebug();
+}
+
+function logChatLayoutDebug() {
+    let debug = false;
+    try {
+        debug = window.location.search.includes('debug=1')
+            || (window.parent !== window && window.parent.location.search.includes('debug=1'));
+    } catch {
+        debug = window.location.search.includes('debug=1');
+    }
+    if (!debug) return;
+    const box = $('#chat-messages');
+    const room = $('#chat-room');
+    const view = $('#chat-view');
+    const root = $('#qq-root');
+    const metrics = [root, view, room, box].filter(Boolean).map(el => ({
+        id: el.id || el.className,
+        className: el.className,
+        clientHeight: el.clientHeight,
+        scrollHeight: el.scrollHeight,
+        offsetHeight: el.offsetHeight,
+        overflowY: getComputedStyle(el).overflowY,
+        display: getComputedStyle(el).display,
+        gridTemplateRows: getComputedStyle(el).gridTemplateRows
+    }));
+    console.table(metrics);
 }
 
 // 「对方」气泡旁的操作按钮（横屏悬停显示）

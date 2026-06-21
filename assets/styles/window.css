@@ -39,6 +39,13 @@
     display: none;
 }
 
+.app-window.chrome-hidden > .window-content {
+    flex-basis: 100%;
+    height: 100% !important;
+    min-height: 0;
+    overflow: hidden;
+}
+
 .control-hotzone {
     display: none;
 }
@@ -80,6 +87,12 @@
     flex: 1;
     overflow-y: auto;
     position: relative;
+    min-height: 0;
+}
+
+#iframe-pool {
+    min-height: 0;
+    overflow: hidden;
 }
 
 .resize-handle {
