@@ -451,6 +451,36 @@ html[data-app-layout="desktop"] .qq-topbar {
     cursor: pointer;
 }
 .qq-me-action:last-child { border-bottom: none; }
+.qq-wallet-card {
+    width: 100%;
+    margin: 12px 0 18px;
+    padding: 22px 18px;
+    border-radius: 16px;
+    background: linear-gradient(135deg, #ff9a3c 0%, #ff6b6b 100%);
+    color: #fff;
+    text-align: left;
+    box-shadow: 0 8px 24px rgba(255, 107, 107, 0.25);
+}
+.qq-wallet-label { font-size: 13px; opacity: 0.9; }
+.qq-wallet-balance {
+    margin-top: 6px;
+    font-size: 34px;
+    font-weight: 600;
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    letter-spacing: 0.5px;
+}
+.qq-wallet-unit { font-size: 26px; }
+.qq-wallet-currency { font-size: 14px; opacity: 0.9; font-weight: 400; }
+.qq-wallet-hint { margin-top: 8px; font-size: 12px; opacity: 0.85; }
+.qq-wallet-note {
+    color: var(--qq-text-fade);
+    font-size: 13px;
+    line-height: 1.7;
+    padding: 0 4px;
+}
+.qq-wallet-note p { margin: 0; }
 .qq-me-action i:first-child { color: var(--qq-accent); font-size: 18px; }
 .qq-me-action i:last-child { color: var(--qq-text-fade); font-size: 13px; }
 .qq-me-select-action {

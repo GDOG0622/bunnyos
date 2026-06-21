@@ -85,6 +85,8 @@ const QQ_DIR = path.join(DATA_DIR, 'qq');
 const QQ_GROUPS_FILE = path.join(QQ_DIR, 'groups.json');
 const QQ_STICKER_PACKS_FILE = path.join(QQ_DIR, 'sticker-packs.json');
 const QQ_SETTINGS_FILE = path.join(QQ_DIR, 'settings.json');
+const WALLET_FILE = path.join(DATA_DIR, 'wallet.json');
+const WALLET_INITIAL_BALANCE = 20000;
 const USER_PERSONAS_DIR = path.join(DATA_DIR, 'userpersonas');
 const AVATARS_DIR = path.join(DATA_DIR, 'assets', 'avatars');
 const USER_PERSONA_AVATARS_DIR = path.join(AVATARS_DIR, 'userpersonas');
@@ -126,6 +128,7 @@ ensureFileExist(QQ_GROUPS_FILE, []);
 ensureFileExist(QQ_STICKER_PACKS_FILE, []);
 ensureFileExist(QQ_SETTINGS_FILE, {});
 ensureFileExist(PUSH_SUBSCRIPTIONS_FILE, []);
+ensureFileExist(WALLET_FILE, { balance: WALLET_INITIAL_BALANCE, updated_at: Date.now() });
 
 // ========== Web Push 初始化 ==========
 function ensureVapidKeys() {
@@ -924,6 +927,47 @@ app.post('/api/settings', (req, res) => {
         res.json({ success: true, message: "设置已保存", settings: data, updatedAt: data._updatedAt });
     } catch (e) {
         res.status(500).json({ error: "保存设置失败" });
+    }
+});
+
+// ========== 钱包（萝卜币 / carrot coin）==========
+// 全局财务文件，余额不可负数。AI 端不暴露余额，详见 QQ美化系统计划.md §1.1
+function readWallet() {
+    const data = readJsonFile(WALLET_FILE, null);
+    if (!data || typeof data.balance !== 'number') {
+        const init = { balance: WALLET_INITIAL_BALANCE, updated_at: Date.now() };
+        writeJsonFile(WALLET_FILE, init);
+        return init;
+    }
+    return data;
+}
+
+app.get('/api/wallet', (req, res) => {
+    try {
+        res.json(readWallet());
+    } catch (e) {
+        res.status(500).json({ error: '无法读取钱包' });
+    }
+});
+
+app.post('/api/wallet/adjust', (req, res) => {
+    try {
+        const delta = Number(req.body?.delta);
+        const reason = String(req.body?.reason || '').slice(0, 200);
+        if (!Number.isFinite(delta) || delta === 0) {
+            return res.status(400).json({ error: 'delta 必须为非零数字' });
+        }
+        const wallet = readWallet();
+        const next = wallet.balance + delta;
+        if (next < 0) {
+            return res.status(402).json({ error: '余额不足', balance: wallet.balance, delta });
+        }
+        const updated = { balance: next, updated_at: Date.now() };
+        writeJsonFile(WALLET_FILE, updated);
+        console.log(`[WALLET] ${delta > 0 ? '+' : ''}${delta} → ${next}${reason ? ` (${reason})` : ''}`);
+        res.json(updated);
+    } catch (e) {
+        res.status(500).json({ error: '钱包写入失败' });
     }
 });
 

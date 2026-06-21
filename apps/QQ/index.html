@@ -406,6 +406,34 @@
         </div>
     </div>
 
+    <!-- 钱包 -->
+    <div class="qq-modal hidden" id="wallet-modal" role="dialog" aria-modal="true">
+        <div class="qq-modal-mask" data-wallet-close="1"></div>
+        <div class="qq-modal-card">
+            <div class="qq-modal-header">
+                <button class="qq-modal-back" data-wallet-close="1"><i class="bi bi-x-lg"></i></button>
+                <div class="qq-modal-title">钱包</div>
+                <span></span>
+            </div>
+            <div class="qq-modal-body">
+                <div class="qq-wallet-card">
+                    <div class="qq-wallet-label">当前余额</div>
+                    <div class="qq-wallet-balance">
+                        <span class="qq-wallet-unit">🥕</span>
+                        <span id="wallet-balance">—</span>
+                        <span class="qq-wallet-currency">cc</span>
+                    </div>
+                    <div class="qq-wallet-hint">萝卜币 (Carrot Coin) · 与任意现实货币 1:1</div>
+                </div>
+                <div class="qq-wallet-note">
+                    <p>· 美化商城创建头像框 / 气泡需 5cc，皮肤需 20cc，背景图 / 头像免费</p>
+                    <p>· 发送红包会立即扣款；未被领取的红包 10 轮交互后自动退回</p>
+                    <p>· 余额不可负数</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- 切换账号 -->
     <div class="qq-account-modal hidden" id="account-modal" role="dialog" aria-modal="true">
         <div class="qq-modal-mask" data-account-close="1"></div>
@@ -496,6 +524,7 @@
 <script src="scripts/chat-render.js"></script>
 <script src="scripts/message-actions.js"></script>
 <script src="scripts/media.js"></script>
+<script src="scripts/wallet.js"></script>
 <script src="scripts/events.js"></script>
 <script src="QQ.js"></script>
 </body>

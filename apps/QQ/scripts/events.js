@@ -19,7 +19,10 @@
 
     $('#me-avatar-btn')?.addEventListener('click', () => openPersonaModal(state.currentPersonaId));
     $('#me-signature')?.addEventListener('click', editSignatureInline);
-    $('#me-wallet')?.addEventListener('click', () => toast('钱包后续迭代'));
+    $('#me-wallet')?.addEventListener('click', openWalletModal);
+    $$('#wallet-modal [data-wallet-close]').forEach(el => {
+        el.addEventListener('click', closeWalletModal);
+    });
     $('#me-prompt-preset')?.addEventListener('change', event => savePromptPresetSetting(event.target.value));
     $('#me-prompt-manager')?.addEventListener('click', openPromptManager);
     $('#me-switch-account')?.addEventListener('click', openAccountModal);
