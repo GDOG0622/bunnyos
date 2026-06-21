@@ -458,6 +458,25 @@
         </div>
     </div>
 
+    <!-- 美化编辑页（全屏覆盖式，盖在商城弹窗上） -->
+    <div class="qq-modal hidden" id="beauty-editor" role="dialog" aria-modal="true">
+        <div class="qq-modal-mask" data-beauty-editor-close="1"></div>
+        <div class="qq-modal-card qq-beauty-editor-card">
+            <div class="qq-modal-header">
+                <button class="qq-modal-back" data-beauty-editor-close="1"><i class="bi bi-chevron-left"></i></button>
+                <div class="qq-modal-title" id="beauty-editor-title">编辑美化</div>
+                <span class="qq-beauty-save-indicator" id="beauty-editor-save-indicator">自动保存</span>
+            </div>
+            <div class="qq-modal-body">
+                <label class="qq-beauty-editor-label">名字</label>
+                <input id="beauty-editor-name" type="text" placeholder="美化名">
+                <label class="qq-beauty-editor-label">预览图直链</label>
+                <input id="beauty-editor-preview" type="text" placeholder="图片 URL（可选）">
+                <div id="beauty-editor-css-area"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- 切换账号 -->
     <div class="qq-account-modal hidden" id="account-modal" role="dialog" aria-modal="true">
         <div class="qq-modal-mask" data-account-close="1"></div>

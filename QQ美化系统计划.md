@@ -64,7 +64,7 @@
 | M6 转账闭环 · S32 三段状态后缀 | 完成 | `51db1ea` | AI 语法解析 [🧧¥X\|note] 同时落地 |
 | M6 转账闭环 · S36+S37 领取闭环 | 完成 | `ceca8f1` | 后端 receive 端点 + 前端点击领取 |
 | M2 美化库后端+商城骨架 | 完成 | `7af2b5c` | S5-S10：beauties/char-beauty 端点 + #me-beauty 入口 + 5 tab 骨架 |
-| M3 头像框跑通（样板模块） | 未开始 | — | — |
+| M3 头像框跑通（样板模块） | 完成 | _待填_ | S11-S17：mockup + 槽位网格 + 新建/编辑/预览/选择删除全套；预览注入逻辑顺手接好 bubble/bg 字段供 M5 复用 |
 | M4 套到 char + 三个点菜单 | 未开始 | — | — |
 | M5 复制到其他 3 个模块 | 未开始 | — | 皮肤/气泡/背景图；头像已剔除（§7.1 已决） |
 | M7 教程 + 图床 + 全局背景 | 未开始 | — | 含 S40 需先确认 §7.3 |
@@ -541,15 +541,13 @@ postimages 的免登录 API 不如 catbox 稳；是否要换成别的（如 0x0.
 
 > 选头像框先做，因为它就是一份 CSS、没有 user/char 双 CSS、没有图片直链复杂度。跑通后其他模块照搬。
 
-- [ ] **S11** 头像框 panel：渲染槽位网格（拉 `/api/qq/beauties/frames`）+ "+"按钮
-- [ ] **S12** "+" 按钮 → POST 创建 → 失败弹"余额不足" / 成功后槽位出现
-- [ ] **S13** 槽位点"编辑" → 全屏编辑页（名字 + CSS textarea + 预览图 URL 输入框，先不加上传按钮）
-- [ ] **S14** 编辑页 debounce 自动 PUT 保存
-- [ ] **S15** 顶部 mockup 组件：写一段固定 HTML 模拟聊天，挂上 5 个包裹类
-- [ ] **S16** 选中槽位 → 注入该 CSS 到 mockup 的 `<style>` 节点
-  - 验证：编辑一段 CSS（比如 `.bunny-qq-frame { border: 4px solid red; }`），mockup 头像立刻显示红框
-- [ ] **S17** "选择"多选模式 + 删除（删之前查 char-beauty 哪些 char 在用，弹确认）
-  - 验证：删一个用着的会弹提示，删除后 char-beauty 里指向被置为 "default"
+- [x] **S11** 头像框 panel：渲染槽位网格（拉 `/api/qq/beauties/frames`）+ "+"按钮
+- [x] **S12** "+" 按钮 → POST 创建 → 失败弹"余额不足" / 成功后槽位出现
+- [x] **S13** 槽位点"编辑" → 全屏编辑页 `#beauty-editor`（名字 + 预览图 URL + CSS textarea）
+- [x] **S14** 编辑页 debounce 500ms 自动 PUT 保存 + "已保存"指示
+- [x] **S15** 顶部 mockup 组件：固定 HTML（user/char 头像 + 气泡），挂上 4 个包裹类（去头像后 4 个）
+- [x] **S16** 选中槽位"预览" → 注入 CSS 到 `<style id="beauty-mockup-style">`（frames 走 css 字段；bubbles/backgrounds/skins 一并接好用于 M5）
+- [x] **S17** "选择"多选模式 + 批量删除（先 `GET /api/qq/char-beauty-usage/:type/:id` 查使用情况，再弹 confirm，删后回到默认）
 
 ### 里程碑 4 · 套用到 char + 三个点菜单
 

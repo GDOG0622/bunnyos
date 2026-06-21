@@ -27,6 +27,10 @@
     $$('#beauty-modal [data-beauty-close]').forEach(el => {
         el.addEventListener('click', closeBeautyModal);
     });
+    $('#beauty-select-toggle')?.addEventListener('click', toggleBeautySelectMode);
+    $$('#beauty-editor [data-beauty-editor-close]').forEach(el => {
+        el.addEventListener('click', () => closeBeautyEditor(false));
+    });
     $('#me-prompt-preset')?.addEventListener('change', event => savePromptPresetSetting(event.target.value));
     $('#me-prompt-manager')?.addEventListener('click', openPromptManager);
     $('#me-switch-account')?.addEventListener('click', openAccountModal);

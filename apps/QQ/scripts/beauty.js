@@ -1,7 +1,6 @@
-// QQ 美化商城。M2 = 骨架：5 tab + 余额条 + 空 panel；后续里程碑往里填模块逻辑。
-// 详见 QQ美化系统计划.md §1.4。
+// QQ 美化商城 · M3 头像框跑通（样板模块）
+// 详见 QQ美化系统计划.md §1.4 §1.6 §8 M3
 //
-// tab 顺序：皮肤 / 头像 / 头像框 / 气泡 / 背景图
 // 头像不算美化模块（用户决策 2026-06-21）。tab 顺序：皮肤 / 头像框 / 气泡 / 背景图
 const BEAUTY_TAB_DEFS = [
     { type: 'skins',       label: '皮肤',   price: 20 },
@@ -10,11 +9,36 @@ const BEAUTY_TAB_DEFS = [
     { type: 'backgrounds', label: '背景图', price: 0 },
 ];
 
+// 每模块的 mockup 包裹类（§1.6）
+// frame 是给 .qq-avatar 外层 wrapper 的，bubble 是 .qq-message 上，bg 是 .qq-chat-view 上，skin 是 body 上
+const MOCKUP_HTML = `
+    <div class="qq-beauty-mockup-frame bunny-qq-bg">
+        <div class="qq-beauty-mockup-row">
+            <span class="bunny-qq-frame">
+                <span class="qq-avatar lg"><img src="${DEFAULT_AVATAR_URL}" alt=""></span>
+            </span>
+            <div class="qq-message bunny-qq-bubble bunny-qq-bubble-char">
+                <div class="qq-bubble">你好呀～ 这是 char 的气泡示例</div>
+            </div>
+        </div>
+        <div class="qq-beauty-mockup-row qq-beauty-mockup-row-self">
+            <div class="qq-message qq-self bunny-qq-bubble bunny-qq-bubble-user">
+                <div class="qq-bubble">我是 user 的气泡示例</div>
+            </div>
+            <span class="bunny-qq-frame">
+                <span class="qq-avatar lg"><img src="${DEFAULT_AVATAR_URL}" alt=""></span>
+            </span>
+        </div>
+    </div>
+`;
+
 function openBeautyModal() {
     $('#beauty-modal')?.classList.remove('hidden');
     state.pageHistory.push('beauty');
     notifyNavState();
     if (!state.beautyTab) state.beautyTab = 'skins';
+    state.beautySelectMode = false;
+    state.beautySelected = new Set();
     refreshBeautyBalance();
     renderBeautyTabs();
     loadBeautyPanel(state.beautyTab);
@@ -22,6 +46,7 @@ function openBeautyModal() {
 
 function closeBeautyModal() {
     $('#beauty-modal')?.classList.add('hidden');
+    closeBeautyEditor(true);
     if (state.pageHistory[state.pageHistory.length - 1] === 'beauty') {
         state.pageHistory.pop();
         notifyNavState();
@@ -51,11 +76,28 @@ function renderBeautyTabs() {
     `).join('');
     bar.querySelectorAll('[data-beauty-tab]').forEach(btn => {
         btn.addEventListener('click', () => {
+            if (state.beautyTab === btn.dataset.beautyTab) return;
             state.beautyTab = btn.dataset.beautyTab;
+            state.beautySelectMode = false;
+            state.beautySelected = new Set();
+            updateSelectToggleLabel();
             renderBeautyTabs();
             loadBeautyPanel(state.beautyTab);
         });
     });
+}
+
+function updateSelectToggleLabel() {
+    const btn = $('#beauty-select-toggle');
+    if (!btn) return;
+    btn.textContent = state.beautySelectMode ? '完成' : '选择';
+}
+
+function toggleBeautySelectMode() {
+    state.beautySelectMode = !state.beautySelectMode;
+    state.beautySelected = new Set();
+    updateSelectToggleLabel();
+    loadBeautyPanel(state.beautyTab);
 }
 
 async function loadBeautyPanel(type) {
@@ -67,23 +109,331 @@ async function loadBeautyPanel(type) {
         const res = await fetch(`/api/qq/beauties/${type}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const list = await res.json();
-        renderBeautyPanel(panel, def, Array.isArray(list) ? list : []);
+        state.beautyListCache = state.beautyListCache || {};
+        state.beautyListCache[type] = Array.isArray(list) ? list : [];
+        renderBeautyPanel(panel, def, state.beautyListCache[type]);
     } catch (err) {
         panel.innerHTML = `<div class="qq-beauty-empty">加载失败：${err.message || '未知错误'}</div>`;
     }
 }
 
 function renderBeautyPanel(panel, def, list) {
-    // M2 骨架：只渲染槽位计数 + 占位提示。M3 起填实际网格。
-    const items = list.map(it => `
-        <div class="qq-beauty-slot${it.id === 'default' ? ' is-default' : ''}" data-id="${it.id}">
-            <div class="qq-beauty-slot-preview">${it.preview ? `<img src="${it.preview}" alt="">` : (it.name || '').slice(0, 1)}</div>
-            <div class="qq-beauty-slot-name">${it.name || '未命名'}</div>
-        </div>
-    `).join('');
+    // 当前 M3 实现：frames 走完整流程；其他类目暂留骨架（M5 复用）
+    const isFrame = def.type === 'frames';
+    const showMockup = def.type !== 'skins'; // 皮肤是"全屏临时预览"按钮，M5 落地
+
+    const mockup = showMockup
+        ? `<div class="qq-beauty-mockup-wrap">
+              <div class="qq-beauty-mockup-title">预览</div>
+              ${MOCKUP_HTML}
+              <style id="beauty-mockup-style"></style>
+           </div>`
+        : `<div class="qq-beauty-mockup-wrap qq-beauty-mockup-skin">
+              <button class="qq-beauty-fullscreen-preview" disabled>全屏预览 (M5)</button>
+           </div>`;
+
+    const slots = list.map(it => renderSlotCard(def, it)).join('');
+    const addTile = state.beautySelectMode
+        ? ''
+        : `<button class="qq-beauty-slot qq-beauty-slot-add" data-beauty-add="${def.type}">
+              <i class="bi bi-plus-lg"></i>
+              <div class="qq-beauty-slot-name">新建 (${def.price}cc)</div>
+           </button>`;
+
+    const deleteBar = state.beautySelectMode
+        ? `<div class="qq-beauty-delete-bar">
+              <button type="button" id="beauty-delete-selected" disabled>删除选中 (0)</button>
+           </div>`
+        : '';
+
     panel.innerHTML = `
-        <div class="qq-beauty-section-title">${def.label} · 共 ${list.length} 项 · 新建价 ${def.price}cc</div>
-        <div class="qq-beauty-grid">${items}</div>
-        <div class="qq-beauty-hint">M3 起此处填入 mockup 预览、教程卡、新建按钮、编辑器。</div>
+        ${mockup}
+        <div class="qq-beauty-section-title">${def.label} · ${list.length} 项${isFrame ? '' : '（M3 仅头像框完整可用，其他模块在 M5 落地）'}</div>
+        <div class="qq-beauty-grid">
+            ${slots}
+            ${addTile}
+        </div>
+        ${deleteBar}
     `;
+
+    // 绑事件
+    panel.querySelectorAll('[data-beauty-add]').forEach(btn => {
+        btn.addEventListener('click', () => createBeautySlot(btn.dataset.beautyAdd));
+    });
+    panel.querySelectorAll('[data-beauty-preview]').forEach(btn => {
+        btn.addEventListener('click', () => previewSlot(def.type, btn.dataset.beautyPreview));
+    });
+    panel.querySelectorAll('[data-beauty-edit]').forEach(btn => {
+        btn.addEventListener('click', () => openBeautyEditor(def.type, btn.dataset.beautyEdit));
+    });
+    panel.querySelectorAll('[data-beauty-check]').forEach(cb => {
+        cb.addEventListener('change', () => onBeautySelectChange(cb.dataset.beautyCheck, cb.checked));
+    });
+    const delBtn = $('#beauty-delete-selected');
+    if (delBtn) delBtn.addEventListener('click', () => deleteSelectedBeauties(def.type));
+}
+
+function renderSlotCard(def, it) {
+    const isDefault = it.id === 'default';
+    const previewBg = it.preview
+        ? `style="background-image:url('${it.preview.replace(/'/g, "\\'")}')"`
+        : '';
+    const initial = (it.name || '?').slice(0, 1);
+    const checkboxHtml = (state.beautySelectMode && !isDefault)
+        ? `<input type="checkbox" class="qq-beauty-slot-check" data-beauty-check="${it.id}"
+                  ${state.beautySelected.has(it.id) ? 'checked' : ''}>`
+        : '';
+    const actionsHtml = state.beautySelectMode
+        ? ''
+        : `<div class="qq-beauty-slot-actions">
+              <button type="button" data-beauty-preview="${it.id}">预览</button>
+              ${isDefault ? '' : `<button type="button" data-beauty-edit="${it.id}">编辑</button>`}
+           </div>`;
+    return `
+        <div class="qq-beauty-slot${isDefault ? ' is-default' : ''}${state.beautySelected.has(it.id) ? ' selected' : ''}"
+             data-id="${it.id}">
+            ${checkboxHtml}
+            <div class="qq-beauty-slot-preview" ${previewBg}>
+                ${it.preview ? '' : initial}
+            </div>
+            <div class="qq-beauty-slot-name">${escapeHtmlText(it.name || '未命名')}</div>
+            ${actionsHtml}
+        </div>
+    `;
+}
+
+function escapeHtmlText(s) {
+    return String(s).replace(/[&<>"']/g, ch => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[ch]));
+}
+
+function onBeautySelectChange(id, checked) {
+    if (checked) state.beautySelected.add(id);
+    else state.beautySelected.delete(id);
+    const btn = $('#beauty-delete-selected');
+    if (btn) {
+        btn.disabled = state.beautySelected.size === 0;
+        btn.textContent = `删除选中 (${state.beautySelected.size})`;
+    }
+    // 卡片高亮
+    const card = document.querySelector(`.qq-beauty-slot[data-id="${id}"]`);
+    if (card) card.classList.toggle('selected', checked);
+}
+
+async function createBeautySlot(type) {
+    const def = BEAUTY_TAB_DEFS.find(t => t.type === type);
+    if (def.price > 0 && state.walletBalance !== null && state.walletBalance < def.price) {
+        toast(`余额不足，需要 ${def.price}cc`);
+        return;
+    }
+    const name = prompt(`新建${def.label}的名字：`, '我的' + def.label);
+    if (!name) return;
+    try {
+        const res = await fetch(`/api/qq/beauties/${type}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name.trim() })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            if (res.status === 402) {
+                toast(`余额不足：${data.balance}cc，需要 ${data.price}cc`);
+            } else {
+                toast(data.error || '创建失败');
+            }
+            return;
+        }
+        await refreshBeautyBalance();
+        await loadBeautyPanel(type);
+        toast(`已创建 ${data.name}（-${def.price}cc）`);
+    } catch (err) {
+        toast('创建失败：' + (err.message || '未知错误'));
+    }
+}
+
+function previewSlot(type, id) {
+    const list = (state.beautyListCache || {})[type] || [];
+    const item = list.find(x => x.id === id);
+    if (!item) return;
+    const styleEl = $('#beauty-mockup-style');
+    if (!styleEl) return;
+    // frames: css 字段；bubbles: userCss+charCss；backgrounds: url；skins: 全屏（M5）
+    if (type === 'frames') styleEl.textContent = item.css || '';
+    else if (type === 'bubbles') styleEl.textContent = (item.userCss || '') + '\n' + (item.charCss || '');
+    else if (type === 'backgrounds') {
+        // mockup 的 .bunny-qq-bg 直接设背景
+        const bg = item.url
+            ? `.qq-beauty-mockup-frame.bunny-qq-bg { background-image: url('${item.url.replace(/'/g, "\\'")}'); background-size: cover; background-position: center; }`
+            : '';
+        styleEl.textContent = bg;
+    } else styleEl.textContent = '';
+    state.beautyPreviewing = { type, id };
+    // 视觉反馈
+    document.querySelectorAll('.qq-beauty-slot').forEach(el => el.classList.remove('previewing'));
+    const card = document.querySelector(`.qq-beauty-slot[data-id="${id}"]`);
+    if (card) card.classList.add('previewing');
+}
+
+// ========== 编辑页 ==========
+function openBeautyEditor(type, id) {
+    const list = (state.beautyListCache || {})[type] || [];
+    const item = list.find(x => x.id === id);
+    if (!item) return;
+    state.beautyEditing = { type, id };
+    const editor = $('#beauty-editor');
+    if (!editor) return;
+    const def = BEAUTY_TAB_DEFS.find(t => t.type === type);
+    const isBubble = type === 'bubbles';
+    const isBackground = type === 'backgrounds';
+
+    editor.querySelector('#beauty-editor-title').textContent = `编辑${def.label}`;
+    editor.querySelector('#beauty-editor-name').value = item.name || '';
+    editor.querySelector('#beauty-editor-preview').value = item.preview || '';
+
+    const cssArea = editor.querySelector('#beauty-editor-css-area');
+    if (isBubble) {
+        cssArea.innerHTML = `
+            <label class="qq-beauty-editor-label">user 气泡 CSS</label>
+            <textarea id="beauty-editor-userCss" spellcheck="false" placeholder=".bunny-qq-bubble.bunny-qq-bubble-user { ... }"></textarea>
+            <label class="qq-beauty-editor-label">char 气泡 CSS</label>
+            <textarea id="beauty-editor-charCss" spellcheck="false" placeholder=".bunny-qq-bubble.bunny-qq-bubble-char { ... }"></textarea>
+        `;
+        editor.querySelector('#beauty-editor-userCss').value = item.userCss || '';
+        editor.querySelector('#beauty-editor-charCss').value = item.charCss || '';
+    } else if (isBackground) {
+        cssArea.innerHTML = `
+            <label class="qq-beauty-editor-label">背景图（M5 接 .wallpaper-pick 上传按钮，目前用 URL 输入框占位）</label>
+            <input id="beauty-editor-url" type="text" placeholder="图片直链 URL">
+        `;
+        editor.querySelector('#beauty-editor-url').value = item.url || '';
+    } else {
+        // frames / skins
+        cssArea.innerHTML = `
+            <label class="qq-beauty-editor-label">CSS</label>
+            <textarea id="beauty-editor-css" spellcheck="false"
+                placeholder="${type === 'frames' ? '.bunny-qq-frame { ... }' : '.bunny-qq-skin { ... }'}"></textarea>
+        `;
+        editor.querySelector('#beauty-editor-css').value = item.css || '';
+    }
+
+    // 绑 debounce 自动保存
+    editor.querySelectorAll('input, textarea').forEach(el => {
+        el.addEventListener('input', () => scheduleBeautyAutoSave());
+    });
+
+    editor.classList.remove('hidden');
+    state.pageHistory.push('beauty-editor');
+    notifyNavState();
+}
+
+function closeBeautyEditor(silent) {
+    const editor = $('#beauty-editor');
+    if (!editor) return;
+    if (editor.classList.contains('hidden')) return;
+    // 关闭前 flush 一次保存
+    if (state.beautyAutoSaveTimer) {
+        clearTimeout(state.beautyAutoSaveTimer);
+        state.beautyAutoSaveTimer = null;
+        flushBeautyAutoSave();
+    }
+    editor.classList.add('hidden');
+    if (!silent && state.pageHistory[state.pageHistory.length - 1] === 'beauty-editor') {
+        state.pageHistory.pop();
+        notifyNavState();
+    }
+    state.beautyEditing = null;
+    // 编辑完后刷新一下商城列表
+    if (state.beautyTab) loadBeautyPanel(state.beautyTab);
+}
+
+function scheduleBeautyAutoSave() {
+    if (state.beautyAutoSaveTimer) clearTimeout(state.beautyAutoSaveTimer);
+    state.beautyAutoSaveTimer = setTimeout(flushBeautyAutoSave, 500);
+}
+
+async function flushBeautyAutoSave() {
+    state.beautyAutoSaveTimer = null;
+    if (!state.beautyEditing) return;
+    const { type, id } = state.beautyEditing;
+    const editor = $('#beauty-editor');
+    if (!editor) return;
+    const patch = {
+        name: editor.querySelector('#beauty-editor-name')?.value || '',
+        preview: editor.querySelector('#beauty-editor-preview')?.value || '',
+    };
+    if (type === 'bubbles') {
+        patch.userCss = editor.querySelector('#beauty-editor-userCss')?.value || '';
+        patch.charCss = editor.querySelector('#beauty-editor-charCss')?.value || '';
+    } else if (type === 'backgrounds') {
+        patch.url = editor.querySelector('#beauty-editor-url')?.value || '';
+    } else {
+        patch.css = editor.querySelector('#beauty-editor-css')?.value || '';
+    }
+    try {
+        const res = await fetch(`/api/qq/beauties/${type}/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(patch)
+        });
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            toast(data.error || '保存失败');
+            return;
+        }
+        const saved = await res.json();
+        // 同步缓存
+        const list = (state.beautyListCache || {})[type] || [];
+        const idx = list.findIndex(x => x.id === id);
+        if (idx >= 0) list[idx] = saved;
+        // 标"已保存"指示
+        const ind = $('#beauty-editor-save-indicator');
+        if (ind) {
+            ind.textContent = '已保存 · ' + new Date().toLocaleTimeString();
+            ind.classList.add('saved');
+            setTimeout(() => ind.classList.remove('saved'), 1500);
+        }
+    } catch (err) {
+        toast('保存失败：' + (err.message || '未知错误'));
+    }
+}
+
+// ========== 多选删除 ==========
+async function deleteSelectedBeauties(type) {
+    if (state.beautySelected.size === 0) return;
+    const ids = [...state.beautySelected];
+    // 先查每个 id 的使用情况
+    const usages = await Promise.all(ids.map(async id => {
+        try {
+            const r = await fetch(`/api/qq/char-beauty-usage/${type}/${id}`);
+            return r.ok ? await r.json() : { count: 0, names: [] };
+        } catch { return { count: 0, names: [] }; }
+    }));
+    const inUse = ids.map((id, i) => ({ id, ...usages[i] })).filter(x => x.count > 0);
+    let confirmMsg = `确认删除 ${ids.length} 个美化项？删除不退币。`;
+    if (inUse.length) {
+        const lines = inUse.map(x => {
+            const slotItem = (state.beautyListCache?.[type] || []).find(it => it.id === x.id);
+            return `· ${slotItem?.name || x.id}：被 ${x.count} 个 char 使用（${x.names.join('、')}），删除后回归默认`;
+        }).join('\n');
+        confirmMsg += `\n\n以下项有 char 在使用：\n${lines}`;
+    }
+    if (!confirm(confirmMsg)) return;
+    // 逐个删
+    const errors = [];
+    for (const id of ids) {
+        try {
+            const r = await fetch(`/api/qq/beauties/${type}/${id}`, { method: 'DELETE' });
+            if (!r.ok) {
+                const d = await r.json().catch(() => ({}));
+                errors.push(`${id}: ${d.error || r.status}`);
+            }
+        } catch (err) { errors.push(`${id}: ${err.message}`); }
+    }
+    if (errors.length) toast(`部分删除失败：${errors.join('；')}`);
+    else toast(`已删除 ${ids.length} 项`);
+    state.beautySelectMode = false;
+    state.beautySelected = new Set();
+    updateSelectToggleLabel();
+    loadBeautyPanel(type);
 }
