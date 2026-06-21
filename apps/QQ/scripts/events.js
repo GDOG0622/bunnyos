@@ -124,6 +124,11 @@
         renderActiveChat();
     });
     $('#chat-messages')?.addEventListener('click', (e) => {
+        const voiceCard = e.target.closest('[data-voice-toggle]');
+        if (voiceCard && !state.deleteMode) {
+            voiceCard.classList.toggle('collapsed');
+            return;
+        }
         const editBtn = e.target.closest('[data-edit-save], [data-edit-cancel]');
         if (editBtn) {
             const row = editBtn.closest('.qq-message-row');

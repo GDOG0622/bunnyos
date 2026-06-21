@@ -1157,11 +1157,15 @@ html[data-app-layout="desktop"] .qq-contact-add {
     display: block;
     padding: 6px 10px 7px;
     min-width: 150px;
+    cursor: pointer;
 }
 .qq-voice-row {
     display: flex;
     align-items: center;
     gap: 7px;
+}
+.qq-voice-card.collapsed .qq-voice-text {
+    display: none;
 }
 .qq-voice-play {
     display: inline-flex;
