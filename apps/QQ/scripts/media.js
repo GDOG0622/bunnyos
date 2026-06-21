@@ -452,15 +452,20 @@ async function sendLinkCard() {
         }
         return;
     }
+    const cleanTitle = String(data.title || '').trim();
+    const cleanDescription = String(data.description || '').trim().replace(/^预览受限：.*/, '');
+    const linkTextParts = [cleanTitle, cleanDescription]
+        .filter(Boolean)
+        .filter((part, index, arr) => arr.indexOf(part) === index);
     await appendChatMessage({
         role: 'user',
         type: 'link',
         url: data.url || trimmed,
-        title: data.title || '',
-        description: data.description || '',
+        title: cleanTitle,
+        description: cleanDescription,
         image: data.image || '',
         siteName: data.siteName || '',
-        text: `[链接] ${[data.title, data.description].filter(Boolean).join('：') || data.siteName || trimmed}`,
+        text: `[链接] ${linkTextParts.join('：') || data.siteName || trimmed}`,
         created_at: Date.now()
     });
 }

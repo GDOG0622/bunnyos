@@ -1246,9 +1246,10 @@ app.post('/api/qq/link-preview', async (req, res) => {
             return {
                 url: finalUrl,
                 title: sharedTitle || inferSiteName(finalHost),
-                description: reason ? `预览受限：${reason}` : '',
+                description: '',
                 image: '',
-                siteName: inferSiteName(finalHost)
+                siteName: inferSiteName(finalHost),
+                limitedReason: reason || ''
             };
         };
         const normalizePreviewPayload = (payload) => {
@@ -1337,6 +1338,14 @@ app.post('/api/qq/link-preview', async (req, res) => {
                 clearTimeout(timer);
             }
         };
+        const isUsefulPreview = (preview, hostname = host) => {
+            if (!preview) return false;
+            return Boolean(
+                String(preview.description || '').trim()
+                || String(preview.image || '').trim()
+                || !isGenericPreviewText(preview.title, hostname)
+            );
+        };
         const settings = readJsonFile(SETTINGS_FILE, {});
         const previewApiUrl = String(settings.linkPreview_apiUrl || '').trim();
         const previewApiEnabled = settings.linkPreview_apiEnabled === true || settings.linkPreview_apiEnabled === 'true';
@@ -1361,7 +1370,7 @@ app.post('/api/qq/link-preview', async (req, res) => {
             }
         }
         const earlyJinaPreview = isXhsHost(host) ? await tryJinaReader(u.toString(), jinaToken) : null;
-        if (earlyJinaPreview && (earlyJinaPreview.description || !isGenericPreviewText(earlyJinaPreview.title, host))) {
+        if (isUsefulPreview(earlyJinaPreview, host)) {
             return res.json(earlyJinaPreview);
         }
         const controller = new AbortController();
@@ -1387,12 +1396,16 @@ app.post('/api/qq/link-preview', async (req, res) => {
         } catch {}
         if (!resp.ok) {
             const jinaPreview = await tryJinaReader(finalUrl, jinaToken);
-            return res.json(jinaPreview || fallbackPreview(finalUrl, `远程返回 ${resp.status}`));
+            return res.json(isUsefulPreview(jinaPreview, new URL(finalUrl).hostname)
+                ? jinaPreview
+                : fallbackPreview(finalUrl, `远程返回 ${resp.status}`));
         }
         const ctype = resp.headers.get('content-type') || '';
         if (ctype && !/text\/html|application\/xhtml/i.test(ctype)) {
             const jinaPreview = await tryJinaReader(finalUrl, jinaToken);
-            return res.json(jinaPreview || fallbackPreview(finalUrl, '非 HTML 内容'));
+            return res.json(isUsefulPreview(jinaPreview, new URL(finalUrl).hostname)
+                ? jinaPreview
+                : fallbackPreview(finalUrl, '非 HTML 内容'));
         }
         // 限制大小：256KB
         const reader = resp.body?.getReader?.();
@@ -1434,7 +1447,7 @@ app.post('/api/qq/link-preview', async (req, res) => {
         const hasUsefulPreview = Boolean(description || image || (title && !isGenericPreviewText(title, finalHost)));
         if (!hasUsefulPreview) {
             const jinaPreview = await tryJinaReader(finalUrl, jinaToken);
-            if (jinaPreview && (jinaPreview.description || !isGenericPreviewText(jinaPreview.title, finalHost))) {
+            if (isUsefulPreview(jinaPreview, finalHost)) {
                 return res.json(jinaPreview);
             }
             if (sharedText) {
