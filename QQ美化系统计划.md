@@ -61,11 +61,12 @@
 | M6 转账闭环 · S33 status字段 | 完成 | `dccb4d5` | 顺势在 M1 做了 |
 | M6 转账闭环 · S34 发送时扣款 | 完成 | `dccb4d5` | 顺势在 M1 做了 |
 | M6 转账闭环 · S35 10轮自动退回 | 完成 | `dccb4d5` | 顺势在 M1 做了 |
-| M2 美化库后端+商城骨架 | 未开始 | — | — |
+| M6 转账闭环 · S32 三段状态后缀 | 完成 | `51db1ea` | AI 语法解析 [🧧¥X\|note] 同时落地 |
+| M6 转账闭环 · S36+S37 领取闭环 | 完成 | `ceca8f1` | 后端 receive 端点 + 前端点击领取 |
+| M2 美化库后端+商城骨架 | 完成 | _待填_ | S5-S10：beauties/char-beauty 端点 + #me-beauty 入口 + 5 tab 骨架 |
 | M3 头像框跑通（样板模块） | 未开始 | — | — |
 | M4 套到 char + 三个点菜单 | 未开始 | — | — |
 | M5 复制到其他 4 个模块 | 未开始 | — | 含 S29 头像模块需先确认 §7.1 |
-| M6 转账闭环 | 未开始 | — | 独立条线，M3 后可插队 |
 | M7 教程 + 图床 + 全局背景 | 未开始 | — | 含 S40 需先确认 §7.3 |
 | M8 对话框管理 + 收尾 | 未开始 | — | 含 S47 需先确认 §7.2 |
 
@@ -535,14 +536,12 @@ postimages 的免登录 API 不如 catbox 稳；是否要换成别的（如 0x0.
 
 ### 里程碑 2 · 美化库后端 + 商城骨架
 
-- [ ] **S5** `server.js`：启动时检查并初始化 `data/qq/beauties.json`（5 类各含 default 项）
-- [ ] **S6** `server.js`：加美化 CRUD 端点（GET 全量、GET 单类、POST 创建+扣费、PUT 更新、DELETE 解绑+不退费）
-  - 验证：curl 测一遍 5 类的增改删，看 wallet.json 余额对应变化
-- [ ] **S7** `server.js`：启动时检查并初始化 `data/qq/char-beauty.json`；加 GET/PUT 端点
-- [ ] **S8** 新建 `apps/QQ/scripts/beauty.js` + `apps/QQ/scripts/beauty-defaults.js`（先放空字符串占位）
-- [ ] **S9** index.html 加 `#me-beauty` 按钮 + `.qq-beauty-view` 骨架（顶部余额条 + 5 个 tab + 空 panel）
-- [ ] **S10** 商城页 tab 切换 + 余额条订阅（先用轮询，SSE 留到后面）
-  - 验证：进美化页能切 tab，能看到余额条
+- [x] **S5** `server.js`：启动时检查并初始化 `data/qq/beauties.json`（5 类各含 default 项）
+- [x] **S6** `server.js`：加美化 CRUD 端点（GET 全量、GET 单类、POST 创建+扣费、PUT 更新、DELETE 解绑+不退费）
+- [x] **S7** `server.js`：启动时检查并初始化 `data/qq/char-beauty.json`；加 GET/PUT 端点（顺手加 `GET /api/qq/char-beauty-usage/:type/:id` 给删除前的"X 个 char 在用"提示用）
+- [x] **S8** 新建 `apps/QQ/scripts/beauty.js` + `apps/QQ/scripts/beauty-defaults.js`（先放空字符串占位）
+- [x] **S9** index.html 加 `#me-beauty` 按钮 + `#beauty-modal` 骨架（顶部余额条 + 5 个 tab + 空 panel + "选择"占位）
+- [x] **S10** 商城页 tab 切换 + 余额条（先轮询：开弹窗时拉一次 `/api/wallet`，SSE 留到 M8 S48）
 
 ### 里程碑 3 · 单个模块跑通（先做"头像框"，最简单）
 

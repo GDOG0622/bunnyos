@@ -23,6 +23,10 @@
     $$('#wallet-modal [data-wallet-close]').forEach(el => {
         el.addEventListener('click', closeWalletModal);
     });
+    $('#me-beauty')?.addEventListener('click', openBeautyModal);
+    $$('#beauty-modal [data-beauty-close]').forEach(el => {
+        el.addEventListener('click', closeBeautyModal);
+    });
     $('#me-prompt-preset')?.addEventListener('change', event => savePromptPresetSetting(event.target.value));
     $('#me-prompt-manager')?.addEventListener('click', openPromptManager);
     $('#me-switch-account')?.addEventListener('click', openAccountModal);

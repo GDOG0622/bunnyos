@@ -87,6 +87,22 @@ const QQ_STICKER_PACKS_FILE = path.join(QQ_DIR, 'sticker-packs.json');
 const QQ_SETTINGS_FILE = path.join(QQ_DIR, 'settings.json');
 const WALLET_FILE = path.join(DATA_DIR, 'wallet.json');
 const WALLET_INITIAL_BALANCE = 20000;
+const QQ_BEAUTIES_FILE = path.join(QQ_DIR, 'beauties.json');
+const QQ_CHAR_BEAUTY_FILE = path.join(QQ_DIR, 'char-beauty.json');
+// 美化分类 + 创建价（cc）。详见 QQ美化系统计划.md §1.4
+const BEAUTY_TYPES = ['skins', 'avatars', 'frames', 'bubbles', 'backgrounds'];
+const BEAUTY_PRICES = { skins: 20, avatars: 0, frames: 5, bubbles: 5, backgrounds: 0 };
+function defaultBeautyItem(type) {
+    const base = { id: 'default', name: '默认', preview: '' };
+    if (type === 'bubbles') return { ...base, userCss: '', charCss: '' };
+    if (type === 'avatars' || type === 'backgrounds') return { ...base, url: '' };
+    return { ...base, css: '' };
+}
+function defaultBeautiesData() {
+    const out = {};
+    BEAUTY_TYPES.forEach(t => { out[t] = [defaultBeautyItem(t)]; });
+    return out;
+}
 const USER_PERSONAS_DIR = path.join(DATA_DIR, 'userpersonas');
 const AVATARS_DIR = path.join(DATA_DIR, 'assets', 'avatars');
 const USER_PERSONA_AVATARS_DIR = path.join(AVATARS_DIR, 'userpersonas');
@@ -129,6 +145,20 @@ ensureFileExist(QQ_STICKER_PACKS_FILE, []);
 ensureFileExist(QQ_SETTINGS_FILE, {});
 ensureFileExist(PUSH_SUBSCRIPTIONS_FILE, []);
 ensureFileExist(WALLET_FILE, { balance: WALLET_INITIAL_BALANCE, updated_at: Date.now() });
+ensureFileExist(QQ_BEAUTIES_FILE, defaultBeautiesData());
+ensureFileExist(QQ_CHAR_BEAUTY_FILE, {});
+// 兜底：若文件存在但缺类目或缺 default 项，补齐
+{
+    const cur = readJsonFile(QQ_BEAUTIES_FILE, {});
+    let changed = false;
+    BEAUTY_TYPES.forEach(t => {
+        if (!Array.isArray(cur[t])) { cur[t] = [defaultBeautyItem(t)]; changed = true; }
+        else if (!cur[t].some(it => it && it.id === 'default')) {
+            cur[t].unshift(defaultBeautyItem(t)); changed = true;
+        }
+    });
+    if (changed) writeJsonFile(QQ_BEAUTIES_FILE, cur);
+}
 
 // ========== Web Push 初始化 ==========
 function ensureVapidKeys() {
@@ -970,6 +1000,186 @@ app.post('/api/wallet/adjust', (req, res) => {
         res.json(updated);
     } catch (e) {
         res.status(500).json({ error: '钱包写入失败' });
+    }
+});
+
+// ========== QQ 美化库 ==========
+// 详见 QQ美化系统计划.md §1.4 §1.5。美化是 user 个人共享库；创建扣 cc，删除不退。
+function readBeauties() {
+    const data = readJsonFile(QQ_BEAUTIES_FILE, null);
+    if (!data || typeof data !== 'object') {
+        const init = defaultBeautiesData();
+        writeJsonFile(QQ_BEAUTIES_FILE, init);
+        return init;
+    }
+    return data;
+}
+function readCharBeauty() {
+    const data = readJsonFile(QQ_CHAR_BEAUTY_FILE, null);
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+        writeJsonFile(QQ_CHAR_BEAUTY_FILE, {});
+        return {};
+    }
+    return data;
+}
+function beautySlotKey(type) {
+    if (type === 'skins') return 'skinId';
+    if (type === 'avatars') return 'avatarId';
+    if (type === 'frames') return 'frameId';
+    if (type === 'bubbles') return 'bubbleId';
+    if (type === 'backgrounds') return 'backgroundId';
+    return null;
+}
+
+app.get('/api/qq/beauties', (req, res) => {
+    try { res.set('Cache-Control', 'no-store').json(readBeauties()); }
+    catch { res.status(500).json({ error: '读取美化库失败' }); }
+});
+
+app.get('/api/qq/beauties/:type', (req, res) => {
+    const type = req.params.type;
+    if (!BEAUTY_TYPES.includes(type)) return res.status(404).json({ error: '未知类目' });
+    try {
+        const data = readBeauties();
+        res.set('Cache-Control', 'no-store').json(data[type] || []);
+    } catch { res.status(500).json({ error: '读取美化库失败' }); }
+});
+
+app.post('/api/qq/beauties/:type', (req, res) => {
+    const type = req.params.type;
+    if (!BEAUTY_TYPES.includes(type)) return res.status(404).json({ error: '未知类目' });
+    try {
+        const name = String(req.body?.name || '').trim() || '未命名美化';
+        const price = BEAUTY_PRICES[type] || 0;
+        if (price > 0) {
+            const wallet = readWallet();
+            if (wallet.balance < price) {
+                return res.status(402).json({ error: '余额不足', balance: wallet.balance, price });
+            }
+            const next = wallet.balance - price;
+            writeJsonFile(WALLET_FILE, { balance: next, updated_at: Date.now() });
+            console.log(`[WALLET] -${price} → ${next} (create ${type})`);
+        }
+        const data = readBeauties();
+        const id = shortId();
+        const item = { ...defaultBeautyItem(type), id, name };
+        data[type] = Array.isArray(data[type]) ? data[type] : [defaultBeautyItem(type)];
+        data[type].push(item);
+        writeJsonFile(QQ_BEAUTIES_FILE, data);
+        res.json(item);
+    } catch (e) {
+        console.error('[BEAUTY POST]', e);
+        res.status(500).json({ error: '创建美化失败' });
+    }
+});
+
+app.put('/api/qq/beauties/:type/:id', (req, res) => {
+    const { type, id } = req.params;
+    if (!BEAUTY_TYPES.includes(type)) return res.status(404).json({ error: '未知类目' });
+    try {
+        const data = readBeauties();
+        const list = data[type] || [];
+        const idx = list.findIndex(x => x && x.id === id);
+        if (idx < 0) return res.status(404).json({ error: '未找到美化项' });
+        if (id === 'default') return res.status(400).json({ error: '默认项不可编辑' });
+        const body = req.body || {};
+        const allowed = ['name', 'preview', 'css', 'userCss', 'charCss', 'url'];
+        const patch = {};
+        allowed.forEach(k => { if (k in body) patch[k] = body[k]; });
+        list[idx] = { ...list[idx], ...patch, id };
+        data[type] = list;
+        writeJsonFile(QQ_BEAUTIES_FILE, data);
+        res.json(list[idx]);
+    } catch (e) {
+        console.error('[BEAUTY PUT]', e);
+        res.status(500).json({ error: '更新美化失败' });
+    }
+});
+
+app.delete('/api/qq/beauties/:type/:id', (req, res) => {
+    const { type, id } = req.params;
+    if (!BEAUTY_TYPES.includes(type)) return res.status(404).json({ error: '未知类目' });
+    if (id === 'default') return res.status(400).json({ error: '默认项不可删除' });
+    try {
+        const data = readBeauties();
+        const list = data[type] || [];
+        const idx = list.findIndex(x => x && x.id === id);
+        if (idx < 0) return res.status(404).json({ error: '未找到美化项' });
+        list.splice(idx, 1);
+        data[type] = list;
+        writeJsonFile(QQ_BEAUTIES_FILE, data);
+        // 解绑 char-beauty
+        const slot = beautySlotKey(type);
+        if (slot) {
+            const cb = readCharBeauty();
+            let changed = false;
+            Object.keys(cb).forEach(charId => {
+                if (cb[charId] && cb[charId][slot] === id) {
+                    cb[charId][slot] = 'default';
+                    changed = true;
+                }
+            });
+            if (changed) writeJsonFile(QQ_CHAR_BEAUTY_FILE, cb);
+        }
+        res.json({ success: true });
+    } catch (e) {
+        console.error('[BEAUTY DELETE]', e);
+        res.status(500).json({ error: '删除美化失败' });
+    }
+});
+
+app.get('/api/qq/char-beauty/:characterId', (req, res) => {
+    try {
+        const cb = readCharBeauty();
+        const cur = cb[req.params.characterId] || {};
+        res.set('Cache-Control', 'no-store').json({
+            avatarId:     cur.avatarId     || 'default',
+            frameId:      cur.frameId      || 'default',
+            bubbleId:     cur.bubbleId     || 'default',
+            backgroundId: cur.backgroundId || 'default',
+        });
+    } catch { res.status(500).json({ error: '读取 char 美化绑定失败' }); }
+});
+
+app.put('/api/qq/char-beauty/:characterId', (req, res) => {
+    try {
+        const cid = req.params.characterId;
+        const cb = readCharBeauty();
+        const cur = cb[cid] || {};
+        const body = req.body || {};
+        ['avatarId', 'frameId', 'bubbleId', 'backgroundId'].forEach(k => {
+            if (k in body && typeof body[k] === 'string') cur[k] = body[k];
+        });
+        cb[cid] = cur;
+        writeJsonFile(QQ_CHAR_BEAUTY_FILE, cb);
+        res.json(cur);
+    } catch (e) {
+        console.error('[CHAR-BEAUTY PUT]', e);
+        res.status(500).json({ error: '更新 char 美化绑定失败' });
+    }
+});
+
+// 哪些 char 在用某个美化项（删除前确认用）
+app.get('/api/qq/char-beauty-usage/:type/:id', (req, res) => {
+    const { type, id } = req.params;
+    const slot = beautySlotKey(type);
+    if (!slot) return res.status(404).json({ error: '未知类目' });
+    try {
+        const cb = readCharBeauty();
+        const charIds = Object.keys(cb).filter(c => cb[c] && cb[c][slot] === id);
+        const names = [];
+        charIds.forEach(cid => {
+            const f = path.join(CHARACTERS_DIR, `${cid}.json`);
+            if (fs.existsSync(f)) {
+                try {
+                    const rec = JSON.parse(fs.readFileSync(f, 'utf-8'));
+                    names.push(rec.name || cid);
+                } catch { names.push(cid); }
+            } else names.push(cid);
+        });
+        res.json({ count: charIds.length, characterIds: charIds, names });
+    } catch (e) {
+        res.status(500).json({ error: '查询使用情况失败' });
     }
 });
 

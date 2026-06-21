@@ -179,6 +179,9 @@
                 <button type="button" class="qq-me-action" id="me-wallet">
                     <i class="bi bi-wallet2"></i><span>钱包</span><i class="bi bi-chevron-right"></i>
                 </button>
+                <button type="button" class="qq-me-action" id="me-beauty">
+                    <i class="bi bi-palette"></i><span>美化</span><i class="bi bi-chevron-right"></i>
+                </button>
                 <label class="qq-me-action qq-me-select-action" for="me-prompt-preset">
                     <i class="bi bi-braces"></i>
                     <span>提示词预设</span>
@@ -434,6 +437,27 @@
         </div>
     </div>
 
+    <!-- 美化商城 -->
+    <div class="qq-modal hidden" id="beauty-modal" role="dialog" aria-modal="true">
+        <div class="qq-modal-mask" data-beauty-close="1"></div>
+        <div class="qq-modal-card qq-beauty-card">
+            <div class="qq-modal-header">
+                <button class="qq-modal-back" data-beauty-close="1"><i class="bi bi-x-lg"></i></button>
+                <div class="qq-modal-title">美化商城</div>
+                <button class="qq-modal-action" id="beauty-select-toggle" type="button">选择</button>
+            </div>
+            <div class="qq-beauty-balance-bar">
+                <span class="qq-wallet-unit">🥕</span>
+                <span id="beauty-balance">—</span>
+                <span class="qq-wallet-currency">cc</span>
+            </div>
+            <div class="qq-beauty-tabs" id="beauty-tabs"></div>
+            <div class="qq-modal-body">
+                <div class="qq-beauty-panel" id="beauty-panel"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- 切换账号 -->
     <div class="qq-account-modal hidden" id="account-modal" role="dialog" aria-modal="true">
         <div class="qq-modal-mask" data-account-close="1"></div>
@@ -525,6 +549,8 @@
 <script src="scripts/message-actions.js"></script>
 <script src="scripts/media.js"></script>
 <script src="scripts/wallet.js"></script>
+<script src="scripts/beauty-defaults.js"></script>
+<script src="scripts/beauty.js"></script>
 <script src="scripts/events.js"></script>
 <script src="QQ.js"></script>
 </body>
