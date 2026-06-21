@@ -1984,12 +1984,55 @@ app.get('/api/qq/chats/:characterId', (req, res) => {
     }
 });
 
+// 1 楼层 = 1 轮 user-char 交互 = transfer 之后出现的 1 个不同 reply_group_id
+// 满 10 轮仍 pending 的 user→char 红包自动退回，详见 QQ美化系统计划.md §1.2
+const TRANSFER_AUTO_RETURN_ROUNDS = 10;
+function countRoundsSince(messages, fromIdx) {
+    const groupIds = new Set();
+    for (let i = fromIdx + 1; i < messages.length; i++) {
+        const m = messages[i];
+        if (m && m.role === 'assistant' && m.reply_group_id) {
+            groupIds.add(m.reply_group_id);
+        }
+    }
+    return groupIds.size;
+}
+
+function settleUserTransfers(messages) {
+    let walletDelta = 0;
+    const updates = [];
+    for (let i = 0; i < messages.length; i++) {
+        const m = messages[i];
+        if (!m || m.role !== 'user' || m.type !== 'transfer' || m.status !== 'pending') continue;
+        const rounds = countRoundsSince(messages, i);
+        if (rounds < TRANSFER_AUTO_RETURN_ROUNDS) continue;
+        const amt = Number(m.amount);
+        if (!Number.isFinite(amt) || amt <= 0) continue;
+        m.status = 'returned';
+        m.settled_at = Date.now();
+        walletDelta += amt;
+        updates.push({ idx: i, amount: amt });
+    }
+    if (walletDelta > 0) {
+        try {
+            const w = readWallet();
+            writeJsonFile(WALLET_FILE, { balance: w.balance + walletDelta, updated_at: Date.now() });
+            console.log(`[WALLET] +${walletDelta} (transfer auto-return × ${updates.length})`);
+        } catch (err) {
+            console.warn('[WALLET] auto-return write failed', err);
+        }
+    }
+    return updates;
+}
+
 app.post('/api/qq/chats/:characterId', (req, res) => {
     try {
         const characterId = req.params.characterId;
+        const messages = sanitizeChatMessagesForStorage(req.body?.messages);
+        settleUserTransfers(messages);
         const data = {
             characterId,
-            messages: sanitizeChatMessagesForStorage(req.body?.messages),
+            messages,
             updated_at: Date.now()
         };
         fs.writeFileSync(path.join(CHATS_DIR, `${characterId}.json`), JSON.stringify(data, null, 2), 'utf-8');

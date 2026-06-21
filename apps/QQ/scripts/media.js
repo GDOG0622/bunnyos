@@ -147,14 +147,39 @@ function closePopModal(id) {
 
 async function sendTransfer() {
     if (!state.activeChatId) return;
-    const amount = $('#transfer-amount').value.trim();
-    if (!amount) {
+    const amountStr = $('#transfer-amount').value.trim();
+    if (!amountStr) {
         toast('请填写金额');
+        return;
+    }
+    const amountNum = Number(amountStr);
+    if (!Number.isFinite(amountNum) || amountNum <= 0) {
+        toast('金额必须是正数');
         return;
     }
     const currency = $('#transfer-currency').value;
     const note = $('#transfer-note').value.trim();
-    await appendChatMessage({ role: 'user', type: 'transfer', text: `转账 ${currency}${amount}${note ? ` ${note}` : ''}`, amount, currency, note, created_at: Date.now() });
+    try {
+        await adjustWallet(-amountNum, `transfer to ${state.activeChatId}`);
+    } catch (err) {
+        if (err.status === 402) {
+            toast(`余额不足，当前 ${formatCC(err.balance)} cc`);
+        } else {
+            toast('扣款失败：' + (err.message || '未知错误'));
+        }
+        return;
+    }
+    await appendChatMessage({
+        role: 'user',
+        type: 'transfer',
+        text: `转账 ${currency}${amountStr}${note ? ` ${note}` : ''}`,
+        amount: amountStr,
+        currency,
+        note,
+        status: 'pending',
+        settled_at: null,
+        created_at: Date.now()
+    });
     $('#transfer-amount').value = '';
     $('#transfer-note').value = '';
     closePopModal('transfer-modal');
@@ -494,8 +519,27 @@ async function saveChat(chat) {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const saved = await res.json();
+    // 同步 server 端做的 transfer 状态更新（自动退回等），同时保留本地的 image dataURL
+    const localMessages = chat.messages || [];
+    let walletNeedsRefresh = false;
+    const mergedMessages = (saved.messages || []).map((srvMsg, i) => {
+        const local = localMessages[i] || {};
+        if (srvMsg && srvMsg.type === 'transfer'
+            && srvMsg.status === 'returned' && local.status === 'pending') {
+            walletNeedsRefresh = true;
+        }
+        if (srvMsg?.type === 'image' && local.type === 'image' && local.image) {
+            return { ...srvMsg, image: local.image, client_image_id: local.client_image_id };
+        }
+        return srvMsg;
+    });
+    chat.messages = mergedMessages;
     const idx = state.chats.findIndex(item => item.characterId === saved.characterId);
-    const localChat = { ...saved, messages: chat.messages || [] };
+    const localChat = { ...saved, messages: mergedMessages };
     if (idx >= 0) state.chats[idx] = localChat;
     else state.chats.unshift(localChat);
+    if (walletNeedsRefresh) {
+        loadWalletBalance().catch(() => {});
+        renderActiveChat();
+    }
 }

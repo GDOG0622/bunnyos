@@ -164,7 +164,20 @@ function messageContentHtml(msg, idx) {
     if (msg.type === 'transfer') {
         const amount = `${escapeHtml(msg.currency || '')}${escapeHtml(msg.amount || '')}`;
         const note = msg.note ? `<div class="qq-transfer-note">${escapeHtml(msg.note)}</div>` : '';
-        return `<div class="qq-message qq-transfer-card">${reply}<div class="qq-transfer-amount">${amount}</div>${note}<div class="qq-transfer-label">转账</div></div>`;
+        const status = msg.status;
+        let badge = '';
+        let extraClass = '';
+        if (status === 'pending') {
+            badge = '<div class="qq-transfer-status pending">未领取</div>';
+            extraClass = ' qq-transfer-pending';
+        } else if (status === 'received') {
+            badge = '<div class="qq-transfer-status received">已领取</div>';
+            extraClass = ' qq-transfer-received';
+        } else if (status === 'returned') {
+            badge = '<div class="qq-transfer-status returned">已退回</div>';
+            extraClass = ' qq-transfer-returned';
+        }
+        return `<div class="qq-message qq-transfer-card${extraClass}">${reply}<div class="qq-transfer-amount">${amount}</div>${note}<div class="qq-transfer-label">转账</div>${badge}</div>`;
     }
     if (msg.type === 'link') {
         const t = escapeHtml(msg.title || msg.url || '链接');

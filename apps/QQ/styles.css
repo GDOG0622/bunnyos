@@ -1163,6 +1163,24 @@ html[data-app-layout="desktop"] .qq-contact-add {
     font-size: 12px;
     opacity: 0.82;
 }
+.qq-transfer-status {
+    display: inline-block;
+    margin-top: 6px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    background: rgba(255, 255, 255, 0.28);
+    color: #fff;
+    letter-spacing: 0.5px;
+}
+.qq-transfer-status.pending  { background: rgba(255, 255, 255, 0.28); }
+.qq-transfer-status.received { background: rgba(76, 217, 100, 0.85); }
+.qq-transfer-status.returned { background: rgba(0, 0, 0, 0.28); }
+.qq-transfer-returned {
+    background: linear-gradient(135deg, #b0b3b8, #7f8388) !important;
+    opacity: 0.85;
+}
 .qq-link-card {
     padding: 0 !important;
     overflow: hidden;
