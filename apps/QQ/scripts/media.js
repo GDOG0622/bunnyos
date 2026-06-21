@@ -152,7 +152,7 @@ async function sendTransfer() {
 }
 
 // STT：Web Speech API 录音转字，填进输入框，格式 =MM:SS|content=
-const voiceState = { rec: null, startAt: 0, finalText: '', stopTimer: null, maxTimer: null, stopping: false };
+const voiceState = { rec: null, startAt: 0, finalText: '', stopTimer: null, maxTimer: null, silenceTimer: null, stopping: false };
 
 function finishVoiceInput(useCurrentInput = false) {
     if (voiceState.stopTimer) {
@@ -162,6 +162,10 @@ function finishVoiceInput(useCurrentInput = false) {
     if (voiceState.maxTimer) {
         clearTimeout(voiceState.maxTimer);
         voiceState.maxTimer = null;
+    }
+    if (voiceState.silenceTimer) {
+        clearTimeout(voiceState.silenceTimer);
+        voiceState.silenceTimer = null;
     }
     const rec = voiceState.rec;
     if (rec) {
@@ -220,6 +224,12 @@ function toggleVoiceInput() {
         toast('语音输入已到 60 秒上限');
         finishVoiceInput(true);
     }, 60000);
+    voiceState.silenceTimer = setTimeout(() => {
+        if (!voiceState.finalText.trim() && !$('#chat-input')?.dataset.voicePreview) {
+            toast('没有收到语音识别结果，当前浏览器语音服务可能不可用');
+            finishVoiceInput(true);
+        }
+    }, 10000);
     const btn = $('#btn-voice-input');
     btn?.classList.add('recording');
     btn?.setAttribute('aria-label', '停止录音');
@@ -238,6 +248,10 @@ function toggleVoiceInput() {
             const live = (voiceState.finalText + interim).trim();
             input.dataset.voicePreview = '1';
             input.value = live;
+        }
+        if ((voiceState.finalText + interim).trim() && voiceState.silenceTimer) {
+            clearTimeout(voiceState.silenceTimer);
+            voiceState.silenceTimer = null;
         }
     };
     rec.onerror = (e) => {
@@ -266,6 +280,8 @@ function toggleVoiceInput() {
         voiceState.stopTimer = null;
         if (voiceState.maxTimer) clearTimeout(voiceState.maxTimer);
         voiceState.maxTimer = null;
+        if (voiceState.silenceTimer) clearTimeout(voiceState.silenceTimer);
+        voiceState.silenceTimer = null;
         voiceState.rec = null;
         voiceState.stopping = false;
         btn?.classList.remove('recording');

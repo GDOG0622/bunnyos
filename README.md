@@ -284,4 +284,5 @@ Events: Just the push event
 
 - `BUNNYOS_UPDATE_TOKEN` 不要提交到 GitHub；只放在 VPS 的 PM2 环境或线上 `ecosystem.config.js`。
 - `data/`、`settings.json`、`node_modules/` 不要提交；它们在 `.gitignore` 中应保持忽略。
+- Webhook 更新会在 `git reset --hard origin/main` 前临时备份并恢复 `settings.json`、`data/`、上传壁纸/图标目录以及线上 `ecosystem.config.js`，避免 GitHub 代码更新覆盖线上设置、聊天记录、API Key 和 PM2 token。
 - 这个 webhook 端点只有设置了 `BUNNYOS_UPDATE_TOKEN` 才启用；没有 token 时返回 404。
