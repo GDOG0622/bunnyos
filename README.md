@@ -177,6 +177,7 @@ BunnyOS/
 - BUNNY 系统信息 +xxx+
 - AI 代回（impersonate）
 - 模板宏：`{{//}} / {{random}} / {{roll}}`
+- USER 语音转文字（STT）：QQ 麦克风按钮 → `MediaRecorder` 录 opus → **前端直传** Groq 或硅基流动的 OpenAI 兼容转写端点 → 回填 `=MM:SS|content=`。Key 存在 `settings.json` 的 `asr_groqKey` / `asr_siliconflowKey`，调度顺序按 `asr_lastWorking` 优先。后端零参与
 
 ### 下一步
 
@@ -188,9 +189,8 @@ BunnyOS/
 
 **P2 加号工具区扩展**：
 - 链接解析按钮：粘贴 URL → BunnyOS 抓 meta 描述给 AI。小红书等强反爬站点普通 `fetch` 只能兜底成链接卡片；若要标题、正文、封面图，需要配置第三方解析 API（设置 → 通用 API → 链接解析），接口返回 `title / description / image / url` 或包在 `data/result/note` 中均可。
-- 语音录入按钮：当前 Web Speech API 版本免费但不稳定，手机端可能因 HTTPS、iframe 权限或浏览器语音服务网络失败报 `not-allowed/network`。更稳定路线是浏览器 `MediaRecorder` 录 `audio/webm;codecs=opus` → 上传 BunnyOS 后端 → 后端调用 ASR（Whisper / SiliconFlow / OpenAI Transcription 等）→ 返回文字并填 `=MM:SS|content=`。
 - 语音消息不保存真实音频，只保存转写文本协议 `=MM:SS|content=`。QQ UI 会把它渲染为仿 iOS 语音气泡；点击气泡展开下方文字。AI 侧仍看到这段文本协议，用于理解 user 说了什么。
-- 设置 → 语音功能中分为两层：`USER 语音输入权限` 只负责浏览器/系统麦克风授权；下方 `CHAR 语音服务商` 才是角色 TTS/声音配置。两者不要混在一起。
+- 设置 → 语音功能中分三层：`USER 语音输入权限` 只负责浏览器/系统麦克风授权；`USER 语音转文字 (STT)` 两个 Key 输入框是 ASR 服务商配置（前端直传，零后端依赖）；`CHAR 语音服务商` 才是角色 TTS/声音配置。三块独立，不要混在一起。
 - 礼物：保留占位
 
 **P3 设置 App 弹窗统一**：剩余的几个 `alert` 换成项目内 dialog
