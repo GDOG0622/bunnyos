@@ -909,6 +909,7 @@ html[data-app-layout="desktop"] .qq-contact-add {
 .qq-chat-messages {
     min-height: 0;
     overflow-y: auto;
+    overflow-x: hidden;
     padding: 8px 10px 14px;
     display: flex;
     flex-direction: column;
@@ -954,7 +955,7 @@ html[data-app-layout="desktop"] .qq-contact-add {
     display: flex;
     flex-direction: column;
     min-width: 0;
-    max-width: min(540px, 76%);
+    max-width: min(540px, 72%);
 }
 .qq-message-row.assistant .qq-msg-col { align-items: flex-start; }
 .qq-message-row.user .qq-msg-col { align-items: flex-end; }
@@ -1142,17 +1143,17 @@ html[data-app-layout="desktop"] .qq-contact-add {
 .qq-voice-message {
     padding: 0 !important;
     overflow: hidden;
+    max-width: 240px;
 }
 .qq-voice-details {
     display: block;
-    min-width: 138px;
-    padding: 9px 12px;
+    padding: 6px 10px 7px;
     cursor: pointer;
 }
 .qq-voice-summary {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     list-style: none;
     user-select: none;
     -webkit-tap-highlight-color: transparent;
@@ -1164,44 +1165,48 @@ html[data-app-layout="desktop"] .qq-contact-add {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 18px;
-    height: 18px;
-    flex: 0 0 18px;
-    font-size: 17px;
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+    font-size: 15px;
 }
 .qq-voice-wave {
     display: inline-flex;
     align-items: center;
     gap: 2px;
-    height: 22px;
-    flex: 1;
+    height: 18px;
+    flex: 0 0 auto;
 }
 .qq-voice-wave span {
     display: block;
-    width: 3px;
+    width: 2px;
     border-radius: 999px;
     background: currentColor;
     opacity: 0.72;
 }
-.qq-voice-wave span:nth-child(1) { height: 12px; }
-.qq-voice-wave span:nth-child(2) { height: 17px; }
-.qq-voice-wave span:nth-child(3) { height: 9px; }
-.qq-voice-wave span:nth-child(4) { height: 20px; }
-.qq-voice-wave span:nth-child(5) { height: 11px; }
-.qq-voice-wave span:nth-child(6) { height: 16px; }
+.qq-voice-wave span:nth-child(1) { height: 8px; }
+.qq-voice-wave span:nth-child(2) { height: 13px; }
+.qq-voice-wave span:nth-child(3) { height: 6px; }
+.qq-voice-wave span:nth-child(4) { height: 15px; }
+.qq-voice-wave span:nth-child(5) { height: 8px; }
+.qq-voice-wave span:nth-child(6) { height: 12px; }
 .qq-voice-duration {
-    margin-left: 4px;
-    font-size: 14px;
+    margin-left: auto;
+    padding-left: 6px;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
     white-space: nowrap;
+    opacity: 0.85;
 }
 .qq-voice-text {
-    margin-top: 8px;
-    padding-top: 8px;
+    margin-top: 6px;
+    padding-top: 6px;
     border-top: 1px solid currentColor;
-    font-size: 14px;
-    line-height: 1.45;
-    opacity: 0.92;
+    font-size: 13px;
+    line-height: 1.4;
+    opacity: 0.85;
     white-space: pre-wrap;
+    word-break: break-word;
 }
 .qq-message-row.assistant .qq-message {
     background: var(--qq-bubble-in);
