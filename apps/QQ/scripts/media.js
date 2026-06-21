@@ -152,12 +152,23 @@ async function sendTransfer() {
 }
 
 // STT：Web Speech API 录音转字，填进输入框，格式 =MM:SS|content=
-const voiceState = { rec: null, startAt: 0, finalText: '', stopTimer: null, stopping: false };
+const voiceState = { rec: null, startAt: 0, finalText: '', stopTimer: null, maxTimer: null, stopping: false };
 
 function finishVoiceInput(useCurrentInput = false) {
     if (voiceState.stopTimer) {
         clearTimeout(voiceState.stopTimer);
         voiceState.stopTimer = null;
+    }
+    if (voiceState.maxTimer) {
+        clearTimeout(voiceState.maxTimer);
+        voiceState.maxTimer = null;
+    }
+    const rec = voiceState.rec;
+    if (rec) {
+        rec.onresult = null;
+        rec.onerror = null;
+        rec.onend = null;
+        try { rec.abort?.(); } catch {}
     }
     const duration = Math.max(1, Math.round((Date.now() - voiceState.startAt) / 1000));
     const mm = String(Math.floor(duration / 60)).padStart(2, '0');
@@ -193,13 +204,8 @@ function toggleVoiceInput() {
     if (voiceState.rec) {
         if (voiceState.stopping) return;
         voiceState.stopping = true;
-        toast('正在结束语音识别');
-        const rec = voiceState.rec;
-        try { voiceState.rec.stop(); } catch {}
-        voiceState.stopTimer = setTimeout(() => {
-            try { rec.abort?.(); } catch {}
-            finishVoiceInput(true);
-        }, 1500);
+        toast('已结束语音识别');
+        finishVoiceInput(true);
         return;
     }
     const rec = new Rec();
@@ -210,6 +216,10 @@ function toggleVoiceInput() {
     voiceState.startAt = Date.now();
     voiceState.finalText = '';
     voiceState.stopping = false;
+    voiceState.maxTimer = setTimeout(() => {
+        toast('语音输入已到 60 秒上限');
+        finishVoiceInput(true);
+    }, 60000);
     const btn = $('#btn-voice-input');
     btn?.classList.add('recording');
     btn?.setAttribute('aria-label', '停止录音');
@@ -240,7 +250,7 @@ function toggleVoiceInput() {
             'no-speech': '没有识别到说话声'
         };
         toast(messages[code] || `语音识别失败：${code}`);
-        if (code === 'not-allowed' || code === 'service-not-allowed' || code === 'audio-capture') {
+        if (code === 'not-allowed' || code === 'service-not-allowed' || code === 'audio-capture' || code === 'network') {
             finishVoiceInput(true);
         }
     };
@@ -254,6 +264,8 @@ function toggleVoiceInput() {
         rec.onend = null;
         if (voiceState.stopTimer) clearTimeout(voiceState.stopTimer);
         voiceState.stopTimer = null;
+        if (voiceState.maxTimer) clearTimeout(voiceState.maxTimer);
+        voiceState.maxTimer = null;
         voiceState.rec = null;
         voiceState.stopping = false;
         btn?.classList.remove('recording');
