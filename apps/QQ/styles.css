@@ -913,6 +913,7 @@ html[data-app-layout="desktop"] .qq-contact-add {
 }
 .qq-chat-messages {
     min-height: 0;
+    min-width: 0;
     overflow-y: auto;
     overflow-x: hidden;
     padding: 8px 10px 14px;
