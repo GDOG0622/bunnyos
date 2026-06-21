@@ -960,13 +960,14 @@ html[data-app-layout="desktop"] .qq-contact-add {
     display: flex;
     flex-direction: column;
     min-width: 0;
-    max-width: min(540px, calc(100dvw - 90px));
+    /* 三道闸：540px 极宽屏上限；70% 适配桌面窄容器；100dvw-90px 兜底 Edge 移动端父链路异常 */
+    max-width: min(540px, 70%, calc(100dvw - 90px));
     flex: 0 1 auto;
 }
 .qq-message-row.assistant .qq-msg-col { align-items: flex-start; }
 .qq-message-row.user .qq-msg-col { align-items: flex-end; }
 .qq-message {
-    max-width: min(100%, calc(100dvw - 100px));
+    max-width: 100%;
     width: fit-content;
     padding: 7px 12px 8px;
     border-radius: 16px;
