@@ -165,10 +165,12 @@ function messageContentHtml(msg, idx) {
         const amount = `${escapeHtml(msg.currency || '')}${escapeHtml(msg.amount || '')}`;
         const note = msg.note ? `<div class="qq-transfer-note">${escapeHtml(msg.note)}</div>` : '';
         const status = msg.status;
+        const isFromChar = msg.role === 'assistant';
+        const canReceive = isFromChar && status === 'pending';
         let badge = '';
         let extraClass = '';
         if (status === 'pending') {
-            badge = '<div class="qq-transfer-status pending">未领取</div>';
+            badge = `<div class="qq-transfer-status pending">${canReceive ? '点击领取' : '未领取'}</div>`;
             extraClass = ' qq-transfer-pending';
         } else if (status === 'received') {
             badge = '<div class="qq-transfer-status received">已领取</div>';
@@ -177,7 +179,9 @@ function messageContentHtml(msg, idx) {
             badge = '<div class="qq-transfer-status returned">已退回</div>';
             extraClass = ' qq-transfer-returned';
         }
-        return `<div class="qq-message qq-transfer-card${extraClass}">${reply}<div class="qq-transfer-amount">${amount}</div>${note}<div class="qq-transfer-label">转账</div>${badge}</div>`;
+        const receiveAttr = canReceive ? ` data-transfer-receive="${idx}"` : '';
+        if (canReceive) extraClass += ' qq-transfer-claimable';
+        return `<div class="qq-message qq-transfer-card${extraClass}"${receiveAttr}>${reply}<div class="qq-transfer-amount">${amount}</div>${note}<div class="qq-transfer-label">转账</div>${badge}</div>`;
     }
     if (msg.type === 'link') {
         const t = escapeHtml(msg.title || msg.url || '链接');

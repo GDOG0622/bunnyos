@@ -136,6 +136,12 @@
         renderActiveChat();
     });
     $('#chat-messages')?.addEventListener('click', (e) => {
+        const receiveCard = e.target.closest('[data-transfer-receive]');
+        if (receiveCard && !state.deleteMode) {
+            const idx = Number(receiveCard.dataset.transferReceive);
+            if (!Number.isNaN(idx)) receiveTransferAt(idx);
+            return;
+        }
         const voiceCard = e.target.closest('[data-voice-toggle]');
         if (voiceCard && !state.deleteMode) {
             voiceCard.classList.toggle('collapsed');

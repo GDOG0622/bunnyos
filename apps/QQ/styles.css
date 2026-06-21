@@ -1181,6 +1181,12 @@ html[data-app-layout="desktop"] .qq-contact-add {
     background: linear-gradient(135deg, #b0b3b8, #7f8388) !important;
     opacity: 0.85;
 }
+.qq-transfer-claimable {
+    cursor: pointer;
+    transition: transform 0.12s ease, filter 0.12s ease;
+}
+.qq-transfer-claimable:hover { filter: brightness(1.08); transform: translateY(-1px); }
+.qq-transfer-claimable:active { transform: translateY(0); filter: brightness(0.96); }
 .qq-link-card {
     padding: 0 !important;
     overflow: hidden;

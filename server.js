@@ -2027,6 +2027,41 @@ function settleUserTransfers(messages) {
     return updates;
 }
 
+// 领取 char→user 的红包：校验 + 改 status + 加钱 + 落盘
+app.post('/api/qq/chats/:characterId/transfer/:idx/receive', (req, res) => {
+    try {
+        const characterId = req.params.characterId;
+        const idx = Number(req.params.idx);
+        if (!Number.isInteger(idx) || idx < 0) return res.status(400).json({ error: 'idx 非法' });
+        const chatPath = path.join(CHATS_DIR, `${characterId}.json`);
+        if (!fs.existsSync(chatPath)) return res.status(404).json({ error: '聊天不存在' });
+        const chat = JSON.parse(fs.readFileSync(chatPath, 'utf-8'));
+        const msg = chat?.messages?.[idx];
+        if (!msg) return res.status(404).json({ error: '消息不存在' });
+        if (msg.type !== 'transfer') return res.status(400).json({ error: '不是红包消息' });
+        if (msg.role !== 'assistant') return res.status(400).json({ error: '只能领取对方发来的红包' });
+        if (msg.status === 'received') return res.status(409).json({ error: '已领取过' });
+        if (msg.status && msg.status !== 'pending') return res.status(409).json({ error: `状态异常: ${msg.status}` });
+        const amt = Number(msg.amount);
+        if (!Number.isFinite(amt) || amt <= 0) return res.status(400).json({ error: '金额非法' });
+
+        const settledAt = Date.now();
+        msg.status = 'received';
+        msg.settled_at = settledAt;
+
+        const w = readWallet();
+        const nextBalance = w.balance + amt;
+        writeJsonFile(WALLET_FILE, { balance: nextBalance, updated_at: settledAt });
+        chat.updated_at = settledAt;
+        fs.writeFileSync(chatPath, JSON.stringify(chat, null, 2), 'utf-8');
+        console.log(`[WALLET] +${amt} (transfer received from ${characterId})`);
+        res.json({ success: true, balance: nextBalance, settled_at: settledAt });
+    } catch (e) {
+        console.error('[transfer receive]', e);
+        res.status(500).json({ error: '领取失败' });
+    }
+});
+
 app.post('/api/qq/chats/:characterId', (req, res) => {
     try {
         const characterId = req.params.characterId;

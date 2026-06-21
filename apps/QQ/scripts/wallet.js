@@ -53,3 +53,32 @@ function closeWalletModal() {
         notifyNavState();
     }
 }
+
+// 点击 char→user 红包 → 走服务端领取（验证 + 加钱 + 落盘）
+async function receiveTransferAt(idx) {
+    const chat = state.chats.find(item => item.characterId === state.activeChatId);
+    if (!chat) return;
+    const msg = chat.messages?.[idx];
+    if (!msg || msg.role !== 'assistant' || msg.type !== 'transfer' || msg.status !== 'pending') return;
+    try {
+        const res = await fetch(
+            `/api/qq/chats/${encodeURIComponent(chat.characterId)}/transfer/${idx}/receive`,
+            { method: 'POST' }
+        );
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            toast(data?.error || '领取失败');
+            return;
+        }
+        // 同步本地状态
+        msg.status = 'received';
+        msg.settled_at = data.settled_at || Date.now();
+        if (typeof data.balance === 'number') state.walletBalance = data.balance;
+        renderActiveChat();
+        // 钱包页若开着，刷新数字
+        if (!$('#wallet-modal')?.classList.contains('hidden')) loadWalletBalance();
+        toast(`已领取 ${msg.currency || ''}${msg.amount}`);
+    } catch (err) {
+        toast('领取失败：' + (err.message || '未知错误'));
+    }
+}
