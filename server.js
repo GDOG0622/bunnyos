@@ -1261,10 +1261,68 @@ app.post('/api/qq/link-preview', async (req, res) => {
                 siteName: data.siteName || data.source || inferSiteName(host)
             };
         };
+        const trimMarkdownNoise = (text, max = 400) => String(text || '')
+            .replace(/!\[[^\]]*]\([^)]+\)/g, '')
+            .replace(/\[[^\]]+]\([^)]+\)/g, '$1')
+            .replace(/[#>*_`~|-]+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, max);
+        const normalizeJinaMarkdown = (markdown, sourceUrl) => {
+            const content = String(markdown || '').trim();
+            if (!content) return null;
+            const titleLine = content.match(/^Title:\s*(.+)$/im)?.[1]
+                || content.match(/^#\s+(.+)$/m)?.[1]
+                || '';
+            const imageMatch = content.match(/!\[[^\]]*]\((https?:\/\/[^)\s]+)[^)]*\)/i);
+            const lines = content
+                .split(/\r?\n/)
+                .map(line => line.trim())
+                .filter(line => line
+                    && !/^Title:/i.test(line)
+                    && !/^URL Source:/i.test(line)
+                    && !/^Markdown Content:/i.test(line)
+                    && !/^#+\s*/.test(line)
+                    && !/^!\[[^\]]*]\(/.test(line));
+            const description = trimMarkdownNoise(lines.find(line => trimMarkdownNoise(line, 20).length >= 12) || '', 400);
+            const title = trimMarkdownNoise(titleLine || description, 200);
+            if (!title && !description && !imageMatch?.[1]) return null;
+            return {
+                url: sourceUrl || u.toString(),
+                title: title || inferSiteName(host),
+                description: description && description !== title ? description : '',
+                image: imageMatch?.[1] ? new URL(imageMatch[1], sourceUrl || u.toString()).toString() : '',
+                siteName: inferSiteName(new URL(sourceUrl || u.toString()).hostname)
+            };
+        };
+        const tryJinaReader = async (targetUrl, token = '') => {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 12000);
+            try {
+                const readerResp = await fetch(`https://r.jina.ai/${targetUrl}`, {
+                    method: 'GET',
+                    redirect: 'follow',
+                    signal: controller.signal,
+                    headers: {
+                        'Accept': 'text/markdown,text/plain;q=0.9,*/*;q=0.8',
+                        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+                    }
+                });
+                if (!readerResp.ok) return null;
+                const markdown = await readerResp.text();
+                return normalizeJinaMarkdown(markdown, targetUrl);
+            } catch (e) {
+                console.warn('[link-preview jina failed]', e?.message || e);
+                return null;
+            } finally {
+                clearTimeout(timer);
+            }
+        };
         const settings = readJsonFile(SETTINGS_FILE, {});
         const previewApiUrl = String(settings.linkPreview_apiUrl || '').trim();
         const previewApiEnabled = settings.linkPreview_apiEnabled === true || settings.linkPreview_apiEnabled === 'true';
-        if (previewApiEnabled && previewApiUrl && isXhsHost(host)) {
+        const jinaToken = String(settings.linkPreview_jinaToken || '').trim();
+        if (previewApiEnabled && previewApiUrl) {
             try {
                 const apiResp = await fetch(previewApiUrl, {
                     method: 'POST',
@@ -1283,6 +1341,8 @@ app.post('/api/qq/link-preview', async (req, res) => {
                 console.warn('[link-preview third-party failed]', e?.message || e);
             }
         }
+        const earlyJinaPreview = isXhsHost(host) ? await tryJinaReader(u.toString(), jinaToken) : null;
+        if (earlyJinaPreview) return res.json(earlyJinaPreview);
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 10000);
         let resp;
@@ -1304,10 +1364,14 @@ app.post('/api/qq/link-preview', async (req, res) => {
             const finalParsed = new URL(finalUrl);
             if (isBlockedHost(finalParsed.hostname)) return res.status(400).json({ error: '禁止访问内网地址' });
         } catch {}
-        if (!resp.ok) return res.json(fallbackPreview(finalUrl, `远程返回 ${resp.status}`));
+        if (!resp.ok) {
+            const jinaPreview = await tryJinaReader(finalUrl, jinaToken);
+            return res.json(jinaPreview || fallbackPreview(finalUrl, `远程返回 ${resp.status}`));
+        }
         const ctype = resp.headers.get('content-type') || '';
         if (ctype && !/text\/html|application\/xhtml/i.test(ctype)) {
-            return res.json(fallbackPreview(finalUrl, '非 HTML 内容'));
+            const jinaPreview = await tryJinaReader(finalUrl, jinaToken);
+            return res.json(jinaPreview || fallbackPreview(finalUrl, '非 HTML 内容'));
         }
         // 限制大小：256KB
         const reader = resp.body?.getReader?.();
@@ -1345,7 +1409,8 @@ app.post('/api/qq/link-preview', async (req, res) => {
         const image = imageRaw ? new URL(imageRaw, finalUrl).toString() : '';
         const siteName = metaContent('og:site_name') || inferSiteName(new URL(finalUrl).hostname);
         if (!title && !description) {
-            return res.json(fallbackPreview(finalUrl, '该页面未提供可解析摘要'));
+            const jinaPreview = await tryJinaReader(finalUrl, jinaToken);
+            return res.json(jinaPreview || fallbackPreview(finalUrl, '该页面未提供可解析摘要'));
         }
         res.json({
             url: finalUrl,

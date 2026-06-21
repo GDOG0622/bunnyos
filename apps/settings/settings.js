@@ -956,6 +956,7 @@ let settings = {};
             renameBeautyPreset,
             deleteBeautyPreset,
             previewNotifySound,
+            showJinaReaderHelp,
             subscribePushHere,
             unsubscribePushHere,
             testPush
@@ -1012,6 +1013,10 @@ let settings = {};
                 const audio = new Audio(url);
                 audio.play().catch(err => alert('试听失败：' + (err?.message || '')));
             }
+        }
+
+        function showJinaReaderHelp() {
+            alert('Jina Reader 是内置链接解析兜底：第三方解析失败、原生抓取拿不到标题/摘要时会尝试使用。Token 可选；不填走免 key 模式，填写后用 Bearer Token 请求 Jina。');
         }
 
         window.onload = init;
