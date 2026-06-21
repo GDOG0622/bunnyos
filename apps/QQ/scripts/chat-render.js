@@ -145,18 +145,7 @@ function messageContentHtml(msg, idx) {
     }
     const voice = parseVoiceText(activeMessageText(msg));
     if (voice) {
-        return `<div class="qq-message qq-voice-message">${reply}
-            <details class="qq-voice-details">
-                <summary class="qq-voice-summary">
-                    <span class="qq-voice-play"><i class="bi bi-play-fill"></i></span>
-                    <span class="qq-voice-wave" aria-hidden="true">
-                        <span></span><span></span><span></span><span></span><span></span><span></span>
-                    </span>
-                    <span class="qq-voice-duration">${escapeHtml(voice.duration)}</span>
-                </summary>
-                <div class="qq-voice-text">${escapeHtml(voice.content)}</div>
-            </details>
-        </div>`;
+        return `<div class="qq-message qq-voice-message">${reply}<div class="qq-voice-card"><div class="qq-voice-row"><span class="qq-voice-play"><i class="bi bi-play-fill"></i></span><span class="qq-voice-wave" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span></span><span class="qq-voice-duration">${escapeHtml(voice.duration)}</span></div><div class="qq-voice-text">${escapeHtml(voice.content)}</div></div></div>`;
     }
     return `<div class="qq-message">${reply}${escapeHtml(activeMessageText(msg))}</div>`;
 }

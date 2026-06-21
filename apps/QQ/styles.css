@@ -1151,25 +1151,17 @@ html[data-app-layout="desktop"] .qq-contact-add {
 .qq-voice-message {
     padding: 0 !important;
     overflow: hidden;
-    max-width: 220px;
-    width: max-content;
+    max-width: 240px;
 }
-.qq-voice-details {
+.qq-voice-card {
     display: block;
+    padding: 6px 10px 7px;
     min-width: 150px;
-    padding: 7px 11px 8px;
-    cursor: pointer;
 }
-.qq-voice-summary {
+.qq-voice-row {
     display: flex;
     align-items: center;
     gap: 7px;
-    list-style: none;
-    user-select: none;
-    -webkit-tap-highlight-color: transparent;
-}
-.qq-voice-summary::-webkit-details-marker {
-    display: none;
 }
 .qq-voice-play {
     display: inline-flex;
@@ -1209,14 +1201,15 @@ html[data-app-layout="desktop"] .qq-contact-add {
     opacity: 0.85;
 }
 .qq-voice-text {
-    margin-top: 7px;
-    padding-top: 7px;
+    margin-top: 5px;
+    padding-top: 5px;
     border-top: 1px solid currentColor;
     font-size: 13px;
-    line-height: 1.45;
+    line-height: 1.4;
     opacity: 0.88;
     white-space: pre-wrap;
     word-break: break-word;
+    overflow-wrap: anywhere;
 }
 .qq-message-row.assistant .qq-message {
     background: var(--qq-bubble-in);
