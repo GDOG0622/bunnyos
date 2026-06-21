@@ -937,15 +937,19 @@ html[data-app-layout="desktop"] .qq-contact-add {
     flex-direction: column;
     gap: 4px;
 }
+.qq-chat-messages > * {
+    flex-shrink: 0;
+}
 .qq-message-row {
     display: flex;
     align-items: flex-start;
     gap: 8px;
+    flex: 0 0 auto;
     width: 100%;
     max-width: 100%;
     min-width: 0;
     position: relative;
-    overflow: hidden;
+    overflow: visible;
 }
 .qq-message-row.user {
     justify-content: flex-start;
@@ -1251,6 +1255,7 @@ html[data-app-layout="desktop"] .qq-contact-add {
 .qq-date-divider {
     display: flex;
     justify-content: center;
+    flex: 0 0 auto;
     margin: 8px 0 4px;
 }
 .qq-date-divider span {
