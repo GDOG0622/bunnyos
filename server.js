@@ -3,6 +3,7 @@ const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 const webpush = require('web-push');
+const { spawn } = require('child_process');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -127,6 +128,10 @@ function readPushSubscriptions() {
 }
 function writePushSubscriptions(list) {
     writeJsonFile(PUSH_SUBSCRIPTIONS_FILE, list);
+}
+
+function shellQuote(value) {
+    return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
 async function sendWebPushToAll(payload) {
     const subs = readPushSubscriptions();
@@ -871,6 +876,32 @@ app.post('/api/settings', (req, res) => {
     } catch (e) {
         res.status(500).json({ error: "保存设置失败" });
     }
+});
+
+// GitHub webhook / manual deploy endpoint.
+// Enable only on VPS by setting BUNNYOS_UPDATE_TOKEN in PM2 env.
+app.post('/api/admin/update-from-github', (req, res) => {
+    const token = String(process.env.BUNNYOS_UPDATE_TOKEN || '').trim();
+    if (!token) return res.status(404).json({ error: 'Not found' });
+    const provided = String(req.get('x-bunnyos-update-token') || req.query.token || '').trim();
+    if (!provided || provided !== token) return res.status(403).json({ error: 'Forbidden' });
+
+    const script = [
+        'set -e',
+        `cd ${shellQuote(__dirname)}`,
+        'git pull --ff-only',
+        'npm install --omit=dev',
+        'pm2 restart bunnyos --update-env',
+        'pm2 save'
+    ].join(' && ');
+
+    const child = spawn('sh', ['-lc', script], {
+        cwd: __dirname,
+        detached: true,
+        stdio: 'ignore'
+    });
+    child.unref();
+    res.json({ success: true, message: 'Update started' });
 });
 
 // 3. 上传美化资源。壁纸按槽位覆盖；App 图标使用唯一文件名。

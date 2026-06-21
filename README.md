@@ -225,3 +225,61 @@ pm2 save && pm2 startup    # 开机自启
 | `data/vapid.json` | VAPID 密钥对（自动生成，加 .gitignore） |
 | `data/push-subscriptions.json` | 所有订阅本站推送的设备 |
 | `ecosystem.config.js` | PM2 配置 |
+
+### GitHub 自动更新 VPS
+
+推荐工作流：
+
+```text
+本地修改 → publish-github.cmd 提交并推送 GitHub → GitHub Webhook 调 VPS → VPS 自动 git pull / npm install / pm2 restart
+```
+
+本地发布：
+
+```powershell
+cd D:\OneDrive\BunnyOS
+.\publish-github.cmd "更新说明"
+```
+
+如果仓库还没有远端，先在本地加：
+
+```powershell
+git remote add origin <你的 GitHub 仓库地址>
+git push -u origin main
+```
+
+VPS 端准备：
+
+```bash
+cd /opt
+git clone <你的 GitHub 仓库地址> bunnyos
+cd /opt/bunnyos
+npm install --omit=dev
+```
+
+在 `ecosystem.config.js` 的 `env` 中设置一个长随机密钥：
+
+```js
+BUNNYOS_UPDATE_TOKEN: '换成一长串随机字符'
+```
+
+然后启动：
+
+```bash
+pm2 start ecosystem.config.js --update-env
+pm2 save
+```
+
+GitHub 仓库设置 Webhook：
+
+```text
+Payload URL: https://你的域名/api/admin/update-from-github?token=同一个随机密钥
+Content type: application/json
+Events: Just the push event
+```
+
+安全注意：
+
+- `BUNNYOS_UPDATE_TOKEN` 不要提交到 GitHub；只放在 VPS 的 PM2 环境或线上 `ecosystem.config.js`。
+- `data/`、`settings.json`、`node_modules/` 不要提交；它们在 `.gitignore` 中应保持忽略。
+- 这个 webhook 端点只有设置了 `BUNNYOS_UPDATE_TOKEN` 才启用；没有 token 时返回 404。
