@@ -1,4 +1,6 @@
 let settings = {};
+        let settingsVersion = 0;
+        let settingsReloading = false;
         let settingsApps = [];
         let presets = {};
         
@@ -125,6 +127,63 @@ let settings = {};
 
         function notifyThemeUpdated() {
             window.parent?.postMessage({ type: 'bunnyos:theme-updated', settings }, '*');
+        }
+
+        function applySettingsToForm() {
+            renderApiConfigSelects();
+            renderBeautyPresetSelects();
+
+            const elements = document.querySelectorAll('input, textarea, select');
+            elements.forEach(el => {
+                if (el.type === 'file') return;
+                if (el.type === 'checkbox') {
+                    if (settings[el.id] !== undefined) {
+                        el.checked = Boolean(settings[el.id]);
+                    }
+                    return;
+                }
+                if (el.tagName === 'SELECT' && settings[el.id]) {
+                    const hasOption = Array.from(el.options).some(opt => opt.value === settings[el.id]);
+                    if (!hasOption) {
+                        const opt = document.createElement('option');
+                        opt.value = settings[el.id];
+                        opt.textContent = settings[el.id];
+                        el.appendChild(opt);
+                    }
+                }
+                if (settings[el.id] !== undefined) {
+                    el.value = settings[el.id];
+                }
+            });
+
+            toggleVendor('voice');
+            toggleVendor('image');
+            syncAllRangeValues();
+            loadApiConfigToEditor();
+            renderWallpaperPreviews();
+            renderIconGrid();
+        }
+
+        async function reloadSettingsIfChanged(force = false) {
+            if (settingsReloading) return false;
+            settingsReloading = true;
+            try {
+                const res = await fetch('/api/settings', { cache: 'no-store' });
+                if (!res.ok) return false;
+                const next = await res.json();
+                const nextVersion = Number(next?._updatedAt || 0);
+                if (!force && nextVersion && settingsVersion && nextVersion === settingsVersion) return false;
+                settings = next || {};
+                settingsVersion = Number(settings._updatedAt || Date.now());
+                applySettingsToForm();
+                notifyThemeUpdated();
+                return true;
+            } catch (e) {
+                console.warn('同步设置失败', e);
+                return false;
+            } finally {
+                settingsReloading = false;
+            }
         }
 
         function readFileAsDataUrl(file) {
@@ -572,12 +631,11 @@ let settings = {};
         async function init() {
             try {
                 // 1. 获取设置表单
-                const settingsRes = await fetch('/api/settings');
+                const settingsRes = await fetch('/api/settings', { cache: 'no-store' });
                 if (settingsRes.ok) {
                     settings = await settingsRes.json();
+                    settingsVersion = Number(settings._updatedAt || Date.now());
                 }
-                renderApiConfigSelects();
-                renderBeautyPresetSelects();
 
                 // 2. 获取提示词预设
                 const presetsRes = await fetch('/api/presets');
@@ -586,37 +644,9 @@ let settings = {};
                     renderPresets();
                 }
 
-                // 恢复所有 input、textarea、select 的值
-                const elements = document.querySelectorAll('input, textarea, select');
-                elements.forEach(el => {
-                    if (el.type === 'file') return;
-                    if (el.type === 'checkbox') {
-                        if (settings[el.id] !== undefined) {
-                            el.checked = Boolean(settings[el.id]);
-                        }
-                        return;
-                    }
-                    if (el.tagName === 'SELECT' && settings[el.id]) {
-                        let hasOption = Array.from(el.options).some(opt => opt.value === settings[el.id]);
-                        if (!hasOption) {
-                            const opt = document.createElement('option');
-                            opt.value = settings[el.id];
-                            opt.textContent = settings[el.id];
-                            el.appendChild(opt);
-                        }
-                    }
-                    if (settings[el.id] !== undefined) {
-                        el.value = settings[el.id];
-                    }
-                });
-
                 // 初始化时触发布局更新
-                toggleVendor('voice');
-                toggleVendor('image');
-                syncAllRangeValues();
-                loadApiConfigToEditor();
-                renderWallpaperPreviews();
                 await loadBeautyApps();
+                applySettingsToForm();
 
             } catch (e) {
                 console.error("加载设置失败: ", e);
@@ -631,11 +661,18 @@ let settings = {};
             });
             
             try {
-                await fetch('/api/settings', {
+                const res = await fetch('/api/settings', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(settings)
                 });
+                if (res.ok) {
+                    const data = await res.json().catch(() => null);
+                    if (data?.settings) {
+                        settings = data.settings;
+                        settingsVersion = Number(settings._updatedAt || Date.now());
+                    }
+                }
                 notifyThemeUpdated();
             } catch (error) {
                 console.error("无法保存设置到服务器:", error);
@@ -890,5 +927,20 @@ let settings = {};
         }
 
         window.onload = init;
+        window.addEventListener('focus', () => reloadSettingsIfChanged());
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) reloadSettingsIfChanged();
+        });
+        setInterval(() => {
+            if (!document.hidden) reloadSettingsIfChanged();
+        }, 30000);
+        if ('EventSource' in window) {
+            try {
+                const settingsEvents = new EventSource('/api/settings/events');
+                settingsEvents.addEventListener('settings-updated', () => reloadSettingsIfChanged());
+            } catch (e) {
+                console.warn('设置实时同步不可用', e);
+            }
+        }
         document.documentElement.dataset.externalNav = window.parent !== window ? 'true' : 'false';
         notifyNavigationState();

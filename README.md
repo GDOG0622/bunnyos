@@ -200,6 +200,7 @@ BunnyOS/
 - 设置、美化、API Key 等全局数据都来自后端 `settings.json`，不应依赖浏览器 `localStorage`。
 - PWA 安装版和浏览器版必须使用完全相同的 origin（协议、域名、端口都一致）。例如 `https://example.com` 与 `https://www.example.com`、`http://IP` 与 `https://域名` 都是不同来源，表现可能不同。
 - `/api/*` 响应必须 `no-store`，避免 Cloudflare、浏览器或安装版 PWA 拿到旧的空设置响应。若安装版仍显示旧设置，先删除桌面图标并清理该站点数据后重新安装。
+- 多端设置同步使用 `/api/settings/events` 的 Server-Sent Events：电脑端保存设置后，手机/PWA 会收到 `settings-updated` 并重拉 `/api/settings`。前端还会在窗口回到前台和每 30 秒轮询兜底。若反代启用了响应缓冲，需对该接口关闭缓冲（Nginx 可用 `proxy_buffering off;`），否则实时性会退化成兜底轮询。
 
 ## VPS 部署
 

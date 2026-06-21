@@ -24,6 +24,19 @@ app.use('/api', (req, res, next) => {
     next();
 });
 
+const settingsEventClients = new Set();
+
+function broadcastSettingsUpdated(settings) {
+    const payload = JSON.stringify({ type: 'settings-updated', updatedAt: settings?._updatedAt || Date.now() });
+    for (const client of settingsEventClients) {
+        try {
+            client.write(`event: settings-updated\ndata: ${payload}\n\n`);
+        } catch {
+            settingsEventClients.delete(client);
+        }
+    }
+}
+
 // 诊断 body-parser 错误（413 等）
 app.use((err, req, res, next) => {
     if (err && (err.type === 'entity.too.large' || err.status === 413)) {
@@ -860,19 +873,43 @@ app.get('/api/apps', (req, res) => {
 app.get('/api/settings', (req, res) => {
     try {
         const rawData = fs.readFileSync(SETTINGS_FILE, 'utf-8');
-        res.json(JSON.parse(rawData));
+        const data = JSON.parse(rawData);
+        if (data && typeof data === 'object' && !Array.isArray(data) && !data._updatedAt) {
+            data._updatedAt = Math.floor(fs.statSync(SETTINGS_FILE).mtimeMs);
+        }
+        res.json(data);
     } catch (e) {
         res.status(500).json({ error: "无法读取 settings.json" });
     }
 });
 
+app.get('/api/settings/events', (req, res) => {
+    res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-store',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no'
+    });
+    res.write(`event: hello\ndata: ${JSON.stringify({ ok: true })}\n\n`);
+    settingsEventClients.add(res);
+    const heartbeat = setInterval(() => {
+        try { res.write(`event: ping\ndata: ${Date.now()}\n\n`); }
+        catch { settingsEventClients.delete(res); clearInterval(heartbeat); }
+    }, 25000);
+    req.on('close', () => {
+        settingsEventClients.delete(res);
+        clearInterval(heartbeat);
+    });
+});
+
 // 2. 保存设置
 app.post('/api/settings', (req, res) => {
     try {
-        const data = req.body;
+        const data = { ...(req.body || {}), _updatedAt: Date.now() };
         // 覆盖写入设置文件
         fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2), 'utf-8');
-        res.json({ success: true, message: "设置已保存" });
+        broadcastSettingsUpdated(data);
+        res.json({ success: true, message: "设置已保存", settings: data, updatedAt: data._updatedAt });
     } catch (e) {
         res.status(500).json({ error: "保存设置失败" });
     }

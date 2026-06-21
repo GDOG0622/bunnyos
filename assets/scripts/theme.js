@@ -1,5 +1,6 @@
 // 全局主题设置：壁纸、字体，以及传给 App iframe 的字体注入。
 let bunnyThemeSettings = {};
+let bunnyThemeSettingsVersion = 0;
 
 function getWallpaperForViewport(settings = bunnyThemeSettings) {
     const isPortrait = window.innerWidth <= window.innerHeight;
@@ -196,6 +197,7 @@ html.bunny-dark-mode .range-value {
 function applyThemeSettings(settings = bunnyThemeSettings) {
     bunnyThemeSettings = settings || {};
     window.bunnyThemeSettings = bunnyThemeSettings;
+    bunnyThemeSettingsVersion = Number(bunnyThemeSettings._updatedAt || bunnyThemeSettingsVersion || 0);
 
     const wallpaper = getWallpaperForViewport(bunnyThemeSettings);
     if (wallpaper) {
@@ -229,7 +231,7 @@ function applyThemeToIframe(iframe) {
 
 async function loadThemeSettings() {
     try {
-        const res = await fetch("/api/settings");
+        const res = await fetch("/api/settings", { cache: "no-store" });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const settings = await res.json();
         applyThemeSettings(settings);
@@ -240,9 +242,45 @@ async function loadThemeSettings() {
     }
 }
 
+async function refreshThemeSettingsIfChanged() {
+    try {
+        const res = await fetch("/api/settings", { cache: "no-store" });
+        if (!res.ok) return false;
+        const settings = await res.json();
+        const nextVersion = Number(settings?._updatedAt || 0);
+        if (!nextVersion || nextVersion === bunnyThemeSettingsVersion) return false;
+        applyThemeSettings(settings);
+        window.dispatchEvent(new CustomEvent("bunnyos:settings-refreshed", { detail: { settings } }));
+        return true;
+    } catch (e) {
+        console.warn("无法同步主题设置。", e);
+        return false;
+    }
+}
+
 window.bunnyThemeSettings = bunnyThemeSettings;
 window.applyThemeSettings = applyThemeSettings;
 window.applyThemeToIframe = applyThemeToIframe;
 window.loadThemeSettings = loadThemeSettings;
+window.refreshThemeSettingsIfChanged = refreshThemeSettingsIfChanged;
 
 window.addEventListener("resize", () => applyThemeSettings(bunnyThemeSettings));
+window.addEventListener("focus", () => refreshThemeSettingsIfChanged());
+document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) refreshThemeSettingsIfChanged();
+});
+setInterval(() => {
+    if (!document.hidden) refreshThemeSettingsIfChanged();
+}, 30000);
+
+if ("EventSource" in window) {
+    try {
+        const settingsEvents = new EventSource("/api/settings/events");
+        settingsEvents.addEventListener("settings-updated", () => refreshThemeSettingsIfChanged());
+        settingsEvents.onerror = () => {
+            // EventSource 自带重连；轮询也会兜底。
+        };
+    } catch (e) {
+        console.warn("设置实时同步不可用。", e);
+    }
+}
