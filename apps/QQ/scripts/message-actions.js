@@ -332,7 +332,7 @@ async function batchUnfavorite() {
     if (!favState.selected.size) return;
     const n = favState.selected.size;
     if (!await askQqConfirm(`取消收藏选中的 ${n} 条消息吗？`)) return;
-    const dirtyChats = new Set();
+    const dirtyIds = new Set();
     for (const key of favState.selected) {
         const [characterId, ts] = key.split('::');
         const chat = state.chats.find(c => c.characterId === characterId);
@@ -341,12 +341,16 @@ async function batchUnfavorite() {
         const msg = chat.messages?.find(m => m.created_at === tsNum && m.favorited);
         if (msg) {
             msg.favorited = false;
-            dirtyChats.add(chat);
+            dirtyIds.add(characterId);
         }
     }
-    for (const chat of dirtyChats) await saveChat(chat);
+    for (const characterId of dirtyIds) {
+        const chat = state.chats.find(c => c.characterId === characterId);
+        if (chat) await saveChat(chat);
+    }
     setFavSelectMode(false);
-    if (state.activeChatId && dirtyChats.has(state.chats.find(c => c.characterId === state.activeChatId))) {
+    renderFavList();
+    if (state.activeChatId && dirtyIds.has(state.activeChatId)) {
         renderActiveChat();
     }
     toast(`已取消收藏 ${n} 条`);
