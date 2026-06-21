@@ -626,6 +626,53 @@ let settings = {};
             input.value = Math.min(max, Math.max(min, value));
         }
 
+        async function refreshUserMicStatus() {
+            const el = document.getElementById('userMic_status');
+            if (!el) return;
+            if (!window.isSecureContext) {
+                el.textContent = '需要 HTTPS';
+                return;
+            }
+            if (!navigator.mediaDevices?.getUserMedia) {
+                el.textContent = '浏览器不支持';
+                return;
+            }
+            try {
+                const status = await navigator.permissions?.query?.({ name: 'microphone' });
+                if (status?.state === 'granted') el.textContent = '已允许';
+                else if (status?.state === 'denied') el.textContent = '已拒绝';
+                else el.textContent = '未授权';
+            } catch {
+                el.textContent = settings.userMicPermissionGranted ? '已尝试授权' : '未授权';
+            }
+        }
+
+        async function requestUserMicPermission() {
+            if (!window.isSecureContext) {
+                alert('麦克风权限需要 HTTPS 域名或 localhost。');
+                await refreshUserMicStatus();
+                return;
+            }
+            if (!navigator.mediaDevices?.getUserMedia) {
+                alert('当前浏览器不支持麦克风权限申请。');
+                await refreshUserMicStatus();
+                return;
+            }
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                stream.getTracks().forEach(track => track.stop());
+                settings.userMicPermissionGranted = true;
+                await saveData();
+                await refreshUserMicStatus();
+                alert('USER 语音输入权限已允许。');
+            } catch (e) {
+                settings.userMicPermissionGranted = false;
+                await saveData();
+                await refreshUserMicStatus();
+                alert('麦克风权限未允许：' + (e?.message || e?.name || '未知错误'));
+            }
+        }
+
 
         // 初始化加载数据
         async function init() {
@@ -647,6 +694,7 @@ let settings = {};
                 // 初始化时触发布局更新
                 await loadBeautyApps();
                 applySettingsToForm();
+                await refreshUserMicStatus();
 
             } catch (e) {
                 console.error("加载设置失败: ", e);
@@ -858,6 +906,7 @@ let settings = {};
             applyApiConfig,
             clampNumber,
             syncRangeValue,
+            requestUserMicPermission,
             saveData,
             loadPreset,
             savePreset,

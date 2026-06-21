@@ -196,6 +196,11 @@ function finishVoiceInput(useCurrentInput = false) {
 }
 
 function toggleVoiceInput() {
+    const btn = $('#btn-voice-input');
+    if (btn?.classList.contains('recording') && !voiceState.rec) {
+        finishVoiceInput(true);
+        return;
+    }
     if (!window.isSecureContext) {
         toast('手机语音需要 HTTPS 域名或 localhost，当前页面不是安全上下文');
         return;
@@ -230,7 +235,6 @@ function toggleVoiceInput() {
             finishVoiceInput(true);
         }
     }, 10000);
-    const btn = $('#btn-voice-input');
     btn?.classList.add('recording');
     btn?.setAttribute('aria-label', '停止录音');
     toast('开始录音，再次点击麦克风结束');

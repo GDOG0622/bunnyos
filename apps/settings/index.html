@@ -204,6 +204,17 @@
         <div class="section">
             <div class="list" style="margin-bottom: 24px;">
                 <div class="item">
+                    <label>USER 语音输入权限</label>
+                    <div class="control-row">
+                        <span id="userMic_status" class="muted">未检测</span>
+                        <button class="pill-btn" onclick="requestUserMicPermission()">授权</button>
+                    </div>
+                </div>
+                <div class="item">
+                    <label>CHAR 语音服务商</label>
+                    <span class="muted">用于角色语音</span>
+                </div>
+                <div class="item">
                     <label>服务提供商</label>
                     <select id="voice_vendor" onchange="toggleVendor('voice'); saveData()">
                         <option value="silicon">硅基流动 (SiliconFlow)</option>

@@ -168,8 +168,12 @@
     $('#btn-fav-list')?.addEventListener('click', openFavListModal);
     // 加号 → 链接：粘贴 URL 发链接卡片
     $('#btn-link')?.addEventListener('click', sendLinkCard);
-    // 加号 → 麦克风：语音输入（Web Speech API）
-    $('#btn-voice-input')?.addEventListener('click', toggleVoiceInput);
+    // 加号 → 麦克风：语音输入。用 pointerdown 保证移动端第二次按下能立即停止红色录音态。
+    $('#btn-voice-input')?.addEventListener('pointerdown', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleVoiceInput();
+    });
     $$('#fav-list-modal [data-fav-close]').forEach(el => {
         el.addEventListener('click', () => {
             setFavSelectMode(false);
