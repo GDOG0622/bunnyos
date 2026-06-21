@@ -204,12 +204,19 @@ html[data-app-layout="desktop"] .qq-topbar {
 .qq-panel {
     position: absolute;
     inset: 0;
+    min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
     display: none;
     background: var(--qq-bg);
+    -webkit-overflow-scrolling: touch;
 }
 .qq-panel.active { display: block; }
+.qq-panel[data-panel="messages"].active {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
 .qq-panel::-webkit-scrollbar { display: none; }
 
 /* ===== Empty States ===== */
@@ -818,22 +825,28 @@ html[data-app-layout="desktop"] .qq-contact-add {
 }
 /* ===== Chat ===== */
 .qq-chat-shell {
+    flex: 1 1 auto;
     height: 100%;
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     min-height: 0;
     min-width: 0;
+    overflow: hidden;
 }
 .qq-chat-list {
     min-width: 0;
+    min-height: 0;
     overflow-y: auto;
     background: transparent;
+    -webkit-overflow-scrolling: touch;
 }
 .qq-chat-view {
     min-width: 0;
     min-height: 0;
+    height: 100%;
     display: none;
     background: transparent;
+    overflow: hidden;
 }
 .qq-chat-room {
     height: 100%;
@@ -844,6 +857,7 @@ html[data-app-layout="desktop"] .qq-contact-add {
     grid-template-columns: minmax(0, 1fr);
     background: var(--qq-chat-bg);
     position: relative;
+    overflow: hidden;
 }
 .qq-chat-header {
     display: flex;
@@ -916,6 +930,8 @@ html[data-app-layout="desktop"] .qq-contact-add {
     min-width: 0;
     overflow-y: auto;
     overflow-x: hidden;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
     padding: 8px 10px 14px;
     display: flex;
     flex-direction: column;
@@ -1107,7 +1123,7 @@ html[data-app-layout="desktop"] .qq-contact-add {
 .qq-link-card {
     padding: 0 !important;
     overflow: hidden;
-    max-width: 260px;
+    max-width: min(340px, calc(100vw - 86px));
 }
 .qq-link-card-inner {
     display: flex;
@@ -1144,8 +1160,10 @@ html[data-app-layout="desktop"] .qq-contact-add {
     line-height: 1.35;
     overflow: hidden;
     display: -webkit-box;
-    -webkit-line-clamp: 2;
+    -webkit-line-clamp: 6;
     -webkit-box-orient: vertical;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
 }
 .qq-link-site {
     margin-top: 6px;

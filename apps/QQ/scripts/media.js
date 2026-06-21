@@ -460,7 +460,7 @@ async function sendLinkCard() {
         description: data.description || '',
         image: data.image || '',
         siteName: data.siteName || '',
-        text: `[链接] ${data.title || data.siteName || trimmed}`,
+        text: `[链接] ${[data.title, data.description].filter(Boolean).join('：') || data.siteName || trimmed}`,
         created_at: Date.now()
     });
 }

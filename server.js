@@ -1256,7 +1256,7 @@ app.post('/api/qq/link-preview', async (req, res) => {
             return {
                 url: data.url || data.shareUrl || u.toString(),
                 title: String(title || inferSiteName(host)).slice(0, 200),
-                description: String(description || '').slice(0, 400),
+                description: String(description || '').slice(0, 1200),
                 image: imageCandidate ? new URL(String(imageCandidate), u.toString()).toString() : '',
                 siteName: data.siteName || data.source || inferSiteName(host)
             };
@@ -1274,18 +1274,28 @@ app.post('/api/qq/link-preview', async (req, res) => {
             const titleLine = content.match(/^Title:\s*(.+)$/im)?.[1]
                 || content.match(/^#\s+(.+)$/m)?.[1]
                 || '';
+            const descriptionLine = content.match(/^Description:\s*(.+)$/im)?.[1] || '';
             const imageMatch = content.match(/!\[[^\]]*]\((https?:\/\/[^)\s]+)[^)]*\)/i);
+            const genericTitle = /小红书|xiaohongshu|xhs|生活指南|发现精彩|正在跳转/i.test(titleLine);
+            const sharedText = cleanSharedText(rawText);
             const lines = content
                 .split(/\r?\n/)
                 .map(line => line.trim())
                 .filter(line => line
                     && !/^Title:/i.test(line)
+                    && !/^Description:/i.test(line)
                     && !/^URL Source:/i.test(line)
                     && !/^Markdown Content:/i.test(line)
                     && !/^#+\s*/.test(line)
-                    && !/^!\[[^\]]*]\(/.test(line));
-            const description = trimMarkdownNoise(lines.find(line => trimMarkdownNoise(line, 20).length >= 12) || '', 400);
-            const title = trimMarkdownNoise(titleLine || description, 200);
+                    && !/^!\[[^\]]*]\(/.test(line)
+                    && !/^(打开|下载|登录|注册|复制|扫码|点击|更多精彩|当前浏览器)/.test(line));
+            const bodyText = trimMarkdownNoise(lines
+                .map(line => trimMarkdownNoise(line, 300))
+                .filter(line => line.length >= 8)
+                .filter((line, index, arr) => arr.indexOf(line) === index)
+                .join(' '), 1200);
+            const description = trimMarkdownNoise(descriptionLine || sharedText || bodyText, 1200);
+            const title = trimMarkdownNoise((genericTitle ? '' : titleLine) || sharedText || description, 200);
             if (!title && !description && !imageMatch?.[1]) return null;
             return {
                 url: sourceUrl || u.toString(),
@@ -1415,7 +1425,7 @@ app.post('/api/qq/link-preview', async (req, res) => {
         res.json({
             url: finalUrl,
             title: (title || '').slice(0, 200),
-            description: (description || '').slice(0, 400),
+            description: (description || '').slice(0, 1200),
             image: image || '',
             siteName: (siteName || '').slice(0, 80)
         });

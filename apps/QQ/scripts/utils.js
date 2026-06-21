@@ -46,7 +46,7 @@ function messageSummaryText(msg) {
         return `转账${amount ? ` ${amount}` : ''}${msg.note ? ` ${msg.note}` : ''}`;
     }
     if (msg.type === 'link') {
-        return `[链接] ${msg.title || msg.siteName || msg.url || ''}`;
+        return `[链接] ${msg.title || msg.description || msg.siteName || msg.url || ''}`;
     }
     const voice = parseVoiceText(activeMessageText(msg));
     if (voice) return `[语音 ${voice.duration}] ${voice.content}`;
