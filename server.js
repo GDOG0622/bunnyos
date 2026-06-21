@@ -56,7 +56,16 @@ app.use((err, req, res, next) => {
 });
 
 // 静态提供当前目录，以支持 index.html 等前端页面
-app.use(express.static(path.join(__dirname)));
+app.use(express.static(path.join(__dirname), {
+    setHeaders: (res, filePath) => {
+        const ext = path.extname(filePath).toLowerCase();
+        if (['.html', '.js', '.css', '.json', '.webmanifest'].includes(ext)) {
+            res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+            res.setHeader('Pragma', 'no-cache');
+            res.setHeader('Expires', '0');
+        }
+    }
+}));
 
 // 萝卜机目录结构
 const APPS_DIR = path.join(__dirname, 'apps');
@@ -848,9 +857,12 @@ app.get('/api/apps', (req, res) => {
                 if (!fs.existsSync(manifestFile)) return null;
 
                 const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf-8'));
-                const entryUrl = manifest.entry
-                    ? `apps/${entry.name}/${manifest.entry}`.replace(/\\/g, '/')
-                    : "";
+                let entryUrl = "";
+                if (manifest.entry) {
+                    const entryPath = path.join(appDir, manifest.entry);
+                    const version = fs.existsSync(entryPath) ? Math.floor(fs.statSync(entryPath).mtimeMs) : Date.now();
+                    entryUrl = `apps/${entry.name}/${manifest.entry}?v=${version}`.replace(/\\/g, '/');
+                }
 
                 if (manifest.hidden) return null;
 
