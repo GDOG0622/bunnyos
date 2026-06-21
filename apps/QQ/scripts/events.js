@@ -169,10 +169,20 @@
     // 加号 → 链接：粘贴 URL 发链接卡片
     $('#btn-link')?.addEventListener('click', sendLinkCard);
     // 加号 → 麦克风：语音输入（MediaRecorder → ASR API）
-    $('#btn-voice-input')?.addEventListener('click', (event) => {
-        event.preventDefault();
-        toggleVoiceInput();
-    });
+    // Edge Android 录音中 click 偶发不触发，pointerup 兜底；500ms 内只触发一次
+    {
+        const voiceButton = $('#btn-voice-input');
+        let lastToggleAt = 0;
+        const handler = (event) => {
+            event.preventDefault();
+            const now = Date.now();
+            if (now - lastToggleAt < 500) return;
+            lastToggleAt = now;
+            toggleVoiceInput();
+        };
+        voiceButton?.addEventListener('pointerup', handler);
+        voiceButton?.addEventListener('click', handler);
+    }
     $$('#fav-list-modal [data-fav-close]').forEach(el => {
         el.addEventListener('click', () => {
             setFavSelectMode(false);
