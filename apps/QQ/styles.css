@@ -960,19 +960,20 @@ html[data-app-layout="desktop"] .qq-contact-add {
     display: flex;
     flex-direction: column;
     min-width: 0;
-    max-width: min(540px, calc(100% - 64px));
+    max-width: min(540px, calc(100dvw - 90px));
     flex: 0 1 auto;
 }
 .qq-message-row.assistant .qq-msg-col { align-items: flex-start; }
 .qq-message-row.user .qq-msg-col { align-items: flex-end; }
 .qq-message {
-    max-width: 100%;
+    max-width: min(100%, calc(100dvw - 100px));
     width: fit-content;
     padding: 7px 12px 8px;
     border-radius: 16px;
     font-size: 16px;
     line-height: 1.4;
     word-break: break-word;
+    overflow-wrap: anywhere;
     white-space: pre-wrap;
     box-shadow: 0 1px 1.5px rgba(0, 0, 0, 0.08);
 }
@@ -1753,6 +1754,30 @@ html:not([data-app-layout="desktop"]) #qq-root.chat-open .qq-tabbar {
 }
 #btn-voice-input.recording {
     color: var(--qq-danger, #e54545);
+    animation: qq-voice-pulse 1s ease-in-out infinite;
+}
+.qq-voice-banner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    width: 100%;
+    border: none;
+    background: var(--qq-danger, #e54545);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 12px 16px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
+.qq-voice-banner.hidden { display: none; }
+.qq-voice-banner-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #fff;
     animation: qq-voice-pulse 1s ease-in-out infinite;
 }
 #btn-voice-input {

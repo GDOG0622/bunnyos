@@ -170,10 +170,25 @@ const ASR_PROVIDERS = {
     },
 };
 
+let voiceElapsedTimer = null;
 function setVoiceRecording(active) {
     const b = $('#btn-voice-input');
     b?.classList.toggle('recording', Boolean(active));
     b?.setAttribute('aria-label', active ? '停止录音' : '语音输入');
+    const banner = $('#voice-recording-banner');
+    banner?.classList.toggle('hidden', !active);
+    const elapsed = $('#voice-recording-elapsed');
+    if (voiceElapsedTimer) { clearInterval(voiceElapsedTimer); voiceElapsedTimer = null; }
+    if (active && elapsed) {
+        const tick = () => {
+            const s = Math.max(0, Math.round((Date.now() - voiceState.startAt) / 1000));
+            elapsed.textContent = `${s}s`;
+        };
+        tick();
+        voiceElapsedTimer = setInterval(tick, 500);
+    } else if (elapsed) {
+        elapsed.textContent = '0s';
+    }
 }
 
 function pickRecorderMime() {

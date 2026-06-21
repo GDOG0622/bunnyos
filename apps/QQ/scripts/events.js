@@ -169,9 +169,9 @@
     // 加号 → 链接：粘贴 URL 发链接卡片
     $('#btn-link')?.addEventListener('click', sendLinkCard);
     // 加号 → 麦克风：语音输入（MediaRecorder → ASR API）
-    // Edge Android 录音中 click 偶发不触发，pointerup 兜底；500ms 内只触发一次
+    // Edge Android 录音中按钮 click 偶发不触发，绑 pointerup + click + touchend 三重兜底
+    // 同时录音中输入栏上方会显示红色「点此结束」横幅作为最稳定入口
     {
-        const voiceButton = $('#btn-voice-input');
         let lastToggleAt = 0;
         const handler = (event) => {
             event.preventDefault();
@@ -180,8 +180,14 @@
             lastToggleAt = now;
             toggleVoiceInput();
         };
+        const voiceButton = $('#btn-voice-input');
         voiceButton?.addEventListener('pointerup', handler);
         voiceButton?.addEventListener('click', handler);
+        voiceButton?.addEventListener('touchend', handler);
+        const banner = $('#voice-recording-banner');
+        banner?.addEventListener('pointerup', handler);
+        banner?.addEventListener('click', handler);
+        banner?.addEventListener('touchend', handler);
     }
     $$('#fav-list-modal [data-fav-close]').forEach(el => {
         el.addEventListener('click', () => {
