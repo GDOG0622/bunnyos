@@ -554,6 +554,43 @@ html[data-app-layout="desktop"] .qq-topbar {
 }
 .qq-beauty-hint { padding-top: 16px; }
 
+/* 头像框 = 头像上一层的透明 PNG 覆盖（::after 实现）。预览/应用时仅注入 background-image。 */
+.bunny-qq-frame {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.bunny-qq-frame::after {
+    content: '';
+    position: absolute;
+    inset: -10%; /* 略大于头像，给框留余量 */
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+    pointer-events: none;
+}
+
+/* 仿设置 App 的 .wallpaper-pick：方块上传按钮 */
+.qq-beauty-wallpaper-pick {
+    width: 100%;
+    height: 120px;
+    border: 1px dashed var(--qq-border, #eaeaea);
+    border-radius: 10px;
+    background: var(--qq-bg-soft, #f5f5f5);
+    color: var(--qq-text-fade, #999);
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    cursor: pointer;
+    font-size: 26px;
+}
+.qq-beauty-wallpaper-pick.has-image {
+    background-size: cover;
+    background-position: center;
+    border-style: solid;
+}
+
 /* Mockup 预览区 */
 .qq-beauty-mockup-wrap {
     margin-bottom: 14px;

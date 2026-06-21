@@ -96,7 +96,8 @@ const BEAUTY_PRICES = { skins: 20, frames: 5, bubbles: 5, backgrounds: 0 };
 function defaultBeautyItem(type) {
     const base = { id: 'default', name: '默认', preview: '' };
     if (type === 'bubbles') return { ...base, userCss: '', charCss: '' };
-    if (type === 'backgrounds') return { ...base, url: '' };
+    // 头像框 = 透明 PNG 直链；背景图 = 上传图片。都是 url 字段。
+    if (type === 'backgrounds' || type === 'frames') return { ...base, url: '' };
     return { ...base, css: '' };
 }
 function defaultBeautiesData() {

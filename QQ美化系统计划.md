@@ -169,12 +169,12 @@ publish-github.cmd 会自动 git add + commit + push 到 origin/main，GitHub we
 ### 1.4 商城结构
 4 个模块 tab：**皮肤 / 头像框 / 气泡 / 背景图**（顺序如左）。**头像不算美化模块**（用户 2026-06-21 决策）。
 
-| 模块 | 创建价 | 顶部预览 | 数据结构单元 |
-|---|---|---|---|
-| 皮肤 | 20cc | "全屏临时预览"按钮（套入 QQ 多页切一圈，含退出按钮） | 单 CSS |
-| 头像框 | 5cc | mockup | 单 CSS |
-| 气泡 | 5cc | mockup | **一组 = userCss + charCss 两个字段** |
-| 背景图 | 0cc | mockup | 上传文件，**覆盖式存到 `data/qq/beauty-backgrounds/<id>.<ext>`**（同 id 旧文件先删，参考设置 App 的 `removeBackgroundSlot`），写回 `url` |
+| 模块 | 创建价 | 顶部预览 | 数据结构单元 | 编辑器 UX |
+|---|---|---|---|---|
+| 皮肤 | 20cc | "全屏临时预览"按钮（套入 QQ 多页切一圈，含退出按钮） | 单 CSS | textarea |
+| 头像框 | 5cc | mockup | **图片直链 `url`**（透明 PNG，覆盖在头像上一层；不写 CSS） | URL 输入框 |
+| 气泡 | 5cc | mockup | **userCss + charCss 两个字段** | 两个 textarea |
+| 背景图 | 0cc | 无（用户决策：背景不需要预览） | 上传文件，**覆盖式存到 `data/qq/beauty-backgrounds/<id>.<ext>`**（同 id 旧文件先删，仿设置 App 的 `removeBackgroundSlot`），写回 `url` | `.wallpaper-pick` 缩略按钮；**无命名、无预览图字段** |
 
 每模块内自上而下：
 1. **顶部 mockup 预览**（皮肤除外，是按钮）。mockup 是固定布局的虚拟聊天场景（含 user/char 头像、reply_to 一例、文本气泡若干、转账气泡示例），实时套用"当前选中槽位"的 CSS / 图。
@@ -216,11 +216,12 @@ publish-github.cmd 会自动 git add + commit + push 到 origin/main，GitHub we
   ```json
   {
     "skins":     [{ "id", "name", "preview", "css" }],
-    "frames":    [{ "id", "name", "preview", "css" }],
+    "frames":    [{ "id", "name", "preview", "url" }],
     "bubbles":   [{ "id", "name", "preview", "userCss", "charCss" }],
     "backgrounds":[{ "id", "name", "preview", "url" }]
   }
   ```
+  注：`frames` 用 `url`（透明 PNG 直链，前端通过 `.bunny-qq-frame::after { background-image: ... }` 叠在头像上）；不是 `css` 字段。背景图 `backgrounds` 同样用 `url`，但走上传端点覆盖式存盘。
   每类的第一个永远是 `id: "default"`，name 是"默认"，css/url 为空字符串，不可删，不可编辑名字。
 
 - `data/qq/char-beauty.json` → char 的选择
@@ -249,13 +250,13 @@ publish-github.cmd 会自动 git add + commit + push 到 origin/main，GitHub we
 ### 1.6 CSS 作用域
 每模块各自的包裹类，由 BunnyOS 在 DOM 上挂好，user 写 CSS **必须以这些类开头**（不自动加前缀）：
 
-| 模块 | 包裹类 | 注入位置 |
-|---|---|---|
-| 皮肤 | `.bunny-qq-skin` | 加在 `apps/QQ/index.html` 的 `<body>` 上 |
-| 头像框 | `.bunny-qq-frame` | 加在渲染头像的 `.qq-avatar` 外层 wrapper（需要改 chat-render.js） |
-| 气泡（user） | `.bunny-qq-bubble.bunny-qq-bubble-user` | 加在 `.qq-message.qq-self` 上 |
-| 气泡（char） | `.bunny-qq-bubble.bunny-qq-bubble-char` | 加在 `.qq-message:not(.qq-self)` 上 |
-| 背景 | `.bunny-qq-bg` | 加在 `.qq-chat-view` 容器上 |
+| 模块 | 包裹类 | 注入位置 | 注入方式 |
+|---|---|---|---|
+| 皮肤 | `.bunny-qq-skin` | 加在 `apps/QQ/index.html` 的 `<body>` 上 | user 写 CSS |
+| 头像框 | `.bunny-qq-frame` | 加在渲染头像的 `.qq-avatar` 外层 wrapper（需要改 chat-render.js） | **不写 CSS**：只设 `.bunny-qq-frame::after { background-image: url(<透明 PNG>) }`，base 规则（`position: relative; ::after 绝对定位 inset:-10%`）在 `styles.css` 全局写好 |
+| 气泡（user） | `.bunny-qq-bubble.bunny-qq-bubble-user` | 加在 `.qq-message.qq-self` 上 | user 写 CSS |
+| 气泡（char） | `.bunny-qq-bubble.bunny-qq-bubble-char` | 加在 `.qq-message:not(.qq-self)` 上 | user 写 CSS |
+| 背景 | `.bunny-qq-bg` | 加在 `.qq-chat-view` 容器上 | **不写 CSS**：上传图片后端覆盖式存盘，注入 `.bunny-qq-bg { background-image: url(...) }` |
 
 气泡内部子元素（reply_to、表情、图片、转账、语音、+系统+、收藏星）走原逻辑；美化 CSS 只控气泡外壳样式（背景、边框、圆角、阴影、文字色等）。
 

@@ -175,28 +175,35 @@ function renderBeautyPanel(panel, def, list) {
 
 function renderSlotCard(def, it) {
     const isDefault = it.id === 'default';
-    const previewBg = it.preview
-        ? `style="background-image:url('${it.preview.replace(/'/g, "\\'")}')"`
+    const isBackground = def.type === 'backgrounds';
+    // 背景图的"自身图"即缩略；其他类用 preview 字段
+    const previewSrc = isBackground ? (it.url || it.preview) : it.preview;
+    const previewBg = previewSrc
+        ? `style="background-image:url('${previewSrc.replace(/'/g, "\\'")}')"`
         : '';
     const initial = (it.name || '?').slice(0, 1);
     const checkboxHtml = (state.beautySelectMode && !isDefault)
         ? `<input type="checkbox" class="qq-beauty-slot-check" data-beauty-check="${it.id}"
                   ${state.beautySelected.has(it.id) ? 'checked' : ''}>`
         : '';
+    // 背景图不展示名字、不展示"预览"按钮（用户决策 2026-06-21）
+    const nameHtml = isBackground
+        ? ''
+        : `<div class="qq-beauty-slot-name">${escapeHtmlText(it.name || '未命名')}</div>`;
     const actionsHtml = state.beautySelectMode
         ? ''
         : `<div class="qq-beauty-slot-actions">
-              <button type="button" data-beauty-preview="${it.id}">预览</button>
-              ${isDefault ? '' : `<button type="button" data-beauty-edit="${it.id}">编辑</button>`}
+              ${isBackground ? '' : `<button type="button" data-beauty-preview="${it.id}">预览</button>`}
+              ${isDefault ? '' : `<button type="button" data-beauty-edit="${it.id}">${isBackground ? '更换' : '编辑'}</button>`}
            </div>`;
     return `
         <div class="qq-beauty-slot${isDefault ? ' is-default' : ''}${state.beautySelected.has(it.id) ? ' selected' : ''}"
              data-id="${it.id}">
             ${checkboxHtml}
             <div class="qq-beauty-slot-preview" ${previewBg}>
-                ${it.preview ? '' : initial}
+                ${previewSrc ? '' : initial}
             </div>
-            <div class="qq-beauty-slot-name">${escapeHtmlText(it.name || '未命名')}</div>
+            ${nameHtml}
             ${actionsHtml}
         </div>
     `;
@@ -227,13 +234,20 @@ async function createBeautySlot(type) {
         toast(`余额不足，需要 ${def.price}cc`);
         return;
     }
-    const name = prompt(`新建${def.label}的名字：`, '我的' + def.label);
-    if (!name) return;
+    let name;
+    if (type === 'backgrounds') {
+        // 背景图不需要命名（用户决策 2026-06-21）
+        name = '背景';
+    } else {
+        const input = prompt(`新建${def.label}的名字：`, '我的' + def.label);
+        if (!input) return;
+        name = input.trim();
+    }
     try {
         const res = await fetch(`/api/qq/beauties/${type}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: name.trim() })
+            body: JSON.stringify({ name })
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -258,16 +272,17 @@ function previewSlot(type, id) {
     if (!item) return;
     const styleEl = $('#beauty-mockup-style');
     if (!styleEl) return;
-    // frames: css 字段；bubbles: userCss+charCss；backgrounds: url；skins: 全屏（M5）
-    if (type === 'frames') styleEl.textContent = item.css || '';
-    else if (type === 'bubbles') styleEl.textContent = (item.userCss || '') + '\n' + (item.charCss || '');
-    else if (type === 'backgrounds') {
-        // mockup 的 .bunny-qq-bg 直接设背景
-        const bg = item.url
-            ? `.qq-beauty-mockup-frame.bunny-qq-bg { background-image: url('${item.url.replace(/'/g, "\\'")}'); background-size: cover; background-position: center; }`
+    // frames: 透明 PNG 直链覆盖在头像上（::after 实现）
+    // bubbles: userCss+charCss；skins: CSS；backgrounds: 不走预览（用户决策）
+    if (type === 'frames') {
+        const url = item.url || '';
+        styleEl.textContent = url
+            ? `.bunny-qq-frame::after { background-image: url('${url.replace(/'/g, "\\'")}'); }`
             : '';
-        styleEl.textContent = bg;
-    } else styleEl.textContent = '';
+    }
+    else if (type === 'bubbles') styleEl.textContent = (item.userCss || '') + '\n' + (item.charCss || '');
+    else if (type === 'skins') styleEl.textContent = item.css || '';
+    else styleEl.textContent = '';
     state.beautyPreviewing = { type, id };
     // 视觉反馈
     document.querySelectorAll('.qq-beauty-slot').forEach(el => el.classList.remove('previewing'));
@@ -286,10 +301,22 @@ function openBeautyEditor(type, id) {
     const def = BEAUTY_TAB_DEFS.find(t => t.type === type);
     const isBubble = type === 'bubbles';
     const isBackground = type === 'backgrounds';
+    const isFrame = type === 'frames';
+    const isSkin = type === 'skins';
 
     editor.querySelector('#beauty-editor-title').textContent = `编辑${def.label}`;
-    editor.querySelector('#beauty-editor-name').value = item.name || '';
-    editor.querySelector('#beauty-editor-preview').value = item.preview || '';
+    // 背景图不需要名字/预览图字段
+    const nameField = editor.querySelector('#beauty-field-name');
+    const previewField = editor.querySelector('#beauty-field-preview');
+    if (isBackground) {
+        nameField.style.display = 'none';
+        previewField.style.display = 'none';
+    } else {
+        nameField.style.display = '';
+        previewField.style.display = '';
+        editor.querySelector('#beauty-editor-name').value = item.name || '';
+        editor.querySelector('#beauty-editor-preview').value = item.preview || '';
+    }
 
     const cssArea = editor.querySelector('#beauty-editor-css-area');
     if (isBubble) {
@@ -302,25 +329,44 @@ function openBeautyEditor(type, id) {
         editor.querySelector('#beauty-editor-userCss').value = item.userCss || '';
         editor.querySelector('#beauty-editor-charCss').value = item.charCss || '';
     } else if (isBackground) {
+        // 仿设置 App 的 .wallpaper-pick：方块按钮 → 选文件 → 覆盖式上传
+        const hasImage = !!item.url;
+        const bgStyle = hasImage ? `style="background-image:url('${item.url.replace(/'/g, "\\'")}')"` : '';
         cssArea.innerHTML = `
-            <label class="qq-beauty-editor-label">背景图（M5 接 .wallpaper-pick 上传按钮，目前用 URL 输入框占位）</label>
-            <input id="beauty-editor-url" type="text" placeholder="图片直链 URL">
+            <label class="qq-beauty-editor-label">背景图（点击上传，将覆盖旧文件）</label>
+            <button type="button" class="qq-beauty-wallpaper-pick${hasImage ? ' has-image' : ''}"
+                    id="beauty-editor-wp-pick" ${bgStyle}>
+                ${hasImage ? '' : '<i class="bi bi-plus-lg"></i>'}
+            </button>
+            <input type="file" id="beauty-editor-wp-file" accept="image/*" style="display:none">
+        `;
+        editor.querySelector('#beauty-editor-wp-pick').addEventListener('click', () => {
+            editor.querySelector('#beauty-editor-wp-file').click();
+        });
+        editor.querySelector('#beauty-editor-wp-file').addEventListener('change', e => {
+            uploadBeautyBackground(id, e.target);
+        });
+    } else if (isFrame) {
+        // 头像框 = 透明 PNG 直链（用户决策 2026-06-21）
+        cssArea.innerHTML = `
+            <label class="qq-beauty-editor-label">头像框图片直链（透明 PNG，叠在头像上一层）</label>
+            <input id="beauty-editor-url" type="text" placeholder="https://...">
         `;
         editor.querySelector('#beauty-editor-url').value = item.url || '';
-    } else {
-        // frames / skins
+    } else if (isSkin) {
         cssArea.innerHTML = `
             <label class="qq-beauty-editor-label">CSS</label>
-            <textarea id="beauty-editor-css" spellcheck="false"
-                placeholder="${type === 'frames' ? '.bunny-qq-frame { ... }' : '.bunny-qq-skin { ... }'}"></textarea>
+            <textarea id="beauty-editor-css" spellcheck="false" placeholder=".bunny-qq-skin { ... }"></textarea>
         `;
         editor.querySelector('#beauty-editor-css').value = item.css || '';
     }
 
-    // 绑 debounce 自动保存
-    editor.querySelectorAll('input, textarea').forEach(el => {
-        el.addEventListener('input', () => scheduleBeautyAutoSave());
-    });
+    // 绑 debounce 自动保存（背景图走单独上传端点，不在此触发）
+    if (!isBackground) {
+        editor.querySelectorAll('input, textarea').forEach(el => {
+            el.addEventListener('input', () => scheduleBeautyAutoSave());
+        });
+    }
 
     editor.classList.remove('hidden');
     state.pageHistory.push('beauty-editor');
@@ -358,6 +404,8 @@ async function flushBeautyAutoSave() {
     const { type, id } = state.beautyEditing;
     const editor = $('#beauty-editor');
     if (!editor) return;
+    // 背景图通过上传端点写盘，无需 PUT
+    if (type === 'backgrounds') return;
     const patch = {
         name: editor.querySelector('#beauty-editor-name')?.value || '',
         preview: editor.querySelector('#beauty-editor-preview')?.value || '',
@@ -365,9 +413,9 @@ async function flushBeautyAutoSave() {
     if (type === 'bubbles') {
         patch.userCss = editor.querySelector('#beauty-editor-userCss')?.value || '';
         patch.charCss = editor.querySelector('#beauty-editor-charCss')?.value || '';
-    } else if (type === 'backgrounds') {
+    } else if (type === 'frames') {
         patch.url = editor.querySelector('#beauty-editor-url')?.value || '';
-    } else {
+    } else if (type === 'skins') {
         patch.css = editor.querySelector('#beauty-editor-css')?.value || '';
     }
     try {
@@ -396,6 +444,40 @@ async function flushBeautyAutoSave() {
     } catch (err) {
         toast('保存失败：' + (err.message || '未知错误'));
     }
+}
+
+// ========== 背景图上传（覆盖式） ==========
+function uploadBeautyBackground(id, fileInput) {
+    const file = fileInput?.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+        try {
+            const res = await fetch(`/api/qq/beauties/backgrounds/${id}/image`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ dataUrl: reader.result })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) { toast(data.error || '上传失败'); return; }
+            // 更新缩略
+            const pick = $('#beauty-editor-wp-pick');
+            if (pick) {
+                pick.classList.add('has-image');
+                pick.style.backgroundImage = `url('${data.url.replace(/'/g, "\\'")}')`;
+                pick.innerHTML = '';
+            }
+            // 同步缓存
+            const list = state.beautyListCache?.backgrounds || [];
+            const idx = list.findIndex(x => x.id === id);
+            if (idx >= 0) list[idx] = data;
+            toast('已上传（旧文件已覆盖）');
+        } catch (err) {
+            toast('上传失败：' + (err.message || '未知错误'));
+        }
+    };
+    reader.onerror = () => toast('读取文件失败');
+    reader.readAsDataURL(file);
 }
 
 // ========== 多选删除 ==========
