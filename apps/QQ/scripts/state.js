@@ -38,6 +38,7 @@ const state = {
     selectedDeleteIndexes: new Set(),
     messageMenuOpenedAt: 0,
     pageHistory: ['main'],
+    imageAttachments: {},
 };
 
 const PERSONA_STATUSES = ['在忙中', '写作业', '搬砖中', '玩游戏', '恋爱中', 'emo中', '超开心', '气鼠了', '累瘫了', '自定义'];

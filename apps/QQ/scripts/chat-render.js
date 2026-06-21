@@ -153,7 +153,13 @@ function messageContentHtml(msg, idx) {
         </div>`;
     }
     if (msg.type === 'sticker' || msg.type === 'image') {
-        return `<div class="qq-message qq-message-media">${reply}<img src="${escapeAttr(msg.image || '')}" alt="${escapeAttr(msg.text || '')}"></div>`;
+        const imageSrc = msg.type === 'image'
+            ? (msg.image || state.imageAttachments?.[msg.client_image_id]?.dataUrl || '')
+            : (msg.image || '');
+        if (!imageSrc) {
+            return `<div class="qq-message">${reply}${escapeHtml(msg.text || '[图片]')}</div>`;
+        }
+        return `<div class="qq-message qq-message-media">${reply}<img src="${escapeAttr(imageSrc)}" alt="${escapeAttr(msg.text || '')}"></div>`;
     }
     if (msg.type === 'transfer') {
         const amount = `${escapeHtml(msg.currency || '')}${escapeHtml(msg.amount || '')}`;

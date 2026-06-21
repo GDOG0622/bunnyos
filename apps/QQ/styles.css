@@ -68,6 +68,15 @@ html[data-app-layout="desktop"] body {
 }
 
 .hidden { display: none !important; }
+.qq-file-input {
+    position: fixed;
+    left: -100vw;
+    top: 0;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+}
 
 /* ===== Root — Grid 自适应 ===== */
 .qq-root {

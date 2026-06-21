@@ -1885,13 +1885,37 @@ app.delete('/api/qq/characters/:id', (req, res) => {
 });
 
 // 单人聊天记录
+function sanitizeChatMessagesForStorage(messages) {
+    return (Array.isArray(messages) ? messages : []).map(message => {
+        if (!message || typeof message !== 'object' || message.type !== 'image') return message;
+        const clean = { ...message, text: message.text || '[图片]' };
+        delete clean.image;
+        delete clean.client_image_id;
+        return clean;
+    });
+}
+
+function sanitizeChatForStorage(chat) {
+    const data = chat && typeof chat === 'object' ? chat : {};
+    return {
+        ...data,
+        messages: sanitizeChatMessagesForStorage(data.messages)
+    };
+}
+
 app.get('/api/qq/chats', (req, res) => {
     try {
         if (!fs.existsSync(CHATS_DIR)) return res.json([]);
         const files = fs.readdirSync(CHATS_DIR).filter(f => f.endsWith('.json'));
         const list = files.map(f => {
             try {
-                return JSON.parse(fs.readFileSync(path.join(CHATS_DIR, f), 'utf-8'));
+                const file = path.join(CHATS_DIR, f);
+                const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
+                const clean = sanitizeChatForStorage(raw);
+                if (JSON.stringify(raw) !== JSON.stringify(clean)) {
+                    fs.writeFileSync(file, JSON.stringify(clean, null, 2), 'utf-8');
+                }
+                return clean;
             } catch { return null; }
         }).filter(Boolean);
         list.sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
@@ -1905,7 +1929,12 @@ app.get('/api/qq/chats/:characterId', (req, res) => {
     try {
         const file = path.join(CHATS_DIR, `${req.params.characterId}.json`);
         if (!fs.existsSync(file)) return res.json({ characterId: req.params.characterId, messages: [] });
-        res.json(JSON.parse(fs.readFileSync(file, 'utf-8')));
+        const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
+        const clean = sanitizeChatForStorage(raw);
+        if (JSON.stringify(raw) !== JSON.stringify(clean)) {
+            fs.writeFileSync(file, JSON.stringify(clean, null, 2), 'utf-8');
+        }
+        res.json(clean);
     } catch (e) {
         res.status(500).json({ error: '读取聊天失败' });
     }
@@ -1916,7 +1945,7 @@ app.post('/api/qq/chats/:characterId', (req, res) => {
         const characterId = req.params.characterId;
         const data = {
             characterId,
-            messages: Array.isArray(req.body?.messages) ? req.body.messages : [],
+            messages: sanitizeChatMessagesForStorage(req.body?.messages),
             updated_at: Date.now()
         };
         fs.writeFileSync(path.join(CHATS_DIR, `${characterId}.json`), JSON.stringify(data, null, 2), 'utf-8');
@@ -2098,14 +2127,19 @@ app.post('/api/qq/reply', async (req, res) => {
         const userPersona = getCurrentUserPersona();
         const variables = buildPromptVariables({ characterId, userName: userPersona?.name || '', messages: list });
 
-        // 把 QQ 聊天记录转成 OpenAI 的 messages 格式
-        // 只给最近若干条里的图片附带真实图像（多模态），更早的老图退化成占位文字，避免每次请求都把全部历史图塞进去
-        const VISION_RECENT = 6;
+        // 把 QQ 聊天记录转成 OpenAI 的 messages 格式。
+        // 图片只允许本次请求里的最后一张真实 dataURL 进入多模态；其它历史图片只保留 [图片] 占位。
+        const latestImageIndex = (() => {
+            for (let i = list.length - 1; i >= 0; i--) {
+                const m = list[i];
+                if (m?.role !== 'assistant' && m?.type === 'image' && /^data:image\//.test(m.image || '')) return i;
+            }
+            return -1;
+        })();
         const history = list
             .map((m, idx) => {
                 const role = m.role === 'assistant' ? 'assistant' : 'user';
-                const isRecent = idx >= list.length - VISION_RECENT;
-                if (role === 'user' && m.type === 'image' && isRecent && /^data:image\//.test(m.image || '')) {
+                if (role === 'user' && m.type === 'image' && idx === latestImageIndex) {
                     return {
                         role,
                         content: [

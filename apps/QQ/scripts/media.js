@@ -125,7 +125,16 @@ async function onChatImagePicked(e) {
     e.target.value = '';
     if (!file || !file.type.startsWith('image/') || !state.activeChatId) return;
     const image = await fileToDataUrl(file);
-    await appendChatMessage({ role: 'user', type: 'image', text: '[图片]', image, created_at: Date.now() });
+    const clientImageId = `img_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    state.imageAttachments[clientImageId] = { dataUrl: image, consumed: false, characterId: state.activeChatId };
+    await appendChatMessage({
+        role: 'user',
+        type: 'image',
+        text: '[图片]',
+        image,
+        client_image_id: clientImageId,
+        created_at: Date.now()
+    });
 }
 
 function openPopModal(id) {
@@ -471,14 +480,22 @@ async function sendLinkCard() {
 }
 
 async function saveChat(chat) {
+    const persistMessages = (chat.messages || []).map(message => {
+        if (message?.type !== 'image') return message;
+        const clean = { ...message, text: message.text || '[图片]' };
+        delete clean.image;
+        delete clean.client_image_id;
+        return clean;
+    });
     const res = await fetch(`/api/qq/chats/${encodeURIComponent(chat.characterId)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: chat.messages || [] }),
+        body: JSON.stringify({ messages: persistMessages }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const saved = await res.json();
     const idx = state.chats.findIndex(item => item.characterId === saved.characterId);
-    if (idx >= 0) state.chats[idx] = saved;
-    else state.chats.unshift(saved);
+    const localChat = { ...saved, messages: chat.messages || [] };
+    if (idx >= 0) state.chats[idx] = localChat;
+    else state.chats.unshift(localChat);
 }

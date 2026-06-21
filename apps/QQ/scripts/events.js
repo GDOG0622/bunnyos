@@ -100,7 +100,16 @@
             renderActiveChat();
         }
     });
-    $('#btn-chat-image').addEventListener('click', () => $('#chat-image-input').click());
+    $('#btn-chat-image').addEventListener('click', () => {
+        const input = $('#chat-image-input');
+        if (!input) return;
+        try {
+            if (typeof input.showPicker === 'function') input.showPicker();
+            else input.click();
+        } catch {
+            input.click();
+        }
+    });
     $('#chat-image-input').addEventListener('change', onChatImagePicked);
     $$('.qq-pop-modal [data-pop-close]').forEach(btn => {
         btn.addEventListener('click', () => closePopModal(btn.dataset.popClose));

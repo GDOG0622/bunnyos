@@ -131,13 +131,14 @@ async function requestImpersonateReply() {
 async function requestAssistantReply(chat) {
     isGenerating = true;
     abortController = new AbortController();
+    const { messages: requestMessages, imageIds: sentImageIds } = prepareMessagesForReply(chat);
     setSendButtonAborting(true);
     setTyping(true);
     try {
         const res = await fetch('/api/qq/reply', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ characterId: chat.characterId, messages: chat.messages, chatType: 'private' }),
+            body: JSON.stringify({ characterId: chat.characterId, messages: requestMessages, chatType: 'private' }),
             signal: abortController.signal,
         });
         const data = await res.json().catch(() => ({}));
@@ -153,6 +154,7 @@ async function requestAssistantReply(chat) {
             notifyParent('fail', chat, '后台返回空');
             return;
         }
+        consumeImageAttachments(chat, sentImageIds);
         await appendAssistantReplySegments(chat, segments);
         notifyParent('success', chat, segments[0] || '');
     } catch (err) {
@@ -169,6 +171,54 @@ async function requestAssistantReply(chat) {
         setSendButtonAborting(false);
         setTyping(false);
     }
+}
+
+function prepareMessagesForReply(chat) {
+    const messages = Array.isArray(chat?.messages) ? chat.messages : [];
+    const imageCandidates = [];
+    for (const message of messages) {
+        if (message?.role !== 'user' || message.type !== 'image') continue;
+        const id = message.client_image_id;
+        const attachment = id ? state.imageAttachments?.[id] : null;
+        const dataUrl = attachment?.dataUrl || message.image || '';
+        if (!attachment?.consumed && /^data:image\//.test(dataUrl)) {
+            imageCandidates.push({ id, message, dataUrl });
+        }
+    }
+    const latest = imageCandidates[imageCandidates.length - 1] || null;
+    return {
+        imageIds: latest?.id ? [latest.id] : [],
+        messages: messages.map(message => {
+            if (message?.type !== 'image') return message;
+            const copy = { ...message, text: message.text || '[图片]' };
+            if (latest && message === latest.message) {
+                copy.image = latest.dataUrl;
+            } else {
+                delete copy.image;
+            }
+            return copy;
+        })
+    };
+}
+
+function consumeImageAttachments(chat, imageIds = []) {
+    if (!imageIds.length) return;
+    const ids = new Set(imageIds);
+    for (const id of ids) {
+        if (state.imageAttachments[id]) {
+            state.imageAttachments[id].consumed = true;
+            delete state.imageAttachments[id].dataUrl;
+        }
+    }
+    for (const message of chat.messages || []) {
+        if (message?.type === 'image' && ids.has(message.client_image_id)) {
+            delete message.image;
+            delete message.client_image_id;
+            message.text = message.text || '[图片]';
+        }
+    }
+    renderChats();
+    renderActiveChat();
 }
 
 // 通知父窗口（BunnyOS desktop）播提示音 + 决定是否弹横幅
