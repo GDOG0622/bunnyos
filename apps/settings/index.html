@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>设置 - BunnyOS</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+    <!-- 主菜单 -->
+    <div id="page-main" class="page active">
+        <div class="header"><span class="breadcrumb-title">设置</span></div>
+        <div class="section">
+            <div class="list">
+                <div class="item" data-action="nav" onclick="navTo('page-api')">
+                    <label>通用 API</label>
+                    <div class="flex-row"><i class="bi bi-chevron-right chevron"></i></div>
+                </div>
+                <div class="item" data-action="nav" onclick="navTo('page-beauty')">
+                    <label>美化</label>
+                    <div class="flex-row"><i class="bi bi-chevron-right chevron"></i></div>
+                </div>
+                <div class="item" data-action="nav" onclick="navTo('page-image')">
+                    <label>生图功能</label>
+                    <div class="flex-row"><i class="bi bi-chevron-right chevron"></i></div>
+                </div>
+                <div class="item" data-action="nav" onclick="navTo('page-voice')">
+                    <label>语音功能</label>
+                    <div class="flex-row"><i class="bi bi-chevron-right chevron"></i></div>
+                </div>
+                <div class="item" data-action="nav" onclick="navTo('page-storage')">
+                    <label>存储配置</label>
+                    <div class="flex-row"><i class="bi bi-chevron-right chevron"></i></div>
+                </div>
+                <div class="item" data-action="nav" onclick="navTo('page-about')">
+                    <label>关于系统</label>
+                    <div class="flex-row"><i class="bi bi-chevron-right chevron"></i></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 通用 API 页面 -->
+    <div id="page-api" class="page">
+        <div class="header">
+            <div class="back-btn" onclick="navBack()"><i class="bi bi-chevron-left"></i>返回</div>
+            <span class="breadcrumb-title">设置 / 通用 API</span>
+        </div>
+
+        <!-- API 配置库 -->
+        <div class="section">
+            <div class="section-title">API 配置库</div>
+            <div class="list">
+                <div class="item">
+                    <label>已保存配置</label>
+                    <div class="control-row">
+                        <select id="apiConfig_select" onchange="loadApiConfigToEditor(); saveData()">
+                            <option value="">--未选择--</option>
+                        </select>
+                        <div class="button-row">
+                            <button class="icon-btn" onclick="saveApiConfig()" title="保存 API">
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11l3 3v13H5z"/><path d="M8 4v6h8V4"/><path d="M8 20v-6h8v6"/></svg>
+                            </button>
+                            <button class="icon-btn" onclick="editApiConfig()" title="编辑 API">
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l11-11a2.8 2.8 0 0 0-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg>
+                            </button>
+                            <button class="icon-btn danger" onclick="deleteApiConfig()" title="删除 API 配置">
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 14h10l1-14"/><path d="M9 7V4h6v3"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- API 输入区域 -->
+        <div class="section">
+            <div class="section-title">API 输入区域</div>
+            <div class="list">
+                <div class="item">
+                    <label>接口 URL</label>
+                    <input type="text" id="apiConfig_url" placeholder="https://api.openai.com/v1" oninput="saveData()">
+                </div>
+                <div class="item">
+                    <label>API Key</label>
+                    <input type="password" id="apiConfig_key" placeholder="sk-..." oninput="saveData()">
+                </div>
+                <div class="item">
+                    <label>模型</label>
+                    <select id="apiConfig_model" onchange="saveData()">
+                        <option value="">请选择模型...</option>
+                    </select>
+                </div>
+                <div class="item">
+                    <label>连接状态</label>
+                    <div class="button-row">
+                        <button class="pill-btn" onclick="connectApiConfig()">连接</button>
+                        <button class="pill-btn" onclick="testApiConfig()">测试</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section-grid two-col">
+            <!-- 主 API 设置 -->
+            <div class="section">
+                <div class="section-title">主 API</div>
+                <div class="list">
+                <div class="item">
+                    <label>API 配置</label>
+                    <div class="control-row">
+                        <select id="mainApi_config" onchange="saveData()">
+                            <option value="">--未选择--</option>
+                        </select>
+                        <button class="pill-btn" onclick="applyApiConfig('mainApi')">应用</button>
+                    </div>
+                </div>
+                <div class="item">
+                    <label>上下文长度</label>
+                    <input type="number" id="mainApi_context" min="1" max="200000" value="8192" oninput="clampNumber(this, 1, 200000); saveData()">
+                </div>
+                <div class="item">
+                    <label>预填充</label>
+                    <label class="switch"><input type="checkbox" id="mainApi_prefill" onchange="saveData()"><span></span></label>
+                </div>
+                <div class="item">
+                    <label>流式传输</label>
+                    <label class="switch"><input type="checkbox" id="mainApi_stream" checked onchange="saveData()"><span></span></label>
+                </div>
+                <div class="item">
+                    <label>抗截断</label>
+                    <label class="switch"><input type="checkbox" id="mainApi_antiCutoffEnabled" onchange="saveData()"><span></span></label>
+                </div>
+                <div class="item">
+                    <label>续写次数（1-5）</label>
+                    <input type="number" id="mainApi_antiCutoffMaxRetries" min="1" max="5" value="2" oninput="clampNumber(this, 1, 5); saveData()">
+                </div>
+                <div class="setting-hint" style="padding:8px 12px;color:var(--text-sub);font-size:12px;line-height:1.5;">
+                    温度、TopP、频率/存在惩罚和最大回复长度交给 QQ 当前的「提示词预设」管理。<br>
+                    抗截断：开关启用后，模型回复被 max_tokens 截断（finish_reason=length）或全是思维链没正文时，自动追加 user 「续写」指令再请求，最多按设定次数。
+                </div>
+                </div>
+            </div>
+
+            <!-- 副 API 设置 -->
+            <div class="section">
+                <div class="section-title">副 API</div>
+                <div class="list">
+                <div class="item">
+                    <label>API 配置</label>
+                    <div class="control-row">
+                        <select id="subApi_config" onchange="saveData()">
+                            <option value="">--未选择--</option>
+                        </select>
+                        <button class="pill-btn" onclick="applyApiConfig('subApi')">应用</button>
+                    </div>
+                </div>
+                <div class="item">
+                    <label>上下文长度</label>
+                    <input type="number" id="subApi_context" min="1" max="200000" value="8192" oninput="clampNumber(this, 1, 200000); saveData()">
+                </div>
+                <div class="item">
+                    <label>最大回复长度</label>
+                    <input type="number" id="subApi_maxReply" min="1" max="200000" value="2048" oninput="clampNumber(this, 1, 200000); saveData()">
+                </div>
+                <div class="item">
+                    <label>温度</label>
+                    <div class="slider-wrap"><input type="range" id="subApi_temperature" min="0" max="2" step="0.01" value="0.7" oninput="syncRangeValue(this); saveData()"><span class="range-value" data-for="subApi_temperature">0.70</span></div>
+                </div>
+                <div class="item">
+                    <label>频率惩罚</label>
+                    <div class="slider-wrap"><input type="range" id="subApi_frequencyPenalty" min="-2" max="2" step="0.01" value="0" oninput="syncRangeValue(this); saveData()"><span class="range-value" data-for="subApi_frequencyPenalty">0.00</span></div>
+                </div>
+                <div class="item">
+                    <label>存在惩罚</label>
+                    <div class="slider-wrap"><input type="range" id="subApi_presencePenalty" min="-2" max="2" step="0.01" value="0" oninput="syncRangeValue(this); saveData()"><span class="range-value" data-for="subApi_presencePenalty">0.00</span></div>
+                </div>
+                <div class="item">
+                    <label>TopP</label>
+                    <div class="slider-wrap"><input type="range" id="subApi_topP" min="0" max="1" step="0.01" value="1" oninput="syncRangeValue(this); saveData()"><span class="range-value" data-for="subApi_topP">1.00</span></div>
+                </div>
+                <div class="item">
+                    <label>预填充</label>
+                    <label class="switch"><input type="checkbox" id="subApi_prefill" onchange="saveData()"><span></span></label>
+                </div>
+                <div class="item">
+                    <label>流式传输</label>
+                    <label class="switch"><input type="checkbox" id="subApi_stream" checked onchange="saveData()"><span></span></label>
+                </div>
+                </div>
+            </div>
+        </div>
+        <div style="height: 40px;"></div>
+    </div>
+
+    <!-- 语音功能 页面 -->
+    <div id="page-voice" class="page">
+        <div class="header">
+            <div class="back-btn" onclick="navBack()"><i class="bi bi-chevron-left"></i>返回</div>
+            <span class="breadcrumb-title">设置 / 语音功能</span>
+        </div>
+        <div class="section">
+            <div class="list" style="margin-bottom: 24px;">
+                <div class="item">
+                    <label>服务提供商</label>
+                    <select id="voice_vendor" onchange="toggleVendor('voice'); saveData()">
+                        <option value="silicon">硅基流动 (SiliconFlow)</option>
+                        <option value="minimax">Minimax</option>
+                        <option value="11labs">11labs</option>
+                    </select>
+                </div>
+            </div>
+
+            <div id="vendor_voice_silicon" class="vendor-block" style="display: none;">
+                <div class="section-footer" style="margin-bottom: 8px;">硅基流动 (SiliconFlow) 配置</div>
+                <div class="list" style="margin-bottom: 20px;">
+                    <div class="item">
+                        <label>接口 URL</label>
+                        <input type="text" id="voice_silicon_url" placeholder="https://api.siliconflow.cn/v1" oninput="saveData()">
+                    </div>
+                    <div class="item">
+                        <label>API Key</label>
+                        <input type="password" id="voice_silicon_key" placeholder="填写官方 Key" oninput="saveData()">
+                    </div>
+                    <div class="item">
+                        <button class="btn-text" onclick="fetchModels('voice_silicon')">拉取模型</button>
+                        <select id="voice_silicon_model" onchange="saveData()">
+                            <option value="">请选择模型...</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div id="vendor_voice_minimax" class="vendor-block" style="display: none;">
+                <div class="section-footer" style="margin-bottom: 8px;">Minimax 配置</div>
+                <div class="list" style="margin-bottom: 20px;">
+                    <div class="item">
+                        <label>Group ID</label>
+                        <input type="text" id="voice_minimax_group" placeholder="如果选填" oninput="saveData()">
+                    </div>
+                    <div class="item">
+                        <label>API Key</label>
+                        <input type="password" id="voice_minimax_key" placeholder="填写官方 Key" oninput="saveData()">
+                    </div>
+                    <div class="item">
+                        <button class="btn-text" onclick="fetchModels('voice_minimax')">拉取配置</button>
+                        <select id="voice_minimax_model" onchange="saveData()">
+                            <option value="">请选择模型...</option>
+                        </select>
+                    </div>
+                    <div class="item">
+                        <label>声音选择</label>
+                        <select id="voice_minimax_voice" onchange="saveData()">
+                            <option value="">等待拉取...</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div id="vendor_voice_11labs" class="vendor-block" style="display: none;">
+                <div class="section-footer" style="margin-bottom: 8px;">11labs 配置</div>
+                <div class="list" style="margin-bottom: 20px;">
+                    <div class="item">
+                        <label>xi-api-key</label>
+                        <input type="password" id="voice_11labs_key" placeholder="填写官方 Key" oninput="saveData()">
+                    </div>
+                    <div class="item">
+                        <button class="btn-text" onclick="fetchModels('voice_11labs')">拉取配置</button>
+                        <select id="voice_11labs_model" onchange="saveData()">
+                            <option value="">请选择模型...</option>
+                        </select>
+                    </div>
+                    <div class="item">
+                        <label>声音选择 (Voice ID)</label>
+                        <select id="voice_11labs_voice" onchange="saveData()">
+                            <option value="">等待拉取...</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div style="height: 40px;"></div>
+    </div>
+
+    <!-- 生图功能 页面 -->
+    <div id="page-image" class="page">
+        <div class="header">
+            <div class="back-btn" onclick="navBack()"><i class="bi bi-chevron-left"></i>返回</div>
+            <span class="breadcrumb-title">设置 / 生图功能</span>
+        </div>
+        <div class="section">
+            <div class="list" style="margin-bottom: 24px;">
+                <div class="item">
+                    <label>服务提供商</label>
+                    <select id="image_vendor" onchange="toggleVendor('image'); saveData()">
+                        <option value="nanobanana">Nanobanana</option>
+                        <option value="novelapi">NovelAPI (NovelAI)</option>
+                    </select>
+                </div>
+            </div>
+
+            <div id="vendor_image_nanobanana" class="vendor-block" style="display: none;">
+                <div class="section-footer" style="margin-bottom: 8px;">Nanobanana 配置</div>
+                <div class="list" style="margin-bottom: 20px;">
+                    <div class="item">
+                        <label>接口 URL</label>
+                        <input type="text" id="image_nanobanana_url" placeholder="https://api.nanobanana.com/v1" oninput="saveData()">
+                    </div>
+                    <div class="item">
+                        <label>API Key</label>
+                        <input type="password" id="image_nanobanana_key" placeholder="填写 Token/Key" oninput="saveData()">
+                    </div>
+                    <div class="item">
+                        <button class="btn-text" onclick="fetchModels('image_nanobanana')">拉取模型</button>
+                        <select id="image_nanobanana_model" onchange="saveData()">
+                            <option value="">请选择模型...</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div id="vendor_image_novelapi" class="vendor-block" style="display: none;">
+                <div class="section-footer" style="margin-bottom: 8px;">NovelAPI / NovelAI 配置</div>
+                <div class="list" style="margin-bottom: 20px;">
+                    <div class="item">
+                        <label>Base URL</label>
+                        <input type="text" id="image_novelapi_url" placeholder="https://api.novelapi.com" oninput="saveData()">
+                    </div>
+                    <div class="item">
+                        <label>API Key</label>
+                        <input type="password" id="image_novelapi_key" placeholder="填写鉴权 Token" oninput="saveData()">
+                    </div>
+                    <div class="item">
+                        <label>采样器 (Sampler)</label>
+                        <select id="image_novelapi_sampler" onchange="saveData()">
+                            <option value="k_euler_ancestral">k_euler_ancestral (推荐)</option>
+                            <option value="k_euler">k_euler</option>
+                            <option value="k_dpmpp_2s_ancestral">k_dpmpp_2s_ancestral</option>
+                            <option value="ddim">ddim</option>
+                        </select>
+                    </div>
+                    <div class="item">
+                        <label>步数 (Steps)</label>
+                        <input type="number" id="image_novelapi_steps" placeholder="例如: 28" value="28" style="text-align: right; background: transparent; border: none; font-size: 14px; color: var(--text-sub);" oninput="saveData()">
+                    </div>
+                    <div class="item">
+                        <label>重绘系数 (Scale)</label>
+                        <input type="number" step="0.1" id="image_novelapi_scale" placeholder="例如: 5.0" value="5.0" style="text-align: right; background: transparent; border: none; font-size: 14px; color: var(--text-sub);" oninput="saveData()">
+                    </div>
+                    <div class="item">
+                        <button class="btn-text" onclick="fetchModels('image_novelapi')">测试拉取模型</button>
+                        <select id="image_novelapi_model" onchange="saveData()">
+                            <option value="">手动输入或拉取...</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section-footer" style="margin-bottom: 8px;">生图提示词预设配置</div>
+            <div class="list">
+                <div class="item">
+                    <label>尺寸 (W x H)</label>
+                    <select id="image_resolution" onchange="saveData()">
+                        <option value="512x768">512 x 768 (肖像)</option>
+                        <option value="512x512">512 x 512 (方形)</option>
+                        <option value="768x512">768 x 512 (风景)</option>
+                        <option value="832x1216">832 x 1216 (大图)</option>
+                    </select>
+                </div>
+                <div class="item">
+                    <label>选择预设</label>
+                    <select id="prompt_preset_select" onchange="loadPreset()">
+                        <option value="">默认配置</option>
+                    </select>
+                </div>
+                <div class="item vertical">
+                    <label>正面提示词 (Positive Prompt)</label>
+                    <textarea id="prompt_positive" placeholder="在这里输入正面提示词..." oninput="saveData()"></textarea>
+                </div>
+                <div class="item vertical">
+                    <label>负面提示词 (Negative Prompt)</label>
+                    <textarea id="prompt_negative" placeholder="在这里输入负面提示词..." oninput="saveData()"></textarea>
+                </div>
+                <div class="item vertical">
+                    <div class="flex-row">
+                        <input type="text" id="preset_name" placeholder="预设保存名称 (例如: 动漫风格)" style="text-align: left;"/>
+                        <button class="btn-text" onclick="savePreset()" style="min-width: 80px;">保存为预设</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div style="height: 40px;"></div>
+    </div>
+
+    <!-- 占位页面：美化 -->
+    <div id="page-beauty" class="page">
+        <div class="header">
+            <div class="back-btn" onclick="navBack()"><i class="bi bi-chevron-left"></i>返回</div>
+            <span class="breadcrumb-title">设置 / 美化</span>
+        </div>
+
+        <div class="section">
+            <div class="section-title">显示</div>
+            <div class="list">
+                <div class="item">
+                    <label>暗色模式</label>
+                    <label class="switch"><input type="checkbox" id="beauty_darkMode" onchange="saveData()"><span></span></label>
+                </div>
+            </div>
+        </div>
+
+        <div class="section-grid two-col">
+            <div class="section">
+                <div class="section-title">竖屏壁纸</div>
+                <div class="list">
+                    <div class="item vertical">
+                        <label>选择图片</label>
+                        <button class="wallpaper-pick" id="beauty_portraitWallpaperPick" onclick="document.getElementById('beauty_portraitWallpaperFile').click()" title="选择竖屏壁纸">
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                        </button>
+                        <input type="file" id="beauty_portraitWallpaperFile" accept="image/*" style="display:none" onchange="handleWallpaperUpload('portrait', this)">
+                        <input type="hidden" id="beauty_portraitWallpaper" oninput="saveData()">
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">横屏壁纸</div>
+                <div class="list">
+                    <div class="item vertical">
+                        <label>选择图片</label>
+                        <button class="wallpaper-pick" id="beauty_landscapeWallpaperPick" onclick="document.getElementById('beauty_landscapeWallpaperFile').click()" title="选择横屏壁纸">
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                        </button>
+                        <input type="file" id="beauty_landscapeWallpaperFile" accept="image/*" style="display:none" onchange="handleWallpaperUpload('landscape', this)">
+                        <input type="hidden" id="beauty_landscapeWallpaper" oninput="saveData()">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">自定义图标</div>
+            <div class="list">
+                <div class="item">
+                    <label>图标配置</label>
+                    <div class="control-row">
+                        <select id="beauty_iconPreset" onchange="saveData()">
+                            <option value="">--未选择--</option>
+                        </select>
+                        <div class="button-row">
+                            <button class="pill-btn" onclick="saveBeautyPreset('icon')">保存</button>
+                            <button class="pill-btn" onclick="applyBeautyPreset('icon')">应用</button>
+                            <button class="pill-btn" onclick="renameBeautyPreset('icon')">重命名</button>
+                            <button class="icon-btn danger" onclick="deleteBeautyPreset('icon')" title="删除">
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 14h10l1-14"/><path d="M9 7V4h6v3"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="item vertical">
+                    <label>应用图标</label>
+                    <div class="app-icon-grid" id="beauty_iconGrid"></div>
+                    <input type="file" id="beauty_appIconUpload" accept="image/*" style="display:none" onchange="handleAppIconUpload(this)">
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">自定义字体</div>
+            <div class="list">
+                <div class="item">
+                    <label>字体配置</label>
+                    <div class="control-row">
+                        <select id="beauty_fontPreset" onchange="saveData()">
+                            <option value="">--未选择--</option>
+                        </select>
+                        <div class="button-row">
+                            <button class="pill-btn" onclick="saveBeautyPreset('font')">保存</button>
+                            <button class="pill-btn" onclick="applyBeautyPreset('font')">应用</button>
+                            <button class="pill-btn" onclick="renameBeautyPreset('font')">重命名</button>
+                            <button class="icon-btn danger" onclick="deleteBeautyPreset('font')" title="删除">
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 14h10l1-14"/><path d="M9 7V4h6v3"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="item vertical">
+                    <label>字体 URL</label>
+                    <input type="text" id="beauty_fontUrl" placeholder="https://example.com/font.woff2" oninput="saveData()">
+                    <div class="setting-hint">尽量使用 .woff2 字体；可用 <a href="https://www.jijie.ink/tool/font-convert" target="_blank" rel="noopener">字体格式转换工具</a> 转换字体格式。</div>
+                </div>
+                <div class="item">
+                    <label>字体大小</label>
+                    <input type="number" id="beauty_fontSize" min="1" placeholder="例如: 14" oninput="clampNumber(this, 1, 200); saveData()">
+                </div>
+                <div class="item">
+                    <label>字体粗细</label>
+                    <input type="number" id="beauty_fontWeight" min="1" max="1000" step="100" placeholder="例如: 400" oninput="clampNumber(this, 1, 1000); saveData()">
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">自定义提示音</div>
+            <div class="list">
+                <div class="item">
+                    <label>启用</label>
+                    <label class="switch"><input type="checkbox" id="notify_enabled" checked onchange="saveData()"><span></span></label>
+                </div>
+                <div class="item vertical">
+                    <label>成功提示音 URL（HTTP 200 + 有内容）</label>
+                    <input type="text" id="notify_successSoundUrl" placeholder="https://.../success.mp3" oninput="saveData()">
+                    <button class="btn-text" type="button" onclick="previewNotifySound('notify_successSoundUrl')">试听</button>
+                </div>
+                <div class="item vertical">
+                    <label>失败提示音 URL（空回 / 截断 / 报错）</label>
+                    <input type="text" id="notify_failSoundUrl" placeholder="https://.../fail.mp3" oninput="saveData()">
+                    <button class="btn-text" type="button" onclick="previewNotifySound('notify_failSoundUrl')">试听</button>
+                </div>
+                <div class="item">
+                    <label>浏览器推送订阅 <span id="push_status" style="color:var(--text-sub);font-size:12px;margin-left:8px;"></span></label>
+                    <div class="button-row">
+                        <button class="pill-btn" type="button" onclick="subscribePushHere()">订阅本设备</button>
+                        <button class="pill-btn" type="button" onclick="unsubscribePushHere()">取消订阅</button>
+                        <button class="pill-btn" type="button" onclick="testPush()">测试推送</button>
+                    </div>
+                </div>
+                <div class="setting-hint" style="padding:8px 12px;color:var(--text-sub);font-size:12px;line-height:1.5;">
+                    <b>BunnyOS 前台</b>（窗口可见）= 横幅 + 自定义铃声；<b>BunnyOS 后台 / 关标签 / 关浏览器</b> = OS 系统通知（由 Service Worker + Web Push 推送）。每台设备每个浏览器需要单独点「订阅本设备」一次。<br>
+                    需要 HTTPS（生产）或 localhost（本地测试）。user 主动点停止不算失败不响。
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">链接解析</div>
+            <div class="list">
+                <div class="item">
+                    <label>第三方解析</label>
+                    <label class="switch"><input type="checkbox" id="linkPreview_apiEnabled" onchange="saveData()"><span></span></label>
+                </div>
+                <div class="item">
+                    <label>接口 URL</label>
+                    <input type="text" id="linkPreview_apiUrl" placeholder="https://example.com/api/parse" oninput="saveData()">
+                </div>
+                <div class="item">
+                    <label>API Key</label>
+                    <input type="password" id="linkPreview_apiKey" placeholder="可选" oninput="saveData()">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 占位页面：存储 -->
+    <div id="page-storage" class="page">
+        <div class="header">
+            <div class="back-btn" onclick="navBack()"><i class="bi bi-chevron-left"></i>返回</div>
+            <span class="breadcrumb-title">设置 / 存储配置</span>
+        </div>
+        <div class="section" style="text-align: center; color: var(--text-sub); margin-top: 50px;">
+            <i class="bi bi-cloud-check" style="font-size: 48px;"></i>
+            <p>GitHub 同步与存储策略施工中...</p>
+        </div>
+    </div>
+
+    <!-- 占位页面：关于 -->
+    <div id="page-about" class="page">
+        <div class="header">
+            <div class="back-btn" onclick="navBack()"><i class="bi bi-chevron-left"></i>返回</div>
+            <span class="breadcrumb-title">设置 / 关于系统</span>
+        </div>
+        <div class="section" style="text-align: center; color: var(--text-sub); margin-top: 50px;">
+            <i class="bi bi-info-circle" style="font-size: 48px;"></i>
+            <h2 style="color: var(--text-main); margin-top: 16px;">BunnyOS</h2>
+            <p>版本 1.0.0 (Local Deploy)</p>
+        </div>
+    </div>
+    <script src="settings.js"></script>
+</body>
+</html>

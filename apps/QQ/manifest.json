@@ -1,0 +1,9 @@
+{
+  "id": "QQ",
+  "name": "QQ",
+  "entry": "index.html",
+  "icon": "bi-chat-dots-fill",
+  "bg": "bg-qq",
+  "iconColor": "#12B7F5",
+  "order": 20
+}

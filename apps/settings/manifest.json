@@ -1,0 +1,9 @@
+{
+  "id": "settings",
+  "name": "设置",
+  "entry": "index.html",
+  "icon": "bi-gear-fill",
+  "bg": "bg-settings",
+  "iconColor": "#8E8E93",
+  "order": 10
+}

@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>提示词管理 - BunnyOS</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<main class="pm-root">
+    <header class="pm-topbar">
+        <div class="pm-title" id="pm-title">预设</div>
+        <button class="pm-icon-btn" id="pm-add" type="button" aria-label="新增"><i class="bi bi-plus-lg"></i></button>
+    </header>
+
+    <section class="pm-page active" data-page="presets">
+        <div class="preset-toolbar">
+            <select id="preset-select" aria-label="选择预设"></select>
+            <div class="preset-actions" aria-label="预设操作">
+                <button class="pm-icon-btn" id="preset-new" type="button" title="新建空白预设"><i class="bi bi-file-earmark-plus"></i></button>
+                <button class="pm-icon-btn" id="preset-save" type="button" title="保存"><i class="bi bi-save"></i></button>
+                <button class="pm-icon-btn" id="preset-rename" type="button" title="编辑预设名"><i class="bi bi-pencil-square"></i></button>
+                <button class="pm-icon-btn" id="preset-groups" type="button" title="编辑条目分组"><i class="bi bi-collection"></i></button>
+                <button class="pm-icon-btn" id="preset-refresh-source" type="button" title="从 Liminal_online.json 重新读取"><i class="bi bi-arrow-clockwise"></i></button>
+                <button class="pm-icon-btn" id="preset-export" type="button" title="导出 JSON"><i class="bi bi-download"></i></button>
+                <button class="pm-icon-btn" id="preset-copy" type="button" title="复制预设"><i class="bi bi-files"></i></button>
+                <button class="pm-icon-btn danger" id="preset-delete" type="button" title="删除预设"><i class="bi bi-trash"></i></button>
+                <button class="pm-icon-btn" id="preset-preview" type="button" title="预览实际顺序"><i class="bi bi-eye"></i></button>
+            </div>
+        </div>
+        <div class="preset-meta" id="preset-meta"></div>
+        <details class="sampling-fold" id="sampling-fold">
+            <summary>采样参数</summary>
+            <div class="sampling-grid">
+                <label><span>温度</span><input type="number" id="sampling-temperature" min="0" max="2" step="0.01"></label>
+                <label><span>TopP</span><input type="number" id="sampling-top_p" min="0" max="1" step="0.01"></label>
+                <label><span>频率惩罚</span><input type="number" id="sampling-frequency_penalty" min="-2" max="2" step="0.01"></label>
+                <label><span>存在惩罚</span><input type="number" id="sampling-presence_penalty" min="-2" max="2" step="0.01"></label>
+                <label><span>最大回复长度</span><input type="number" id="sampling-openai_max_tokens" min="1" max="200000" step="1"></label>
+            </div>
+        </details>
+        <div class="preset-filter">
+            <input type="search" id="preset-search" placeholder="搜索条目">
+            <div class="segmented" id="preset-filter">
+                <button class="active" type="button" data-filter="all">全部</button>
+                <button type="button" data-filter="enabled">启用</button>
+                <button type="button" data-filter="disabled">关闭</button>
+                <button type="button" data-filter="marker">动态</button>
+            </div>
+        </div>
+        <div class="preset-list" id="st-prompt-list"></div>
+    </section>
+
+    <section class="pm-page" data-page="worldbooks">
+        <div class="wb-global">
+            <div class="wb-global-label">全局世界书</div>
+            <div class="wb-chips" id="wb-global-chips"></div>
+        </div>
+        <div class="wb-toolbar">
+            <select id="wb-book-select" aria-label="选择世界书"></select>
+            <div class="wb-actions">
+                <button class="pm-icon-btn" id="wb-import" type="button" title="导入酒馆世界书 JSON"><i class="bi bi-upload"></i></button>
+                <button class="pm-icon-btn" id="wb-book-new" type="button" title="新建空白世界书"><i class="bi bi-plus-lg"></i></button>
+                <button class="pm-icon-btn" id="wb-book-rename" type="button" title="重命名"><i class="bi bi-pencil-square"></i></button>
+                <button class="pm-icon-btn danger" id="wb-book-delete" type="button" title="删除整本"><i class="bi bi-trash"></i></button>
+            </div>
+        </div>
+        <div class="wb-meta" id="wb-meta"></div>
+        <div class="pm-list" id="worldbook-list"></div>
+        <input type="file" id="wb-import-file" accept="application/json,.json" hidden>
+        <div class="wb-chip-menu hidden" id="wb-chip-menu"></div>
+    </section>
+
+    <section class="pm-page" data-page="variables">
+        <div class="pm-manual">
+            <div class="pm-section-title">实时变量</div>
+            <div class="pm-variable-grid" id="variable-grid"></div>
+            <div class="pm-section-title">模板预览</div>
+            <textarea id="variable-template">当前现实时间：{{now}}（{{timezone}}）
+今天是{{date}}，{{weekday}}，现在{{time}}。
+当前角色：{{char}} / <char>
+当前用户：{{user}} / <user></textarea>
+            <pre class="pm-preview" id="variable-preview"></pre>
+        </div>
+    </section>
+
+    <nav class="pm-tabbar">
+        <button class="pm-tab active" data-page="presets" type="button"><i class="bi bi-journal-text"></i><span>预设</span></button>
+        <button class="pm-tab" data-page="worldbooks" type="button"><i class="bi bi-book"></i><span>世界书</span></button>
+        <button class="pm-tab" data-page="variables" type="button"><i class="bi bi-braces"></i><span>变量手册</span></button>
+    </nav>
+</main>
+
+<div class="pm-modal hidden" id="editor-modal">
+    <div class="pm-modal-backdrop" data-close></div>
+    <div class="pm-modal-card">
+        <div class="pm-modal-header">
+            <button type="button" data-close aria-label="关闭"><i class="bi bi-x-lg"></i></button>
+            <div id="editor-title">编辑条目</div>
+            <button type="button" id="editor-delete">删除</button>
+        </div>
+        <div class="pm-modal-body">
+            <label class="field-label">名称</label>
+            <input type="text" id="editor-name" placeholder="名称">
+            <div class="field-grid">
+                <label><span>Role</span><select id="editor-role"><option value="system">system</option><option value="user">user</option><option value="assistant">assistant</option></select></label>
+                <label><span>Identifier</span><input type="text" id="editor-identifier"></label>
+            </div>
+            <div class="switch-row">
+                <label><input type="checkbox" id="editor-enabled"> 启用</label>
+                <label><input type="checkbox" id="editor-marker"> 动态 marker</label>
+                <label><input type="checkbox" id="editor-system-prompt"> system_prompt</label>
+            </div>
+            <details class="marker-details hidden" id="editor-marker-details">
+                <summary>动态插入预览</summary>
+                <pre id="editor-marker-preview"></pre>
+            </details>
+            <label class="field-label">内容</label>
+            <textarea id="editor-content" placeholder="内容"></textarea>
+            <details class="advanced-fields">
+                <summary>高级字段</summary>
+                <div class="field-grid">
+                    <label><span>injection_position</span><input type="number" id="editor-injection-position"></label>
+                    <label><span>injection_depth</span><input type="number" id="editor-injection-depth"></label>
+                    <label><span>injection_order</span><input type="number" id="editor-injection-order"></label>
+                    <label><span>injection_trigger</span><input type="text" id="editor-injection-trigger"></label>
+                </div>
+                <label class="check-line"><input type="checkbox" id="editor-forbid-overrides"> forbid_overrides</label>
+            </details>
+        </div>
+    </div>
+</div>
+
+<div class="pm-modal hidden" id="preview-modal">
+    <div class="pm-modal-backdrop" data-preview-close></div>
+    <div class="pm-modal-card">
+        <div class="pm-modal-header">
+            <button type="button" data-preview-close aria-label="关闭"><i class="bi bi-x-lg"></i></button>
+            <div id="preview-title">装配预览</div>
+            <button type="button" id="preview-copy">复制</button>
+        </div>
+        <div class="pm-modal-body">
+            <div class="preview-marker-toggles hidden" id="preview-marker-toggles"></div>
+            <pre class="assembly-preview" id="assembly-preview"></pre>
+        </div>
+    </div>
+</div>
+
+<div class="pm-dialog hidden" id="pm-dialog" role="dialog" aria-modal="true">
+    <div class="pm-dialog-backdrop"></div>
+    <div class="pm-dialog-card">
+        <div class="pm-dialog-title" id="pm-dialog-title">确认</div>
+        <div class="pm-dialog-message" id="pm-dialog-message"></div>
+        <input type="text" id="pm-dialog-input" class="hidden">
+        <div class="pm-dialog-actions">
+            <button type="button" id="pm-dialog-cancel">取消</button>
+            <button type="button" id="pm-dialog-ok">确定</button>
+        </div>
+    </div>
+</div>
+
+<div class="pm-toast hidden" id="pm-toast"></div>
+
+<script src="prompt-manager.js"></script>
+</body>
+</html>

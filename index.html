@@ -1,0 +1,97 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>BunnyOS</title>
+    <link rel="icon" href="/app-icon">
+    <link rel="apple-touch-icon" href="/app-icon">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <meta name="theme-color" content="#000000">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="assets/styles/base.css">
+    <link rel="stylesheet" href="assets/styles/desktop.css">
+    <link rel="stylesheet" href="assets/styles/window.css">
+</head>
+<body>
+
+    <div class="top-bar mobile-status">
+        <span id="mobile-time">10:00</span>
+        <div class="right">
+            <i class="bi bi-reception-4"></i>
+            <i class="bi bi-wifi"></i>
+            <i class="bi bi-battery-full"></i>
+        </div>
+    </div>
+
+    <div class="top-bar mac-menu">
+        <div class="left">
+            <span><i class="bi bi-apple"></i></span>
+            <span style="font-weight: bold;">BunnyOS</span>
+            <span>文件</span><span>编辑</span><span>视图</span><span>窗口</span>
+        </div>
+        <div class="right">
+            <i class="bi bi-wifi"></i>
+            <i class="bi bi-battery-full"></i>
+            <span id="mac-time">周一 10:00</span>
+        </div>
+    </div>
+
+    <div class="mobile-desktop" id="mobile-desktop"></div>
+
+    <div class="app-window" id="app-window">
+        <div class="window-header">
+            <div class="mac-controls">
+                <div class="mac-btn mac-close" onclick="closeApp()"></div>
+                <div class="mac-btn mac-min" onclick="closeApp()"></div>
+                <div class="mac-btn mac-max" onclick="toggleFullscreen()"></div>
+            </div>
+            <div class="mobile-back" onclick="handleMobileBack()">
+                <i class="bi bi-chevron-left"></i><span>返回</span>
+            </div>
+            <div class="window-title" id="window-title">Loading...</div>
+        </div>
+        
+        <div class="window-content" id="window-content">
+            <div class="placeholder-ui" id="placeholder-ui">
+                <i id="app-content-icon" class="bi" style="font-size: 64px; margin-bottom: 20px;"></i>
+                <h2 style="color: #333; margin-bottom: 12px; font-weight: 500;">
+                    正在运行 <span id="app-name-display" style="color: #007AFF;">应用</span>
+                </h2>
+                <p style="color: #666; font-size: 14px; line-height: 1.6; max-width: 400px; padding: 0 20px;">
+                    这里是预留的「无界面」交互区域。<br>
+                    它已经适配好了宽屏和窄屏的响应式环境，你可以将大模型对话气泡流直接丢到这个区块里。
+                </p>
+            </div>
+            <div id="iframe-pool" style="width: 100%; height: 100%; position: relative; display: none;"></div>
+        </div>
+        <div class="resize-handle resize-n" data-resize="n"></div>
+        <div class="resize-handle resize-s" data-resize="s"></div>
+        <div class="resize-handle resize-e" data-resize="e"></div>
+        <div class="resize-handle resize-w" data-resize="w"></div>
+        <div class="resize-handle resize-ne" data-resize="ne"></div>
+        <div class="resize-handle resize-nw" data-resize="nw"></div>
+        <div class="resize-handle resize-se" data-resize="se"></div>
+        <div class="resize-handle resize-sw" data-resize="sw"></div>
+        <div class="control-hotzone" id="control-hotzone"></div>
+    </div>
+    <!-- 后台通知横幅 + 提示音 -->
+    <div class="bunnyos-banner hidden" id="bunnyos-banner" role="alert">
+        <div class="bunnyos-banner-avatar"><img id="bunnyos-banner-avatar-img" alt=""></div>
+        <div class="bunnyos-banner-main">
+            <div class="bunnyos-banner-title" id="bunnyos-banner-title"></div>
+            <div class="bunnyos-banner-text" id="bunnyos-banner-text"></div>
+        </div>
+        <button type="button" class="bunnyos-banner-close" id="bunnyos-banner-close" aria-label="关闭"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <audio id="bunnyos-notify-audio" preload="auto" playsinline webkit-playsinline></audio>
+
+    <script src="assets/scripts/theme.js"></script>
+    <script src="assets/scripts/apps.js"></script>
+    <script src="assets/scripts/window-manager.js"></script>
+    <script src="assets/scripts/notify.js"></script>
+    <script src="assets/scripts/clock.js"></script>
+</body>
+</html>
+
+

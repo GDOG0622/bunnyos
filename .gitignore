@@ -1,0 +1,16 @@
+node_modules/
+
+# 用户数据：本地优先，git 不带走
+data/
+settings.json
+
+# 用户上传资源
+assets/backgrounds/
+assets/app-icons/
+
+# 日志
+*.log
+
+# 系统
+.DS_Store
+Thumbs.db

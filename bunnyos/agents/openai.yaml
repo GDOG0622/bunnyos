@@ -1,0 +1,5 @@
+interface:
+  display_name: "BunnyOS"
+  short_description: "Maintain BunnyOS architecture and UI."
+  default_prompt: "Use $bunnyos to inspect BunnyOS architecture, settings, storage, window behavior, and backend routes before making changes."
+

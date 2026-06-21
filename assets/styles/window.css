@@ -1,0 +1,276 @@
+/* ================= App 窗口 ================= */
+.app-window {
+    position: fixed;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--window-bg);
+    backdrop-filter: var(--blur);
+    -webkit-backdrop-filter: var(--blur);
+    transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    opacity: 0;
+    pointer-events: none;
+}
+
+.app-window.active {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.window-header {
+    height: 32px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    background: rgba(255, 255, 255, 0.4);
+    border-bottom: 1px solid rgba(0,0,0,0.05);
+    cursor: default;
+}
+
+.window-title {
+    display: none;
+}
+
+/* App 请求隐藏外层头栏（如 QQ 进入对话后自带头栏） */
+.app-window.chrome-hidden > .window-header {
+    display: none;
+}
+
+.control-hotzone {
+    display: none;
+}
+
+.mobile-back {
+    position: absolute;
+    left: 12px;
+    font-size: 16px;
+    color: #007AFF;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.mobile-back span {
+    font-size: 14px;
+}
+
+.mac-controls {
+    position: absolute;
+    left: 14px;
+    display: none;
+    gap: 8px;
+}
+
+.mac-btn {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+.mac-close { background: #FF5F56; }
+.mac-min { background: #FFBD2E; }
+.mac-max { background: #27C93F; }
+
+.window-content {
+    flex: 1;
+    overflow-y: auto;
+    position: relative;
+}
+
+.resize-handle {
+    display: none;
+}
+
+.app-window.resizing {
+    transition: none !important;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+
+.app-window.resizing #app-iframe {
+    pointer-events: none;
+}
+
+.placeholder-ui {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+}
+
+@media (max-width: 768px) {
+    .app-window {
+        top: 100% !important;
+        left: 0 !important;
+        width: 100vw !important;
+        max-width: none !important;
+        height: 100dvh !important;
+        max-height: none !important;
+        min-width: 0 !important;
+        min-height: 0 !important;
+        transform: none !important;
+        border-radius: 0;
+        border: none;
+    }
+
+    .app-window.active {
+        top: 0 !important;
+    }
+
+    .window-header {
+        position: relative;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 10;
+        background: rgba(248, 248, 248, 0.78);
+    }
+
+    .window-title {
+        display: block;
+        max-width: 56%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 14px;
+        font-weight: 600;
+    }
+
+    .window-content {
+        height: calc(100% - 32px);
+    }
+}
+
+@media (min-width: 769px) {
+    .mobile-back { display: none; }
+    .mac-controls { display: flex; }
+
+    .app-window {
+        top: 50%;
+        left: 50%;
+        width: 75vw;
+        max-width: 1000px;
+        height: 75vh;
+        max-height: 800px;
+        min-width: 360px;
+        min-height: 320px;
+        transform: translate(-50%, -45%) scale(0.95);
+        border-radius: 14px;
+        border: 1px solid var(--glass-border);
+        box-shadow: 0 24px 60px rgba(0,0,0,0.25);
+    }
+
+    .app-window.active {
+        transform: translate(-50%, -50%) scale(1);
+    }
+
+    .app-window.portrait-default {
+        width: min(620px, calc(100vw - 120px));
+        max-width: 620px;
+        height: min(86vh, 860px);
+        max-height: 860px;
+        min-width: 430px;
+        min-height: 620px;
+        transform: translate(-50%, -50%) scale(1);
+    }
+
+    .app-window.fullscreen {
+        top: 0 !important;
+        left: 0 !important;
+        width: 100vw !important;
+        max-width: none;
+        height: 100dvh !important;
+        max-height: none;
+        min-width: 0;
+        min-height: 0;
+        transform: none !important;
+        border-radius: 0;
+        border: none;
+        box-shadow: none;
+    }
+
+    .app-window.fullscreen .window-header {
+        position: relative;
+        z-index: 20;
+        opacity: 0;
+        height: 0;
+        overflow: hidden;
+        border-bottom: 0;
+        transition: opacity 0.16s ease, height 0.16s ease;
+        background: rgba(246, 246, 246, 0.78);
+    }
+
+    .app-window.fullscreen.show-controls .window-header,
+    .app-window.fullscreen .window-header:hover {
+        height: 32px;
+        opacity: 1;
+        border-bottom: 1px solid rgba(0,0,0,0.05);
+    }
+
+    .app-window.fullscreen .control-hotzone {
+        display: block;
+        position: absolute;
+        top: 6px;
+        left: 10px;
+        width: 70px;
+        height: 20px;
+        z-index: 19;
+    }
+
+    .app-window.fullscreen.show-controls .control-hotzone {
+        height: 20px;
+    }
+
+    .resize-handle {
+        position: absolute;
+        z-index: 5;
+        display: block;
+    }
+
+    .resize-n { top: -4px; left: 10px; right: 10px; height: 8px; cursor: ns-resize; }
+    .resize-s { bottom: -4px; left: 10px; right: 10px; height: 8px; cursor: ns-resize; }
+    .resize-e { right: -4px; top: 10px; bottom: 10px; width: 8px; cursor: ew-resize; }
+    .resize-w { left: -4px; top: 10px; bottom: 10px; width: 8px; cursor: ew-resize; }
+    .resize-ne { top: -4px; right: -4px; width: 14px; height: 14px; cursor: nesw-resize; }
+    .resize-nw { top: -4px; left: -4px; width: 14px; height: 14px; cursor: nwse-resize; }
+    .resize-se { bottom: -4px; right: -4px; width: 14px; height: 14px; cursor: nwse-resize; }
+    .resize-sw { bottom: -4px; left: -4px; width: 14px; height: 14px; cursor: nesw-resize; }
+
+    .app-window.fullscreen .resize-handle {
+        display: none;
+    }
+
+    .app-window[data-app-layout="mobile"]:not(.fullscreen) .window-header {
+        height: 32px;
+        opacity: 1;
+        overflow: visible;
+        border-bottom: 1px solid rgba(0,0,0,0.05);
+        background: rgba(248, 248, 248, 0.86);
+    }
+
+    .app-window[data-app-layout="mobile"]:not(.fullscreen) .mac-controls {
+        display: none;
+    }
+
+    .app-window[data-app-layout="mobile"]:not(.fullscreen) .mobile-back {
+        display: flex;
+    }
+
+    .app-window[data-app-layout="mobile"]:not(.fullscreen) .window-title {
+        display: block;
+        max-width: 56%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 14px;
+        font-weight: 600;
+    }
+}
+﻿

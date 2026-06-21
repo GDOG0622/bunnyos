@@ -1,0 +1,26 @@
+/* ================= 基础重置与系统变量 ================= */
+:root {
+    --glass-bg: rgba(255, 255, 255, 0.25);
+    --glass-border: rgba(255, 255, 255, 0.3);
+    --window-bg: rgba(250, 250, 250, 0.75);
+    --blur: blur(25px);
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    font-family: var(--bunny-font-family, -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", Roboto, Helvetica, sans-serif);
+}
+
+body {
+    width: 100vw;
+    height: 100dvh;
+    overflow: hidden;
+    background: url('https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=2564&auto=format&fit=crop') center/cover no-repeat;
+    background-color: #a8edea;
+    color: #333;
+}
+﻿

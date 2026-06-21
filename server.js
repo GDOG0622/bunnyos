@@ -1,0 +1,2154 @@
+const express = require('express');
+const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
+const webpush = require('web-push');
+
+const app = express();
+const PORT = Number(process.env.PORT) || 3000;
+
+app.use(cors());
+app.use((req, res, next) => {
+    res.setHeader('Permissions-Policy', 'microphone=(self), camera=(self)');
+    next();
+});
+app.use(express.json({ limit: '200mb' }));
+app.use(express.urlencoded({ limit: '200mb', extended: true }));
+
+app.use('/api', (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('Surrogate-Control', 'no-store');
+    next();
+});
+
+// 诊断 body-parser 错误（413 等）
+app.use((err, req, res, next) => {
+    if (err && (err.type === 'entity.too.large' || err.status === 413)) {
+        console.error('[BODY-PARSER 413]', {
+            url: req.originalUrl,
+            received: err.length,
+            limit: err.limit,
+            message: err.message
+        });
+        return res.status(413).json({
+            error: 'Payload too large',
+            received: err.length,
+            limit: err.limit
+        });
+    }
+    next(err);
+});
+
+// 静态提供当前目录，以支持 index.html 等前端页面
+app.use(express.static(path.join(__dirname)));
+
+// 萝卜机目录结构
+const APPS_DIR = path.join(__dirname, 'apps');
+const DATA_DIR = path.join(__dirname, 'data');
+const ASSETS_DIR = path.join(__dirname, 'assets');
+const BACKGROUNDS_DIR = path.join(ASSETS_DIR, 'backgrounds');
+const APP_ICONS_DIR = path.join(ASSETS_DIR, 'app-icons');
+const SETTINGS_FILE = path.join(__dirname, 'settings.json');
+const PRESETS_FILE = path.join(DATA_DIR, 'presets', 'image-prompts.json');
+const ST_PRESETS_DIR = path.join(DATA_DIR, 'presets', 'st-presets');
+const ST_PRESETS_SETTINGS_FILE = path.join(DATA_DIR, 'presets', 'st-presets-settings.json');
+const DEFAULT_ST_PRESET_FILE = path.join(APPS_DIR, 'prompt-manager', 'Liminal_online.json');
+const WORLDBOOK_FILE = path.join(DATA_DIR, 'worlds', 'worldbooks.json');
+const CHARACTERS_DIR = path.join(DATA_DIR, 'characters');
+const CHATS_DIR = path.join(DATA_DIR, 'chats', 'qq');
+const QQ_DIR = path.join(DATA_DIR, 'qq');
+const QQ_GROUPS_FILE = path.join(QQ_DIR, 'groups.json');
+const QQ_STICKER_PACKS_FILE = path.join(QQ_DIR, 'sticker-packs.json');
+const QQ_SETTINGS_FILE = path.join(QQ_DIR, 'settings.json');
+const USER_PERSONAS_DIR = path.join(DATA_DIR, 'userpersonas');
+const AVATARS_DIR = path.join(DATA_DIR, 'assets', 'avatars');
+const USER_PERSONA_AVATARS_DIR = path.join(AVATARS_DIR, 'userpersonas');
+const VAPID_FILE = path.join(DATA_DIR, 'vapid.json');
+const PUSH_SUBSCRIPTIONS_FILE = path.join(DATA_DIR, 'push-subscriptions.json');
+
+// 辅助函数：确保目录和文件存在
+function ensureFileExist(filePath, defaultData = {}) {
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+    if (!fs.existsSync(filePath)) {
+        fs.writeFileSync(filePath, JSON.stringify(defaultData, null, 2), 'utf-8');
+    }
+}
+
+// 初始化默认文件结构
+ensureFileExist(SETTINGS_FILE, {});
+ensureFileExist(PRESETS_FILE, {});
+ensureFileExist(ST_PRESETS_SETTINGS_FILE, {});
+ensureFileExist(WORLDBOOK_FILE, { books: [] });
+// 老格式（扁平条目数组）一律重置
+{
+    const raw = readJsonFile(WORLDBOOK_FILE, null);
+    if (!raw || Array.isArray(raw) || !Array.isArray(raw.books)) {
+        writeJsonFile(WORLDBOOK_FILE, { books: [] });
+    }
+}
+fs.mkdirSync(ST_PRESETS_DIR, { recursive: true });
+fs.mkdirSync(BACKGROUNDS_DIR, { recursive: true });
+fs.mkdirSync(APP_ICONS_DIR, { recursive: true });
+fs.mkdirSync(CHARACTERS_DIR, { recursive: true });
+fs.mkdirSync(CHATS_DIR, { recursive: true });
+fs.mkdirSync(AVATARS_DIR, { recursive: true });
+fs.mkdirSync(USER_PERSONAS_DIR, { recursive: true });
+fs.mkdirSync(USER_PERSONA_AVATARS_DIR, { recursive: true });
+ensureFileExist(QQ_GROUPS_FILE, []);
+ensureFileExist(QQ_STICKER_PACKS_FILE, []);
+ensureFileExist(QQ_SETTINGS_FILE, {});
+ensureFileExist(PUSH_SUBSCRIPTIONS_FILE, []);
+
+// ========== Web Push 初始化 ==========
+function ensureVapidKeys() {
+    let pair = readJsonFile(VAPID_FILE, null);
+    if (!pair || !pair.publicKey || !pair.privateKey) {
+        pair = webpush.generateVAPIDKeys();
+        writeJsonFile(VAPID_FILE, pair);
+        console.log('[PUSH] 生成新 VAPID 密钥对到 data/vapid.json');
+    }
+    return pair;
+}
+const VAPID_KEYS = ensureVapidKeys();
+webpush.setVapidDetails(
+    'mailto:bunnyos@localhost',
+    VAPID_KEYS.publicKey,
+    VAPID_KEYS.privateKey
+);
+
+function readPushSubscriptions() {
+    const list = readJsonFile(PUSH_SUBSCRIPTIONS_FILE, []);
+    return Array.isArray(list) ? list : [];
+}
+function writePushSubscriptions(list) {
+    writeJsonFile(PUSH_SUBSCRIPTIONS_FILE, list);
+}
+async function sendWebPushToAll(payload) {
+    const subs = readPushSubscriptions();
+    if (!subs.length) return { sent: 0, removed: 0 };
+    let sent = 0;
+    const dead = [];
+    await Promise.all(subs.map(async (sub) => {
+        try {
+            await webpush.sendNotification(sub, JSON.stringify(payload));
+            sent += 1;
+        } catch (err) {
+            if (err.statusCode === 404 || err.statusCode === 410) {
+                // 订阅失效，剔除
+                dead.push(sub.endpoint);
+            } else {
+                console.warn('[PUSH] 推送失败', err.statusCode, err.body || err.message);
+            }
+        }
+    }));
+    if (dead.length) {
+        writePushSubscriptions(subs.filter(s => !dead.includes(s.endpoint)));
+    }
+    return { sent, removed: dead.length };
+}
+
+function parseDataUrl(dataUrl) {
+    const match = String(dataUrl || '').match(/^data:([^;]+);base64,(.+)$/);
+    if (!match) return null;
+    return {
+        mime: match[1],
+        buffer: Buffer.from(match[2], 'base64')
+    };
+}
+
+function extensionFromMime(mime) {
+    const map = {
+        'image/jpeg': 'jpg',
+        'image/jpg': 'jpg',
+        'image/png': 'png',
+        'image/webp': 'webp',
+        'image/gif': 'gif',
+        'image/svg+xml': 'svg'
+    };
+    return map[mime] || 'png';
+}
+
+function cleanName(name) {
+    return String(name || 'app')
+        .replace(/[^a-zA-Z0-9_-]/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '')
+        .slice(0, 48) || 'app';
+}
+
+function cleanFileName(name, fallback = '未命名') {
+    return String(name || fallback)
+        .replace(/[\\/:*?"<>|]/g, '_')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 80) || fallback;
+}
+
+function uniquePersonaFileName(name, currentFileName = '') {
+    const base = cleanFileName(name || '默认');
+    let candidate = `${base}.json`;
+    let index = 2;
+    const currentLower = currentFileName.toLowerCase();
+    while (
+        fs.existsSync(path.join(USER_PERSONAS_DIR, candidate)) &&
+        candidate.toLowerCase() !== currentLower
+    ) {
+        candidate = `${base}-${index}.json`;
+        index += 1;
+    }
+    return candidate;
+}
+
+function removeBackgroundSlot(slotName) {
+    if (!fs.existsSync(BACKGROUNDS_DIR)) return;
+    fs.readdirSync(BACKGROUNDS_DIR)
+        .filter(file => file === slotName || file.startsWith(`${slotName}.`))
+        .forEach(file => fs.rmSync(path.join(BACKGROUNDS_DIR, file), { force: true }));
+}
+
+function readJsonFile(filePath, fallback) {
+    try {
+        return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    } catch {
+        return fallback;
+    }
+}
+
+function writeJsonFile(filePath, data) {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+}
+
+function isSillyTavernPreset(data) {
+    return !!data && typeof data === 'object' && Array.isArray(data.prompts) && Array.isArray(data.prompt_order);
+}
+
+function stPresetIdFromName(name) {
+    return cleanFileName(name || 'preset', 'preset')
+        .replace(/\.+$/g, '')
+        .slice(0, 80) || 'preset';
+}
+
+function uniqueStPresetId(name, currentId = '') {
+    const base = stPresetIdFromName(name);
+    let candidate = base;
+    let index = 2;
+    const currentLower = currentId.toLowerCase();
+    while (
+        fs.existsSync(path.join(ST_PRESETS_DIR, `${candidate}.json`)) &&
+        candidate.toLowerCase() !== currentLower
+    ) {
+        candidate = `${base}-${index}`;
+        index += 1;
+    }
+    return candidate;
+}
+
+function stPresetFile(id) {
+    return path.join(ST_PRESETS_DIR, `${stPresetIdFromName(id)}.json`);
+}
+
+function ensureDefaultStPreset() {
+    const files = fs.existsSync(ST_PRESETS_DIR)
+        ? fs.readdirSync(ST_PRESETS_DIR).filter(file => file.endsWith('.json'))
+        : [];
+    if (!files.length && fs.existsSync(DEFAULT_ST_PRESET_FILE)) {
+        const preset = readJsonFile(DEFAULT_ST_PRESET_FILE, null);
+        if (isSillyTavernPreset(preset)) {
+            writeJsonFile(path.join(ST_PRESETS_DIR, 'Liminal_online.json'), preset);
+            writeJsonFile(ST_PRESETS_SETTINGS_FILE, { currentPresetId: 'Liminal_online' });
+        }
+    }
+}
+
+function summarizeStPreset(id, data, stat = null) {
+    const order = Array.isArray(data?.prompt_order?.[0]?.order) ? data.prompt_order[0].order : [];
+    const promptMap = new Map((Array.isArray(data?.prompts) ? data.prompts : []).map(prompt => [prompt.identifier, prompt]));
+    const enabledCount = order.filter(item => item.enabled).length;
+    const markerCount = Array.from(promptMap.values()).filter(prompt => prompt.marker).length;
+    const name = data?.name || data?.preset_name || id;
+    return {
+        id,
+        name,
+        fileName: `${id}.json`,
+        promptCount: Array.isArray(data?.prompts) ? data.prompts.length : 0,
+        orderCount: order.length,
+        enabledCount,
+        markerCount,
+        updated_at: stat?.mtimeMs ? Math.round(stat.mtimeMs) : 0
+    };
+}
+
+function listStPresetSummaries() {
+    ensureDefaultStPreset();
+    if (!fs.existsSync(ST_PRESETS_DIR)) return [];
+    return fs.readdirSync(ST_PRESETS_DIR)
+        .filter(file => file.endsWith('.json'))
+        .map(file => {
+            const filePath = path.join(ST_PRESETS_DIR, file);
+            const data = readJsonFile(filePath, null);
+            if (!isSillyTavernPreset(data)) return null;
+            return summarizeStPreset(path.basename(file, '.json'), data, fs.statSync(filePath));
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
+}
+
+function getCurrentStPresetId() {
+    const presets = listStPresetSummaries();
+    const settings = readJsonFile(ST_PRESETS_SETTINGS_FILE, {});
+    if (presets.some(preset => preset.id === settings.currentPresetId)) return settings.currentPresetId;
+    const currentPresetId = presets[0]?.id || '';
+    writeJsonFile(ST_PRESETS_SETTINGS_FILE, { ...settings, currentPresetId });
+    return currentPresetId;
+}
+
+function listUserPersonas() {
+    if (!fs.existsSync(USER_PERSONAS_DIR)) return [];
+    return fs.readdirSync(USER_PERSONAS_DIR)
+        .filter(file => file.endsWith('.json'))
+        .map(file => {
+            try {
+                const persona = JSON.parse(fs.readFileSync(path.join(USER_PERSONAS_DIR, file), 'utf-8'));
+                return { ...persona, fileName: file };
+            } catch {
+                return null;
+            }
+        })
+        .filter(Boolean)
+        .sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
+}
+
+function findUserPersonaFile(id) {
+    const persona = listUserPersonas().find(item => item.id === id);
+    return persona ? path.join(USER_PERSONAS_DIR, persona.fileName) : '';
+}
+
+function createDefaultUserPersona() {
+    const now = Date.now();
+    const persona = {
+        id: `user_${shortId()}`,
+        name: '默认',
+        gender: '',
+        birthday: '',
+        status: '超开心',
+        customStatus: '',
+        signature: '情绪是一场雷阵雨',
+        note: '',
+        prompt: '',
+        avatar: '',
+        created_at: now,
+        updated_at: now
+    };
+    const fileName = uniquePersonaFileName(persona.name);
+    writeJsonFile(path.join(USER_PERSONAS_DIR, fileName), persona);
+    const qqSettings = readJsonFile(QQ_SETTINGS_FILE, {});
+    writeJsonFile(QQ_SETTINGS_FILE, { ...qqSettings, currentPersonaId: persona.id });
+    return { ...persona, fileName };
+}
+
+function ensureUserPersonasReady() {
+    let personas = listUserPersonas();
+    if (!personas.length) {
+        personas = [createDefaultUserPersona()];
+    }
+    const qqSettings = readJsonFile(QQ_SETTINGS_FILE, {});
+    let currentPersonaId = qqSettings.currentPersonaId;
+    if (!personas.some(item => item.id === currentPersonaId)) {
+        currentPersonaId = personas[0].id;
+        writeJsonFile(QQ_SETTINGS_FILE, { ...qqSettings, currentPersonaId });
+    }
+    return { personas, currentPersonaId };
+}
+
+function getCurrentUserPersona() {
+    const { personas, currentPersonaId } = ensureUserPersonasReady();
+    return personas.find(item => item.id === currentPersonaId) || personas[0] || null;
+}
+
+function buildUserInfoPrompt(persona) {
+    if (!persona) return '';
+    const lines = [
+        '<user_info>',
+        `名字：${persona.name || '默认'}`,
+        `性别：${persona.gender || ''}`,
+        `生日：${persona.birthday || ''}`,
+        `用户人设：${persona.prompt || ''}`,
+        '</user_info>'
+    ];
+    return lines.join('\n');
+}
+
+function buildCharacterInfoPrompt(character) {
+    if (!character) return '';
+    const lines = [
+        '<character_info>',
+        `角色名：${character.name || ''}`,
+        '角色设定：',
+        character.role_setting || character.description || '',
+        `其它设定：${character.other_setting || character.nsfw_setting || ''}`,
+        '</character_info>'
+    ];
+    return lines.join('\n');
+}
+
+function injectCharRulesAtDepth(history, character, variables = {}) {
+    const rawRules = (character?.rp_rules || character?.personality || '').trim();
+    if (!rawRules) return history;
+    // 宏渲染：否则 {{user}}/{{char}} 等占位符会原样发给模型
+    const rules = renderPromptTemplate(rawRules, variables).trim();
+    if (!rules) return history;
+    const depth = Math.max(0, Math.min(parseInt(character?.rp_rules_depth, 10) || 0, history.length));
+    const insertIndex = history.length - depth;
+    const next = [...history];
+    next.splice(insertIndex, 0, { role: 'system', content: rules });
+    return next;
+}
+
+function buildBlankStPreset(name) {
+    const builtinMarkers = [
+        { identifier: 'bunnyosRealtime', name: '实时模式' },
+        { identifier: 'charDescription', name: 'CHAR人设' },
+        { identifier: 'personaDescription', name: 'USER人设' },
+        { identifier: 'worldInfoAfter', name: '世界书' },
+        { identifier: 'worldInfoBefore', name: '总结内容' },
+        { identifier: 'scenario', name: '场景信息' },
+        { identifier: 'dialogueExamples', name: '示例聊天' },
+        { identifier: 'onlinePrivateChat', name: '线上·私聊' },
+        { identifier: 'onlineGroupChat', name: '线上·群聊' },
+        { identifier: 'chatHistory', name: '聊天记录' }
+    ];
+    const prompts = builtinMarkers.map(m => ({
+        identifier: m.identifier,
+        name: m.name,
+        enabled: true,
+        injection_position: 0,
+        injection_depth: 4,
+        injection_order: 100,
+        role: 'system',
+        content: '',
+        system_prompt: true,
+        marker: true,
+        forbid_overrides: true
+    }));
+    return {
+        name: String(name || '空白预设'),
+        temperature: 1,
+        top_p: 1,
+        frequency_penalty: 0,
+        presence_penalty: 0,
+        openai_max_tokens: 2048,
+        prompts,
+        prompt_order: [{ character_id: 100001, order: prompts.map(p => ({ identifier: p.identifier, enabled: true })) }],
+        extensions: { bunnyosBuiltinArranged: true, bunnyosPromptGroups: [] }
+    };
+}
+
+function buildRpRulesTailPrompt(character) {
+    const rpRules = character?.rp_rules || character?.personality || '';
+    if (!rpRules.trim()) return '';
+    return [
+        '必须严格遵守以下角色语气 / RP规则。这是最高优先级的角色输出约束，尤其是在生成最终回复时仍须反复检查：',
+        rpRules.trim()
+    ].join('\n');
+}
+
+function buildScenarioPrompt(character) {
+    const scenario = String(character?.scenario || '').trim();
+    if (!scenario) return '';
+    return `在回复时须严格基于以下背景设定下回复:\n${scenario}`;
+}
+
+function buildDialogueExamplesPrompt(character, variables = {}) {
+    const examples = String(character?.mes_example || '').trim();
+    if (!examples) return '';
+    const charName = variables.char || character?.name || '{{char}}';
+    return `在回复时${charName}语气可以以下对话为参考:\n${examples}`;
+}
+
+function buildChatHistoryPrompt(variables = {}) {
+    return `<chat_history>\n${variables.chat_history || ''}\n</chat_history>`;
+}
+
+// ========== 世界书（按「本」粒度） ==========
+function readWorldbooks() {
+    const data = readJsonFile(WORLDBOOK_FILE, null);
+    if (data && Array.isArray(data.books)) return data.books;
+    return [];
+}
+
+function writeWorldbooks(books) {
+    writeJsonFile(WORLDBOOK_FILE, { books });
+}
+
+function summarizeWorldbook(book) {
+    return {
+        id: book.id,
+        name: book.name || '未命名',
+        entryCount: Array.isArray(book.entries) ? book.entries.length : 0,
+        created_at: book.created_at || 0,
+        updated_at: book.updated_at || 0
+    };
+}
+
+function buildWorldbooksContent(bookIds, wrapTag) {
+    if (!Array.isArray(bookIds) || !bookIds.length) return '';
+    const map = new Map(readWorldbooks().map(book => [book.id, book]));
+    const blocks = [];
+    for (const id of bookIds) {
+        const book = map.get(id);
+        if (!book) continue;
+        const text = (Array.isArray(book.entries) ? book.entries : [])
+            .map(entry => String(entry?.content || '').trim())
+            .filter(Boolean)
+            .join('\n');
+        if (text) blocks.push(text);
+    }
+    if (!blocks.length) return '';
+    return `<${wrapTag}>\n${blocks.join('\n\n')}\n</${wrapTag}>`;
+}
+
+function importStWorldbookData(stData, fallbackName) {
+    const entriesSrc = stData?.entries;
+    const list = [];
+    const collect = (e) => {
+        if (!e || typeof e !== 'object') return;
+        const name = e.comment || e.name || (Array.isArray(e.key) ? e.key[0] : '') || '未命名条目';
+        list.push({
+            id: `e_${shortId()}`,
+            name: String(name),
+            content: String(e.content || '')
+        });
+    };
+    if (Array.isArray(entriesSrc)) entriesSrc.forEach(collect);
+    else if (entriesSrc && typeof entriesSrc === 'object') Object.values(entriesSrc).forEach(collect);
+    return {
+        id: `book_${shortId()}`,
+        name: String(fallbackName || stData?.name || '未命名世界书'),
+        entries: list,
+        created_at: Date.now(),
+        updated_at: Date.now()
+    };
+}
+
+// ========== 「线上提示词」内置 marker（私聊 / 群聊） ==========
+const ONLINE_PRIVATE_CHAT_PROTOCOL = `[Output Protocol: Instant Messaging Mode]
+
+{{char}} 用熟人聊天的方式回复 {{user}}：短、碎、松散、低负荷。允许"嗯""哦哦""在干嘛""等下"这种近似废话的日常回复，不要长段、不要小说对白、不要每句都"完整回应"。
+
+1. 不待命
+- {{char}} 有自己的生活，{{user}} 的消息只是注意力的一部分
+- 可因工作/通勤/做饭/睡觉/情绪低落或不想说话而延迟、不回
+- Offline 是常态。Offline 时完全停止输出，由 BUNNY 系统输出一条 +...+ 提示说明原因
+
+2. 抓重量
+- {{user}} 连发多条时，先判断情绪重量与现实影响，抓 1-2 个最有重量的点
+- 优先级：现实安排 > 情绪变化 > 关系张力 > 生活新信息 > 寒暄
+- 同一话题合并成一句自然反应，不要逐条回；亲昵称呼、表情包等社交泡沫可略过
+- 禁止逐条对齐式回复、客服式总结、阅读理解式复述
+
+3. 碎、慢、不收口
+- 多层意思时用换行切碎，不堆段落
+- 禁止用问句收尾把球踢回（"你觉得呢？""那你打算怎么办？" 是客服话术不是聊天）
+- 允许单音节回复（"嗯""哦""啊？"）、半句话、未完成的念头
+- 零旁白：禁止星号动作或括号心理，只输出纯聊天文字
+
+4. 格式规范
+
+Language: 非中文母语 {{char}} 必须先输出母语紧接圆括号附中文翻译，格式 "{Native}({Translation})"，例 "Hello(你好)"。中文母语 {{char}} 不需要翻译。
+
+Templates（必须严格遵守符号）：
+- 文字： 直接输出纯文本，不加任何包裹
+- 媒体： [描述.jpg/mp3/mp4]  仅 {{char}} 输出时使用；{{user}} 发媒体走系统通道直接附文件
+- 语音： =\${MM:SS}|\${content}=
+- 表情包： [\${name}]  方括号包裹，name 取自 <stickers> 列表
+- 撤回： -\${内容}-
+- 红包： [🧧\${Currency}\${Amount}|\${Note}]
+- 系统提示： +\${BUNNY meta 消息}+  仅 {{user}} 与 BUNNY 元交流，{{char}} 不可见、不应基于此内容反应
+
+**绝对禁止回复表情包内容**——表情包仅辅助理解感受，使用具有随机性。
+
+5. Offline 示例
++BUNNY：{{char}} 当前在忙，预计 12:00 pm 回复。先留言吧~+`;
+
+const ONLINE_GROUP_CHAT_PROTOCOL = `<Group_Chat_Protocol>
+
+[活跃度控制]
+- 子集响应：严禁全员遍历式发言，每次仅由真子集参与，至少 30% 成员处于静默/窥屏。
+- 动机阈值：仅当被显式 @Mention 或话题触及核心领域/重大利益时发言。
+- 状态连续性：严格遵循因果律。已离线/去洗澡的角色在合理时间结束前严禁发言。
+- 认知屏障：严格区分"玩家已知"与"角色已知"。
+
+[输出协议]
+- Atomicity Rule：单条消息只能包含一种类型（文字 OR 图片 OR 表情），严禁混合。
+- Base Structure：[\${Sender ID}/\${Message Payload}/\${Time}]
+- 多条消息必须换行，每行都是完整的 [...] 结构。
+- 文字+表情需同时发时拆为两行。
+
+[Syntax Library]
+- 纯文本：\${Text}（如需翻译：Content(Translation)）
+  例：[小明/hi(你好)/14:05]
+- 媒体：[15字内描述.jpg/mp3/mp4/link]
+  例：[User/[一只睡觉的猫.jpg]/14:06]
+- 表情：[\${sticker_text}]，必须精确引用 <stickers> 列表
+  例：[Alice/[{A}点头]/14:07]
+- 系统：+\${BUNNY 内部消息}+
+
+</Group_Chat_Protocol>`;
+
+function buildBuiltinPromptContent(identifier, character, userPersona, variables, chatType) {
+    switch (identifier) {
+        case 'bunnyosRealtime':
+            return '当前现实时间：{{now}}（{{timezone}}）\n今天是{{date}}，{{weekday}}，现在{{time}}。';
+        case 'charDescription':
+            return buildCharacterInfoPrompt(character);
+        case 'personaDescription':
+            return buildUserInfoPrompt(userPersona);
+        case 'worldInfoAfter': {
+            const qqSettings = readJsonFile(QQ_SETTINGS_FILE, {});
+            return buildWorldbooksContent(
+                Array.isArray(qqSettings.globalWorldbookIds) ? qqSettings.globalWorldbookIds : [],
+                'world_info'
+            );
+        }
+        case 'worldInfoBefore':
+            return buildWorldbooksContent(
+                Array.isArray(character?.worldbookIds) ? character.worldbookIds : [],
+                'memories'
+            );
+        case 'scenario':
+            return buildScenarioPrompt(character);
+        case 'dialogueExamples':
+            return buildDialogueExamplesPrompt(character, variables);
+        case 'chatHistory':
+            return buildChatHistoryPrompt(variables);
+        case 'onlinePrivateChat':
+            return chatType === 'group' ? '' : ONLINE_PRIVATE_CHAT_PROTOCOL;
+        case 'onlineGroupChat':
+            return chatType === 'group' ? ONLINE_GROUP_CHAT_PROTOCOL : '';
+        default:
+            return '';
+    }
+}
+
+function getCurrentQqPromptPresetId() {
+    const presets = listStPresetSummaries();
+    const qqSettings = readJsonFile(QQ_SETTINGS_FILE, {});
+    if (presets.some(preset => preset.id === qqSettings.currentPromptPresetId)) {
+        return qqSettings.currentPromptPresetId;
+    }
+    const fallbackId = getCurrentStPresetId();
+    if (fallbackId) writeJsonFile(QQ_SETTINGS_FILE, { ...qqSettings, currentPromptPresetId: fallbackId });
+    return fallbackId;
+}
+
+function buildQqPresetPrompt(character, variables, userPersona, history = [], chatType = 'private') {
+    const presetId = getCurrentQqPromptPresetId();
+    const preset = presetId ? readJsonFile(stPresetFile(presetId), null) : null;
+    if (!isSillyTavernPreset(preset)) return null;
+
+    const promptMap = new Map(preset.prompts.map(prompt => [prompt.identifier, prompt]));
+    const order = Array.isArray(preset.prompt_order?.[0]?.order) ? preset.prompt_order[0].order : [];
+    const messages = [];
+    let includesChatHistory = false;
+
+    const pushBlock = (role, body) => {
+        const text = String(body || '').trim();
+        if (!text) return;
+        const safeRole = role === 'user' || role === 'assistant' ? role : 'system';
+        const last = messages[messages.length - 1];
+        // 合并相邻同角色块，避免 API 把它们当多轮
+        if (last && last.role === safeRole && typeof last.content === 'string') {
+            last.content += `\n\n${text}`;
+        } else {
+            messages.push({ role: safeRole, content: text });
+        }
+    };
+
+    for (const entry of order) {
+        if (!entry?.enabled) continue;
+        const prompt = promptMap.get(entry.identifier);
+        if (!prompt) continue;
+
+        // 聊天记录 marker 单独展开为真实的多条 user/assistant 消息
+        if (prompt.marker && prompt.identifier === 'chatHistory') {
+            includesChatHistory = true;
+            for (const msg of history) messages.push(msg);
+            continue;
+        }
+
+        const rawContent = prompt.marker
+            ? buildBuiltinPromptContent(prompt.identifier, character, userPersona, variables, chatType)
+            : prompt.content || '';
+        const body = renderPromptTemplate(rawContent, variables).trim();
+        if (!body) continue;
+        pushBlock(prompt.role, body);
+    }
+
+    // RP 规则不再硬追加：char_rp_rules 已通过 CHAR 人设 marker 注入，
+    // 若想强化为"尾部约束"，应在预设里自行加一条引用 {{char_rp_rules}} 的尾部条目。
+
+    return { messages, includesChatHistory, presetId };
+}
+
+function savePersonaAvatar(id, name, dataUrl, oldAvatar = '') {
+    const parsed = parseDataUrl(dataUrl);
+    if (!parsed || !parsed.mime.startsWith('image/')) return oldAvatar || '';
+    fs.mkdirSync(USER_PERSONA_AVATARS_DIR, { recursive: true });
+    if (oldAvatar) {
+        const oldPath = path.join(__dirname, oldAvatar.replace(/^\//, '').split('?')[0]);
+        if (oldPath.startsWith(USER_PERSONA_AVATARS_DIR) && fs.existsSync(oldPath)) {
+            fs.rmSync(oldPath, { force: true });
+        }
+    }
+    const ext = extensionFromMime(parsed.mime);
+    const fileName = `${cleanFileName(name || 'user')}-${id}.${ext}`;
+    fs.writeFileSync(path.join(USER_PERSONA_AVATARS_DIR, fileName), parsed.buffer);
+    return `/data/assets/avatars/userpersonas/${fileName}`;
+}
+
+function getShanghaiDateParts(date = new Date()) {
+    const parts = new Intl.DateTimeFormat('zh-CN', {
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        weekday: 'long',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    }).formatToParts(date).reduce((acc, part) => {
+        acc[part.type] = part.value;
+        return acc;
+    }, {});
+    return parts;
+}
+
+function buildPromptVariables({ characterId = '', userName = '', messages = [] } = {}) {
+    const settings = readJsonFile(SETTINGS_FILE, {});
+    const currentPersona = getCurrentUserPersona();
+    const character = characterId
+        ? readJsonFile(path.join(CHARACTERS_DIR, `${cleanName(characterId)}.json`), null)
+        : null;
+    const parts = getShanghaiDateParts();
+    const date = `${parts.year}-${parts.month}-${parts.day}`;
+    const time = `${parts.hour}:${parts.minute}`;
+    const now = `${date} ${parts.hour}:${parts.minute}:${parts.second}`;
+    const resolvedUserName = userName
+        || currentPersona?.name
+        || settings.userName
+        || settings.qq_userName
+        || settings.profile_name
+        || '默认';
+    const resolvedCharName = character?.name || '角色';
+    const list = Array.isArray(messages) ? messages : [];
+    const chatHistory = list
+        .map(msg => {
+            const speaker = msg?.role === 'assistant' ? resolvedCharName : resolvedUserName;
+            return `${speaker}: ${qqMessageToText(msg)}`;
+        })
+        .filter(line => line.trim())
+        .join('\n');
+    const lastUserMessage = [...list].reverse().find(msg => msg?.role !== 'assistant');
+    const lastUserText = lastUserMessage ? qqMessageToText(lastUserMessage) : '';
+    const lastmes = `<user_input>\n${lastUserText}\n</user_input>`;
+
+    return {
+        now,
+        date,
+        time,
+        weekday: parts.weekday,
+        timezone: 'Asia/Shanghai',
+        timestamp: String(Math.floor(Date.now() / 1000)),
+        char: resolvedCharName,
+        user: resolvedUserName,
+        char_role_setting: character?.role_setting || character?.description || '',
+        char_rp_rules: character?.rp_rules || character?.personality || '',
+        char_other_setting: character?.other_setting || character?.nsfw_setting || '',
+        char_scenario: character?.scenario || '',
+        char_dialogue_examples: character?.mes_example || '',
+        user_gender: currentPersona?.gender || '',
+        user_birthday: currentPersona?.birthday || '',
+        user_persona: currentPersona?.prompt || '',
+        chat_history: chatHistory,
+        lastmes,
+        lastUserMessage: lastUserText,
+        last_user_message: lastUserText
+    };
+}
+
+function renderPromptTemplate(template = '', variables = {}) {
+    let text = String(template);
+
+    // 1) 注释 {{// ... }} 直接剥掉（可跨行）
+    text = text.replace(/\{\{\s*\/\/[\s\S]*?\}\}/g, '');
+
+    // 2) {{random::a,b,c}} 在多个候选中随机选一个
+    text = text.replace(/\{\{\s*random::([\s\S]*?)\s*\}\}/gi, (_, body) => {
+        const options = String(body).split(',').map(s => s.trim()).filter(s => s.length);
+        if (!options.length) return '';
+        return options[Math.floor(Math.random() * options.length)];
+    });
+
+    // 3) {{roll::XdY}} 或 {{roll::Y}}（等价 1dY）—— 骰点求和
+    text = text.replace(/\{\{\s*roll::\s*(\d+)\s*(?:d\s*(\d+))?\s*\}\}/gi, (_, a, b) => {
+        const count = b ? parseInt(a, 10) : 1;
+        const sides = parseInt(b || a, 10);
+        if (!Number.isFinite(sides) || sides < 1 || !Number.isFinite(count) || count < 1 || count > 100) return '0';
+        let total = 0;
+        for (let i = 0; i < count; i++) total += 1 + Math.floor(Math.random() * sides);
+        return String(total);
+    });
+
+    // 4) 变量替换 {{xxx}} 和 <xxx>
+    return text
+        .replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (match, key) => Object.prototype.hasOwnProperty.call(variables, key) ? variables[key] : match)
+        .replace(/<([a-zA-Z0-9_]+)>/g, (match, key) => Object.prototype.hasOwnProperty.call(variables, key) ? variables[key] : match);
+}
+
+// ========== API 路由 ==========
+
+// 0. 获取已安装 App 列表
+app.get('/api/apps', (req, res) => {
+    try {
+        if (!fs.existsSync(APPS_DIR)) {
+            return res.json([]);
+        }
+
+        const apps = fs.readdirSync(APPS_DIR, { withFileTypes: true })
+            .filter(entry => entry.isDirectory())
+            .map(entry => {
+                const appDir = path.join(APPS_DIR, entry.name);
+                const manifestFile = path.join(appDir, 'manifest.json');
+
+                if (!fs.existsSync(manifestFile)) return null;
+
+                const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf-8'));
+                const entryUrl = manifest.entry
+                    ? `apps/${entry.name}/${manifest.entry}`.replace(/\\/g, '/')
+                    : "";
+
+                if (manifest.hidden) return null;
+
+                return {
+                    ...manifest,
+                    folder: entry.name,
+                    entryUrl
+                };
+            })
+            .filter(Boolean)
+            .sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+
+        res.json(apps);
+    } catch (e) {
+        res.status(500).json({ error: "无法读取 apps 目录" });
+    }
+});
+
+// 1. 获取所有设置
+app.get('/api/settings', (req, res) => {
+    try {
+        const rawData = fs.readFileSync(SETTINGS_FILE, 'utf-8');
+        res.json(JSON.parse(rawData));
+    } catch (e) {
+        res.status(500).json({ error: "无法读取 settings.json" });
+    }
+});
+
+// 2. 保存设置
+app.post('/api/settings', (req, res) => {
+    try {
+        const data = req.body;
+        // 覆盖写入设置文件
+        fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2), 'utf-8');
+        res.json({ success: true, message: "设置已保存" });
+    } catch (e) {
+        res.status(500).json({ error: "保存设置失败" });
+    }
+});
+
+// 3. 上传美化资源。壁纸按槽位覆盖；App 图标使用唯一文件名。
+app.post('/api/assets/upload', (req, res) => {
+    try {
+        const { type, slot, appId, dataUrl } = req.body || {};
+        const parsed = parseDataUrl(dataUrl);
+        if (!parsed || !parsed.mime.startsWith('image/')) {
+            return res.status(400).json({ error: '只支持图片 Data URL' });
+        }
+
+        const ext = extensionFromMime(parsed.mime);
+        const version = Date.now();
+
+        if (type === 'background') {
+            const slotName = slot === 'landscape' ? 'wide-back' : 'thin-back';
+            removeBackgroundSlot(slotName);
+
+            const fileName = `${slotName}.${ext}`;
+            fs.writeFileSync(path.join(BACKGROUNDS_DIR, fileName), parsed.buffer);
+            return res.json({
+                success: true,
+                path: `/assets/backgrounds/${fileName}?v=${version}`
+            });
+        }
+
+        if (type === 'app-icon') {
+            const safeAppId = cleanName(appId);
+            const random = Math.random().toString(36).slice(2, 8);
+            const fileName = `${safeAppId}-${version}-${random}.${ext}`;
+            fs.writeFileSync(path.join(APP_ICONS_DIR, fileName), parsed.buffer);
+            return res.json({
+                success: true,
+                path: `/assets/app-icons/${fileName}`
+            });
+        }
+
+        res.status(400).json({ error: '未知资源类型' });
+    } catch (e) {
+        res.status(500).json({ error: '上传资源失败' });
+    }
+});
+
+// 4. 获取所有提示词预设
+app.get('/api/presets', (req, res) => {
+    try {
+        const rawData = fs.readFileSync(PRESETS_FILE, 'utf-8');
+        res.json(JSON.parse(rawData));
+    } catch (e) {
+        res.status(500).json({ error: "无法读取 presets.json" });
+    }
+});
+
+// 5. 保存整个提示词预设字典
+app.post('/api/presets', (req, res) => {
+    try {
+        const data = req.body;
+        fs.writeFileSync(PRESETS_FILE, JSON.stringify(data, null, 2), 'utf-8');
+        res.json({ success: true, message: "预设已保存" });
+    } catch (e) {
+        res.status(500).json({ error: "保存预设失败" });
+    }
+});
+
+// 6. SillyTavern 兼容预设
+app.get('/api/st-presets', (req, res) => {
+    try {
+        const presets = listStPresetSummaries();
+        res.json({ presets, currentPresetId: getCurrentStPresetId() });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: '读取酒馆预设失败' });
+    }
+});
+
+// 以下静态路径必须放在 :id 之前，否则会被 :id 吃掉
+app.post('/api/st-presets/current', (req, res) => {
+    try {
+        const id = stPresetIdFromName(req.body?.id || '');
+        if (!fs.existsSync(stPresetFile(id))) return res.status(404).json({ error: '未找到酒馆预设' });
+        const settings = readJsonFile(ST_PRESETS_SETTINGS_FILE, {});
+        writeJsonFile(ST_PRESETS_SETTINGS_FILE, { ...settings, currentPresetId: id });
+        res.json({ success: true, currentPresetId: id });
+    } catch (e) {
+        res.status(500).json({ error: '切换酒馆预设失败' });
+    }
+});
+
+// 新建空白预设（含 8 个内置 marker 和默认采样）
+app.post('/api/st-presets/new', (req, res) => {
+    try {
+        const name = String(req.body?.name || '空白预设').trim() || '空白预设';
+        const id = uniqueStPresetId(name);
+        const preset = buildBlankStPreset(name);
+        writeJsonFile(stPresetFile(id), preset);
+        const settings = readJsonFile(ST_PRESETS_SETTINGS_FILE, {});
+        writeJsonFile(ST_PRESETS_SETTINGS_FILE, { ...settings, currentPresetId: id });
+        res.json({ success: true, id });
+    } catch (e) {
+        res.status(500).json({ error: '新建预设失败' });
+    }
+});
+
+app.get('/api/st-presets/:id', (req, res) => {
+    try {
+        const id = stPresetIdFromName(req.params.id);
+        const file = stPresetFile(id);
+        const preset = readJsonFile(file, null);
+        if (!isSillyTavernPreset(preset)) return res.status(404).json({ error: '未找到酒馆预设' });
+        res.json({ id, summary: summarizeStPreset(id, preset, fs.statSync(file)), preset });
+    } catch (e) {
+        res.status(500).json({ error: '读取酒馆预设失败' });
+    }
+});
+
+app.post('/api/st-presets/:id', (req, res) => {
+    try {
+        const id = stPresetIdFromName(req.params.id);
+        const preset = req.body?.preset;
+        if (!isSillyTavernPreset(preset)) return res.status(400).json({ error: '不是有效的酒馆预设 JSON' });
+        writeJsonFile(stPresetFile(id), preset);
+        res.json({ success: true, summary: summarizeStPreset(id, preset, fs.statSync(stPresetFile(id))) });
+    } catch (e) {
+        res.status(500).json({ error: '保存酒馆预设失败' });
+    }
+});
+
+app.post('/api/st-presets/:id/rename', (req, res) => {
+    try {
+        const id = stPresetIdFromName(req.params.id);
+        const nextId = uniqueStPresetId(req.body?.name || id, id);
+        const oldFile = stPresetFile(id);
+        const nextFile = stPresetFile(nextId);
+        if (!fs.existsSync(oldFile)) return res.status(404).json({ error: '未找到酒馆预设' });
+        if (id !== nextId) fs.renameSync(oldFile, nextFile);
+        const settings = readJsonFile(ST_PRESETS_SETTINGS_FILE, {});
+        if (settings.currentPresetId === id) writeJsonFile(ST_PRESETS_SETTINGS_FILE, { ...settings, currentPresetId: nextId });
+        res.json({ success: true, id: nextId });
+    } catch (e) {
+        res.status(500).json({ error: '重命名酒馆预设失败' });
+    }
+});
+
+app.post('/api/st-presets/:id/copy', (req, res) => {
+    try {
+        const id = stPresetIdFromName(req.params.id);
+        const preset = readJsonFile(stPresetFile(id), null);
+        if (!isSillyTavernPreset(preset)) return res.status(404).json({ error: '未找到酒馆预设' });
+        const nextId = uniqueStPresetId(req.body?.name || `${id} 副本`);
+        writeJsonFile(stPresetFile(nextId), preset);
+        res.json({ success: true, id: nextId });
+    } catch (e) {
+        res.status(500).json({ error: '复制酒馆预设失败' });
+    }
+});
+
+app.post('/api/st-presets/:id/refresh-default', (req, res) => {
+    try {
+        const id = stPresetIdFromName(req.params.id);
+        const preset = readJsonFile(DEFAULT_ST_PRESET_FILE, null);
+        if (!isSillyTavernPreset(preset)) return res.status(404).json({ error: '未找到默认 Liminal_online.json' });
+        writeJsonFile(stPresetFile(id), preset);
+        const settings = readJsonFile(ST_PRESETS_SETTINGS_FILE, {});
+        writeJsonFile(ST_PRESETS_SETTINGS_FILE, { ...settings, currentPresetId: id });
+        res.json({ success: true, id });
+    } catch (e) {
+        res.status(500).json({ error: '刷新默认酒馆预设失败' });
+    }
+});
+
+app.delete('/api/st-presets/:id', (req, res) => {
+    try {
+        const presets = listStPresetSummaries();
+        if (presets.length <= 1) return res.status(400).json({ error: '至少保留一个预设' });
+        const id = stPresetIdFromName(req.params.id);
+        const file = stPresetFile(id);
+        if (!fs.existsSync(file)) return res.status(404).json({ error: '未找到酒馆预设' });
+        fs.rmSync(file, { force: true });
+        const settings = readJsonFile(ST_PRESETS_SETTINGS_FILE, {});
+        if (settings.currentPresetId === id) {
+            const nextId = listStPresetSummaries()[0]?.id || '';
+            writeJsonFile(ST_PRESETS_SETTINGS_FILE, { ...settings, currentPresetId: nextId });
+        }
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: '删除酒馆预设失败' });
+    }
+});
+
+app.post('/api/st-presets/import-default', (req, res) => {
+    try {
+        const preset = readJsonFile(DEFAULT_ST_PRESET_FILE, null);
+        if (!isSillyTavernPreset(preset)) return res.status(404).json({ error: '未找到默认 Liminal_online.json' });
+        const id = uniqueStPresetId('Liminal_online');
+        writeJsonFile(stPresetFile(id), preset);
+        const settings = readJsonFile(ST_PRESETS_SETTINGS_FILE, {});
+        writeJsonFile(ST_PRESETS_SETTINGS_FILE, { ...settings, currentPresetId: id });
+        res.json({ success: true, id });
+    } catch (e) {
+        res.status(500).json({ error: '导入默认酒馆预设失败' });
+    }
+});
+
+app.get('/api/qq/prompt-preset', (req, res) => {
+    try {
+        const presets = listStPresetSummaries();
+        const qqSettings = readJsonFile(QQ_SETTINGS_FILE, {});
+        let currentPromptPresetId = qqSettings.currentPromptPresetId || getCurrentStPresetId();
+        if (!presets.some(preset => preset.id === currentPromptPresetId)) {
+            currentPromptPresetId = presets[0]?.id || '';
+            writeJsonFile(QQ_SETTINGS_FILE, { ...qqSettings, currentPromptPresetId });
+        }
+        res.json({ presets, currentPromptPresetId });
+    } catch (e) {
+        res.status(500).json({ error: '读取 QQ 提示词预设失败' });
+    }
+});
+
+app.post('/api/qq/prompt-preset', (req, res) => {
+    try {
+        const id = stPresetIdFromName(req.body?.id || '');
+        if (!fs.existsSync(stPresetFile(id))) return res.status(404).json({ error: '未找到提示词预设' });
+        const qqSettings = readJsonFile(QQ_SETTINGS_FILE, {});
+        writeJsonFile(QQ_SETTINGS_FILE, { ...qqSettings, currentPromptPresetId: id });
+        res.json({ success: true, currentPromptPresetId: id });
+    } catch (e) {
+        res.status(500).json({ error: '保存 QQ 提示词预设失败' });
+    }
+});
+
+// 链接预览：拉 HTML，解析 OG/meta，返回卡片字段
+app.post('/api/qq/link-preview', async (req, res) => {
+    try {
+        const raw = String(req.body?.url || '').trim();
+        const rawText = String(req.body?.rawText || raw).trim();
+        if (!raw) return res.status(400).json({ error: '缺少 URL' });
+        let u;
+        try { u = new URL(raw); } catch { return res.status(400).json({ error: 'URL 格式无效' }); }
+        if (!/^https?:$/.test(u.protocol)) return res.status(400).json({ error: '仅支持 http/https' });
+        // SSRF: 拒绝内网/本地
+        const isBlockedHost = (hostname) => {
+            const host = String(hostname || '').toLowerCase();
+            return host === 'localhost' || host === '0.0.0.0' || /^127\./.test(host) || /^10\./.test(host)
+                || /^192\.168\./.test(host) || /^169\.254\./.test(host)
+                || /^172\.(1[6-9]|2\d|3[0-1])\./.test(host) || /^::1$/.test(host) || /^fe80:/i.test(host);
+        };
+        const host = u.hostname.toLowerCase();
+        if (isBlockedHost(host)) {
+            return res.status(400).json({ error: '禁止访问内网地址' });
+        }
+        const isXhsHost = (hostname) => /(^|\.)xhslink\.com$|(^|\.)xiaohongshu\.com$|(^|\.)xhscdn\.com$/i.test(hostname || '');
+        const inferSiteName = (hostname) => {
+            if (isXhsHost(hostname)) return '小红书';
+            return hostname || '链接';
+        };
+        const cleanSharedText = (text) => {
+            return String(text || '')
+                .replace(/https?:\/\/[^\s"'<>，。！？、；）)】\]]+/gi, '')
+                .replace(/复制本条信息.*?(小红书|App).*$/i, '')
+                .replace(/打开【?小红书】?App查看精彩内容.*$/i, '')
+                .replace(/[“”"']/g, '')
+                .replace(/\s+/g, ' ')
+                .replace(/^[,，。:：\s]+|[,，。:：\s]+$/g, '')
+                .slice(0, 200);
+        };
+        const fallbackPreview = (finalUrl = u.toString(), reason = '') => {
+            let finalHost = host;
+            try { finalHost = new URL(finalUrl).hostname; } catch {}
+            const sharedTitle = cleanSharedText(rawText);
+            return {
+                url: finalUrl,
+                title: sharedTitle || inferSiteName(finalHost),
+                description: reason ? `预览受限：${reason}` : '',
+                image: '',
+                siteName: inferSiteName(finalHost)
+            };
+        };
+        const normalizePreviewPayload = (payload) => {
+            const data = payload?.data || payload?.result || payload?.note || payload;
+            if (!data || typeof data !== 'object') return null;
+            const images = Array.isArray(data.images) ? data.images
+                : Array.isArray(data.imageList) ? data.imageList
+                    : Array.isArray(data.pictures) ? data.pictures
+                        : [];
+            const imageCandidate = data.image || data.cover || data.coverUrl || data.thumbnail || images[0] || '';
+            const title = data.title || data.desc || data.description || data.content || data.text || '';
+            const description = data.description || data.desc || data.content || data.text || '';
+            if (!title && !description && !imageCandidate) return null;
+            return {
+                url: data.url || data.shareUrl || u.toString(),
+                title: String(title || inferSiteName(host)).slice(0, 200),
+                description: String(description || '').slice(0, 400),
+                image: imageCandidate ? new URL(String(imageCandidate), u.toString()).toString() : '',
+                siteName: data.siteName || data.source || inferSiteName(host)
+            };
+        };
+        const settings = readJsonFile(SETTINGS_FILE, {});
+        const previewApiUrl = String(settings.linkPreview_apiUrl || '').trim();
+        const previewApiEnabled = settings.linkPreview_apiEnabled === true || settings.linkPreview_apiEnabled === 'true';
+        if (previewApiEnabled && previewApiUrl && isXhsHost(host)) {
+            try {
+                const apiResp = await fetch(previewApiUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...(settings.linkPreview_apiKey ? { 'Authorization': `Bearer ${settings.linkPreview_apiKey}` } : {})
+                    },
+                    body: JSON.stringify({ url: u.toString(), rawText })
+                });
+                if (apiResp.ok) {
+                    const parsed = await apiResp.json().catch(() => null);
+                    const normalized = normalizePreviewPayload(parsed);
+                    if (normalized) return res.json(normalized);
+                }
+            } catch (e) {
+                console.warn('[link-preview third-party failed]', e?.message || e);
+            }
+        }
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 10000);
+        let resp;
+        try {
+            resp = await fetch(u.toString(), {
+                method: 'GET',
+                redirect: 'follow',
+                signal: controller.signal,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+                    'Referer': `${u.protocol}//${u.hostname}/`
+                }
+            });
+        } finally { clearTimeout(timer); }
+        const finalUrl = resp.url || u.toString();
+        try {
+            const finalParsed = new URL(finalUrl);
+            if (isBlockedHost(finalParsed.hostname)) return res.status(400).json({ error: '禁止访问内网地址' });
+        } catch {}
+        if (!resp.ok) return res.json(fallbackPreview(finalUrl, `远程返回 ${resp.status}`));
+        const ctype = resp.headers.get('content-type') || '';
+        if (ctype && !/text\/html|application\/xhtml/i.test(ctype)) {
+            return res.json(fallbackPreview(finalUrl, '非 HTML 内容'));
+        }
+        // 限制大小：256KB
+        const reader = resp.body?.getReader?.();
+        let html = '';
+        const decoder = new TextDecoder('utf-8');
+        let total = 0;
+        if (reader) {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                total += value.length;
+                if (total > 256 * 1024) { try { await reader.cancel(); } catch {} break; }
+                html += decoder.decode(value, { stream: true });
+            }
+            html += decoder.decode();
+        } else {
+            html = await resp.text();
+            if (html.length > 256 * 1024) html = html.slice(0, 256 * 1024);
+        }
+        const pick = (re) => {
+            const m = html.match(re);
+            return m ? m[1].trim() : '';
+        };
+        const decodeEntities = (s) => s
+            .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+            .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n));
+        const metaContent = (prop) => {
+            const re = new RegExp(`<meta[^>]+(?:property|name)\\s*=\\s*["']${prop}["'][^>]*content\\s*=\\s*["']([^"']+)["']`, 'i');
+            const re2 = new RegExp(`<meta[^>]+content\\s*=\\s*["']([^"']+)["'][^>]+(?:property|name)\\s*=\\s*["']${prop}["']`, 'i');
+            return decodeEntities(pick(re) || pick(re2));
+        };
+        const title = metaContent('og:title') || decodeEntities(pick(/<title[^>]*>([^<]+)<\/title>/i));
+        const description = metaContent('og:description') || metaContent('description');
+        const imageRaw = metaContent('og:image') || metaContent('twitter:image');
+        const image = imageRaw ? new URL(imageRaw, finalUrl).toString() : '';
+        const siteName = metaContent('og:site_name') || inferSiteName(new URL(finalUrl).hostname);
+        if (!title && !description) {
+            return res.json(fallbackPreview(finalUrl, '该页面未提供可解析摘要'));
+        }
+        res.json({
+            url: finalUrl,
+            title: (title || '').slice(0, 200),
+            description: (description || '').slice(0, 400),
+            image: image || '',
+            siteName: (siteName || '').slice(0, 80)
+        });
+    } catch (e) {
+        const msg = e?.name === 'AbortError' ? '抓取超时' : '抓取失败';
+        res.status(502).json({ error: msg });
+    }
+});
+
+// 7. 世界书 —— 按「本」粒度
+app.get('/api/worldbooks', (req, res) => {
+    try {
+        res.json({ books: readWorldbooks() });
+    } catch (e) {
+        res.status(500).json({ error: '读取世界书失败' });
+    }
+});
+
+// 整体覆盖（前端编辑后一次写回）
+app.post('/api/worldbooks', (req, res) => {
+    try {
+        const books = Array.isArray(req.body?.books) ? req.body.books : [];
+        writeWorldbooks(books);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: '保存世界书失败' });
+    }
+});
+
+// 新建空白本
+app.post('/api/worldbooks/books', (req, res) => {
+    try {
+        const name = String(req.body?.name || '').trim() || '未命名世界书';
+        const now = Date.now();
+        const book = { id: `book_${shortId()}`, name, entries: [], created_at: now, updated_at: now };
+        const books = readWorldbooks();
+        books.unshift(book);
+        writeWorldbooks(books);
+        res.json({ success: true, book: summarizeWorldbook(book) });
+    } catch (e) {
+        res.status(500).json({ error: '新建世界书失败' });
+    }
+});
+
+// 删除一本
+app.delete('/api/worldbooks/books/:id', (req, res) => {
+    try {
+        const id = req.params.id;
+        const books = readWorldbooks().filter(book => book.id !== id);
+        writeWorldbooks(books);
+        // 清理 QQ 全局选择
+        const qqSettings = readJsonFile(QQ_SETTINGS_FILE, {});
+        if (Array.isArray(qqSettings.globalWorldbookIds) && qqSettings.globalWorldbookIds.includes(id)) {
+            qqSettings.globalWorldbookIds = qqSettings.globalWorldbookIds.filter(item => item !== id);
+            writeJsonFile(QQ_SETTINGS_FILE, qqSettings);
+        }
+        // 清理所有角色卡的引用
+        if (fs.existsSync(CHARACTERS_DIR)) {
+            fs.readdirSync(CHARACTERS_DIR).filter(f => f.endsWith('.json')).forEach(f => {
+                const file = path.join(CHARACTERS_DIR, f);
+                const c = readJsonFile(file, null);
+                if (c && Array.isArray(c.worldbookIds) && c.worldbookIds.includes(id)) {
+                    c.worldbookIds = c.worldbookIds.filter(item => item !== id);
+                    writeJsonFile(file, c);
+                }
+            });
+        }
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: '删除世界书失败' });
+    }
+});
+
+// 酒馆世界书 JSON 导入
+app.post('/api/worldbooks/import-st', (req, res) => {
+    try {
+        const stData = req.body?.data;
+        const name = req.body?.name;
+        if (!stData || typeof stData !== 'object') return res.status(400).json({ error: '请上传有效的酒馆世界书 JSON' });
+        const book = importStWorldbookData(stData, name);
+        const books = readWorldbooks();
+        books.unshift(book);
+        writeWorldbooks(books);
+        res.json({ success: true, book: summarizeWorldbook(book) });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: '导入失败' });
+    }
+});
+
+// QQ 全局世界书 enabled 列表
+app.get('/api/qq/global-worldbooks', (req, res) => {
+    try {
+        const qqSettings = readJsonFile(QQ_SETTINGS_FILE, {});
+        const ids = Array.isArray(qqSettings.globalWorldbookIds) ? qqSettings.globalWorldbookIds : [];
+        res.json({ globalWorldbookIds: ids });
+    } catch (e) {
+        res.status(500).json({ error: '读取 QQ 全局世界书失败' });
+    }
+});
+
+app.post('/api/qq/global-worldbooks', (req, res) => {
+    try {
+        const ids = Array.isArray(req.body?.globalWorldbookIds) ? req.body.globalWorldbookIds : [];
+        const qqSettings = readJsonFile(QQ_SETTINGS_FILE, {});
+        writeJsonFile(QQ_SETTINGS_FILE, { ...qqSettings, globalWorldbookIds: ids });
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: '保存 QQ 全局世界书失败' });
+    }
+});
+
+// 装配预览：实际 world_info / memories 内容（供前端展开查看）
+app.get('/api/qq/preset-marker-preview', (req, res) => {
+    try {
+        const characterId = String(req.query?.characterId || '');
+        const character = characterId
+            ? readJsonFile(path.join(CHARACTERS_DIR, `${cleanName(characterId)}.json`), null)
+            : null;
+        const qqSettings = readJsonFile(QQ_SETTINGS_FILE, {});
+        res.json({
+            world_info: buildWorldbooksContent(
+                Array.isArray(qqSettings.globalWorldbookIds) ? qqSettings.globalWorldbookIds : [],
+                'world_info'
+            ),
+            memories: buildWorldbooksContent(
+                Array.isArray(character?.worldbookIds) ? character.worldbookIds : [],
+                'memories'
+            )
+        });
+    } catch (e) {
+        res.status(500).json({ error: '读取 marker 预览失败' });
+    }
+});
+
+// 8. 提示词变量
+app.get('/api/prompt/variables', (req, res) => {
+    try {
+        res.json(buildPromptVariables({
+            characterId: req.query.characterId || '',
+            userName: req.query.userName || '',
+            messages: Array.isArray(req.query.messages) ? req.query.messages : []
+        }));
+    } catch (e) {
+        res.status(500).json({ error: '读取变量失败' });
+    }
+});
+
+app.post('/api/prompt/render', (req, res) => {
+    try {
+        const variables = buildPromptVariables({
+            characterId: req.body?.characterId || '',
+            userName: req.body?.userName || '',
+            messages: Array.isArray(req.body?.messages) ? req.body.messages : []
+        });
+        res.json({
+            variables,
+            rendered: renderPromptTemplate(req.body?.template || '', variables)
+        });
+    } catch (e) {
+        res.status(500).json({ error: '渲染提示词失败' });
+    }
+});
+
+// 9. User personas
+app.get('/api/userpersonas', (req, res) => {
+    try {
+        const { personas, currentPersonaId } = ensureUserPersonasReady();
+        res.json({
+            personas,
+            currentPersonaId,
+            currentPersona: personas.find(item => item.id === currentPersonaId) || personas[0] || null
+        });
+    } catch (e) {
+        res.status(500).json({ error: '读取 user 人设失败' });
+    }
+});
+
+app.post('/api/userpersonas', (req, res) => {
+    try {
+        const body = req.body || {};
+        const now = Date.now();
+        const id = body.id || `user_${shortId()}`;
+        const name = cleanFileName(body.name || '未命名');
+        let persona = {
+            id,
+            name,
+            gender: body.gender || '',
+            birthday: body.birthday || '',
+            status: body.status || '超开心',
+            customStatus: body.customStatus || '',
+            signature: body.signature || '情绪是一场雷阵雨',
+            note: body.note || '',
+            prompt: body.prompt || '',
+            avatar: body.avatar || '',
+            created_at: now,
+            updated_at: now
+        };
+        if (body.avatarDataUrl) {
+            persona.avatar = savePersonaAvatar(id, persona.name, body.avatarDataUrl, persona.avatar);
+        }
+        const fileName = uniquePersonaFileName(persona.name);
+        writeJsonFile(path.join(USER_PERSONAS_DIR, fileName), persona);
+        const qqSettings = readJsonFile(QQ_SETTINGS_FILE, {});
+        if (!qqSettings.currentPersonaId) {
+            writeJsonFile(QQ_SETTINGS_FILE, { ...qqSettings, currentPersonaId: id });
+        }
+        res.json({ ...persona, fileName });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: '保存 user 人设失败' });
+    }
+});
+
+app.put('/api/userpersonas/:id', (req, res) => {
+    try {
+        const id = req.params.id;
+        const file = findUserPersonaFile(id);
+        if (!file) return res.status(404).json({ error: '未找到 user 人设' });
+        const cur = readJsonFile(file, null);
+        if (!cur) return res.status(404).json({ error: '未找到 user 人设' });
+        const body = req.body || {};
+        const name = cleanFileName(body.name || cur.name || '未命名');
+        let avatar = body.avatar ?? cur.avatar ?? '';
+        if (body.avatarDataUrl) {
+            avatar = savePersonaAvatar(id, name, body.avatarDataUrl, cur.avatar || '');
+        }
+        const next = {
+            ...cur,
+            name,
+            gender: body.gender ?? cur.gender ?? '',
+            birthday: body.birthday ?? cur.birthday ?? '',
+            status: body.status ?? cur.status ?? '超开心',
+            customStatus: body.customStatus ?? cur.customStatus ?? '',
+            signature: body.signature ?? cur.signature ?? '情绪是一场雷阵雨',
+            note: body.note ?? cur.note ?? '',
+            prompt: body.prompt ?? cur.prompt ?? '',
+            avatar,
+            id: cur.id,
+            updated_at: Date.now()
+        };
+        const oldFileName = path.basename(file);
+        const nextFileName = uniquePersonaFileName(next.name, oldFileName);
+        const nextFile = path.join(USER_PERSONAS_DIR, nextFileName);
+        writeJsonFile(nextFile, next);
+        if (nextFile !== file && fs.existsSync(file)) fs.rmSync(file, { force: true });
+        res.json({ ...next, fileName: nextFileName });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: '更新 user 人设失败' });
+    }
+});
+
+app.delete('/api/userpersonas/:id', (req, res) => {
+    try {
+        const { personas, currentPersonaId } = ensureUserPersonasReady();
+        if (personas.length <= 1) return res.status(400).json({ error: '至少保留一个 user 人设' });
+        const id = req.params.id;
+        const target = personas.find(item => item.id === id);
+        if (!target) return res.status(404).json({ error: '未找到 user 人设' });
+        const file = path.join(USER_PERSONAS_DIR, target.fileName);
+        if (fs.existsSync(file)) fs.rmSync(file, { force: true });
+        if (target.avatar) {
+            const avatarPath = path.join(__dirname, target.avatar.replace(/^\//, '').split('?')[0]);
+            if (avatarPath.startsWith(USER_PERSONA_AVATARS_DIR) && fs.existsSync(avatarPath)) {
+                fs.rmSync(avatarPath, { force: true });
+            }
+        }
+        const remaining = personas.filter(item => item.id !== id);
+        if (currentPersonaId === id) {
+            const qqSettings = readJsonFile(QQ_SETTINGS_FILE, {});
+            writeJsonFile(QQ_SETTINGS_FILE, { ...qqSettings, currentPersonaId: remaining[0].id });
+        }
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: '删除 user 人设失败' });
+    }
+});
+
+app.post('/api/userpersonas/current', (req, res) => {
+    try {
+        const id = req.body?.id || '';
+        const { personas } = ensureUserPersonasReady();
+        if (!personas.some(item => item.id === id)) {
+            return res.status(404).json({ error: '未找到 user 人设' });
+        }
+        const qqSettings = readJsonFile(QQ_SETTINGS_FILE, {});
+        writeJsonFile(QQ_SETTINGS_FILE, { ...qqSettings, currentPersonaId: id });
+        res.json({ success: true, currentPersonaId: id });
+    } catch (e) {
+        res.status(500).json({ error: '切换 user 人设失败' });
+    }
+});
+
+// ========== QQ App 路由 ==========
+
+function shortId() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+// 列出所有角色
+app.get('/api/qq/characters', (req, res) => {
+    try {
+        if (!fs.existsSync(CHARACTERS_DIR)) return res.json([]);
+        const files = fs.readdirSync(CHARACTERS_DIR).filter(f => f.endsWith('.json'));
+        const list = files.map(f => {
+            try {
+                return JSON.parse(fs.readFileSync(path.join(CHARACTERS_DIR, f), 'utf-8'));
+            } catch { return null; }
+        }).filter(Boolean);
+        list.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+        res.json(list);
+    } catch (e) {
+        res.status(500).json({ error: '读取角色失败' });
+    }
+});
+
+// 新建角色（来自 ST 导入或新增好友）
+app.post('/api/qq/characters', (req, res) => {
+    console.log(`[POST /api/qq/characters] content-length=${req.headers['content-length']} body-keys=${Object.keys(req.body || {}).join(',')}`);
+    try {
+        const body = req.body || {};
+        const id = body.id || shortId();
+        let avatarPath = '';
+        if (body.avatarDataUrl) {
+            const parsed = parseDataUrl(body.avatarDataUrl);
+            if (parsed && parsed.mime.startsWith('image/')) {
+                const ext = extensionFromMime(parsed.mime);
+                const fileName = `${id}.${ext}`;
+                fs.writeFileSync(path.join(AVATARS_DIR, fileName), parsed.buffer);
+                avatarPath = `/data/assets/avatars/${fileName}`;
+            }
+        }
+        const record = {
+            id,
+            name: body.name || '未命名',
+            avatar: avatarPath,
+            description: body.description || '',
+            personality: body.personality || '',
+            scenario: body.scenario || '',
+            first_mes: body.first_mes || '',
+            mes_example: body.mes_example || '',
+            system_prompt: body.system_prompt || '',
+            post_history_instructions: body.post_history_instructions || '',
+            role_setting: body.role_setting || body.description || '',
+            rp_rules: body.rp_rules || body.personality || '',
+            other_setting: body.other_setting || body.nsfw_setting || '',
+            nsfw_setting: body.nsfw_setting || '',
+            alternate_greetings: Array.isArray(body.alternate_greetings) ? body.alternate_greetings : [],
+            tags: Array.isArray(body.tags) ? body.tags : [],
+            worldbookIds: Array.isArray(body.worldbookIds) ? body.worldbookIds : [],
+            rp_rules_depth: Math.max(0, Math.min(parseInt(body.rp_rules_depth, 10) || 0, 4)),
+            creator: body.creator || '',
+            character_version: body.character_version || '',
+            group: body.group || '',
+            starred: !!body.starred,
+            remark: body.remark || '',
+            created_at: Date.now(),
+        };
+        fs.writeFileSync(path.join(CHARACTERS_DIR, `${id}.json`), JSON.stringify(record, null, 2), 'utf-8');
+        res.json(record);
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: '保存角色失败' });
+    }
+});
+
+// 更新单个角色（PATCH 风格）
+app.put('/api/qq/characters/:id', (req, res) => {
+    try {
+        const id = req.params.id;
+        const file = path.join(CHARACTERS_DIR, `${id}.json`);
+        if (!fs.existsSync(file)) return res.status(404).json({ error: '未找到角色' });
+        const cur = JSON.parse(fs.readFileSync(file, 'utf-8'));
+        const body = req.body || {};
+        let avatar = body.avatar ?? cur.avatar;
+        if (body.avatarDataUrl) {
+            const parsed = parseDataUrl(body.avatarDataUrl);
+            if (parsed && parsed.mime.startsWith('image/')) {
+                if (cur.avatar && fs.existsSync(AVATARS_DIR)) {
+                    fs.readdirSync(AVATARS_DIR)
+                        .filter(f => f.startsWith(`${id}.`))
+                        .forEach(f => fs.rmSync(path.join(AVATARS_DIR, f), { force: true }));
+                }
+                const ext = extensionFromMime(parsed.mime);
+                const fileName = `${id}.${ext}`;
+                fs.writeFileSync(path.join(AVATARS_DIR, fileName), parsed.buffer);
+                avatar = `/data/assets/avatars/${fileName}`;
+            }
+        }
+        const { avatarDataUrl, ...patch } = body;
+        const next = { ...cur, ...patch, avatar, id: cur.id };
+        fs.writeFileSync(file, JSON.stringify(next, null, 2), 'utf-8');
+        res.json(next);
+    } catch (e) {
+        res.status(500).json({ error: '更新角色失败' });
+    }
+});
+
+// 删除角色
+app.delete('/api/qq/characters/:id', (req, res) => {
+    try {
+        const id = req.params.id;
+        const file = path.join(CHARACTERS_DIR, `${id}.json`);
+        if (fs.existsSync(file)) fs.rmSync(file, { force: true });
+        const chatFile = path.join(CHATS_DIR, `${id}.json`);
+        if (fs.existsSync(chatFile)) fs.rmSync(chatFile, { force: true });
+        // 顺手清头像
+        if (fs.existsSync(AVATARS_DIR)) {
+            fs.readdirSync(AVATARS_DIR)
+                .filter(f => f.startsWith(`${id}.`))
+                .forEach(f => fs.rmSync(path.join(AVATARS_DIR, f), { force: true }));
+        }
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: '删除角色失败' });
+    }
+});
+
+// 单人聊天记录
+app.get('/api/qq/chats', (req, res) => {
+    try {
+        if (!fs.existsSync(CHATS_DIR)) return res.json([]);
+        const files = fs.readdirSync(CHATS_DIR).filter(f => f.endsWith('.json'));
+        const list = files.map(f => {
+            try {
+                return JSON.parse(fs.readFileSync(path.join(CHATS_DIR, f), 'utf-8'));
+            } catch { return null; }
+        }).filter(Boolean);
+        list.sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
+        res.json(list);
+    } catch (e) {
+        res.status(500).json({ error: '读取聊天失败' });
+    }
+});
+
+app.get('/api/qq/chats/:characterId', (req, res) => {
+    try {
+        const file = path.join(CHATS_DIR, `${req.params.characterId}.json`);
+        if (!fs.existsSync(file)) return res.json({ characterId: req.params.characterId, messages: [] });
+        res.json(JSON.parse(fs.readFileSync(file, 'utf-8')));
+    } catch (e) {
+        res.status(500).json({ error: '读取聊天失败' });
+    }
+});
+
+app.post('/api/qq/chats/:characterId', (req, res) => {
+    try {
+        const characterId = req.params.characterId;
+        const data = {
+            characterId,
+            messages: Array.isArray(req.body?.messages) ? req.body.messages : [],
+            updated_at: Date.now()
+        };
+        fs.writeFileSync(path.join(CHATS_DIR, `${characterId}.json`), JSON.stringify(data, null, 2), 'utf-8');
+        res.json(data);
+    } catch (e) {
+        res.status(500).json({ error: '保存聊天失败' });
+    }
+});
+
+// 通讯录分组定义
+app.get('/api/qq/groups', (req, res) => {
+    try {
+        const raw = fs.readFileSync(QQ_GROUPS_FILE, 'utf-8');
+        res.json(JSON.parse(raw));
+    } catch (e) {
+        res.status(500).json({ error: '读取分组失败' });
+    }
+});
+
+app.post('/api/qq/groups', (req, res) => {
+    try {
+        const data = Array.isArray(req.body) ? req.body : [];
+        fs.writeFileSync(QQ_GROUPS_FILE, JSON.stringify(data, null, 2), 'utf-8');
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: '保存分组失败' });
+    }
+});
+
+app.get('/api/qq/sticker-packs', (req, res) => {
+    try {
+        const raw = fs.readFileSync(QQ_STICKER_PACKS_FILE, 'utf-8');
+        res.json(JSON.parse(raw));
+    } catch (e) {
+        res.status(500).json({ error: '读取表情包失败' });
+    }
+});
+
+app.post('/api/qq/sticker-packs', (req, res) => {
+    try {
+        const data = Array.isArray(req.body) ? req.body : [];
+        fs.writeFileSync(QQ_STICKER_PACKS_FILE, JSON.stringify(data, null, 2), 'utf-8');
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: '保存表情包失败' });
+    }
+});
+
+// 网页图标（favicon）：自动认根目录下的 icon.png / icon.jpg / icon.gif 等，换图免改代码
+app.get('/app-icon', (req, res) => {
+    const exts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico'];
+    for (const ext of exts) {
+        const iconPath = path.join(__dirname, `icon.${ext}`);
+        if (fs.existsSync(iconPath)) {
+            res.set('Cache-Control', 'no-cache');
+            return res.sendFile(iconPath);
+        }
+    }
+    res.status(404).end();
+});
+
+// ========== QQ AI 回复路由（转发员） ==========
+
+// 把单条 QQ 消息转成给大模型看的纯文本，遵循「线上提示词」格式约定
+// 文字 → "content"   表情包 → "[name]"   红包 → [🧧¥10|备注]
+// 图片不走文字 wrap，单独走 multimodal image_url（在 /api/qq/reply 里处理）
+function qqMessageToText(msg) {
+    if (!msg) return '';
+    switch (msg.type) {
+        case 'sticker':
+            return `[${msg.text || '表情'}]`;
+        case 'image':
+            return '[图片]';
+        case 'transfer':
+            return `[🧧${msg.currency || ''}${msg.amount || ''}${msg.note ? `|${msg.note}` : '|'}]`;
+        case 'link': {
+            const t = String(msg.title || '').trim();
+            const d = String(msg.description || '').trim();
+            const s = String(msg.siteName || '').trim();
+            const parts = [];
+            if (t) parts.push(`标题：${t}`);
+            if (d) parts.push(`描述：${d}`);
+            if (s) parts.push(`站点：${s}`);
+            return `[链接卡片] ${parts.join('；')}`;
+        }
+        case 'system':
+            // BUNNY 元交流：user 与系统层，char 不可见
+            return `+${String(msg.text || '').trim()}+`;
+        default:
+            return String(msg.text || '').trim();
+    }
+}
+
+// 用角色卡拼出"你要扮演谁"的系统提示词
+function buildCharacterSystemPrompt(character, variables, userPersona = null) {
+    const lines = [
+        '你正在一个手机聊天软件（类似微信 / QQ）里扮演一个角色，正在用文字和用户私聊。',
+        '请始终以该角色的第一人称身份回复，不要跳出角色，不要解释你是 AI。',
+        ''
+    ];
+    const characterInfo = buildCharacterInfoPrompt(character);
+    if (characterInfo) {
+        lines.push(characterInfo);
+    }
+    const scenarioInfo = buildScenarioPrompt(character);
+    if (scenarioInfo) {
+        lines.push('', scenarioInfo);
+    }
+    const dialogueExamples = buildDialogueExamplesPrompt(character, variables);
+    if (dialogueExamples) {
+        lines.push('', dialogueExamples);
+    }
+    if (character.system_prompt && character.system_prompt.trim()) {
+        lines.push('', character.system_prompt.trim());
+    }
+    const userInfo = buildUserInfoPrompt(userPersona);
+    if (userInfo) {
+        lines.push('', userInfo);
+    }
+    lines.push('', `【与你对话的用户】${variables.user}`, `【当前时间】${variables.now}（${variables.weekday}）`);
+    lines.push(
+        '',
+        '【回复规则——必须严格遵守】',
+        '1. 只输出你作为角色要"说出口"的聊天内容本身。',
+        '2. 严禁任何动作、神态、场景或心理描写；严禁使用括号（）()、星号*、破折号旁白或任何小说式叙述。',
+        '3. 像真人发消息一样简短、口语化。把一次要表达的内容拆成若干条短消息，每条单独占一行，用换行分隔，通常 1~4 条。',
+        '4. 不要复述或解释用户的话，不要添加任何前后缀说明。'
+    );
+    const rpRulesTail = buildRpRulesTailPrompt(character);
+    if (rpRulesTail) {
+        lines.push('', rpRulesTail);
+    }
+    return renderPromptTemplate(lines.join('\n'), variables);
+}
+
+// 从 AI 输出里剥掉 <think>...</think> / <thinking>...</thinking>（含未闭合的）
+function stripThinkingTags(text) {
+    return String(text || '')
+        // 1. 闭合段：成对剥
+        .replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '')
+        // 2. 兜底：只开不关时，从 tag 处到结尾全砍
+        .replace(/<think(?:ing)?>[\s\S]*$/i, '')
+        .trim();
+}
+
+// 按换行把模型回复拆成多条气泡显示；不做任何"剥旁白"清洗，是否短回复完全由预设提示词决定。
+function splitReplyToSegments(text) {
+    const segments = String(text || '')
+        .split(/\r?\n+/)
+        .map(s => s.trim())
+        .filter(Boolean);
+    if (!segments.length) {
+        const fallback = String(text || '').trim();
+        return fallback ? [fallback] : [];
+    }
+    return segments;
+}
+
+app.post('/api/qq/reply', async (req, res) => {
+    try {
+        const { characterId, messages, chatType } = req.body || {};
+        const resolvedChatType = chatType === 'group' ? 'group' : 'private';
+        if (!characterId) return res.status(400).json({ error: '缺少 characterId' });
+
+        const settings = readJsonFile(SETTINGS_FILE, {});
+        const apiUrl = (settings.mainApi_url || '').trim();
+        const apiKey = (settings.mainApi_key || '').trim();
+        const model = (settings.mainApi_model || '').trim();
+        if (!apiUrl || !apiKey || !model) {
+            return res.status(400).json({ error: '请先在「设置 / 通用 API」里配置并应用主 API（地址、密钥、模型）' });
+        }
+
+        const character = readJsonFile(path.join(CHARACTERS_DIR, `${cleanName(characterId)}.json`), null);
+        if (!character) return res.status(404).json({ error: '未找到角色' });
+
+        const list = Array.isArray(messages) ? messages : [];
+        const userPersona = getCurrentUserPersona();
+        const variables = buildPromptVariables({ characterId, userName: userPersona?.name || '', messages: list });
+
+        // 把 QQ 聊天记录转成 OpenAI 的 messages 格式
+        // 只给最近若干条里的图片附带真实图像（多模态），更早的老图退化成占位文字，避免每次请求都把全部历史图塞进去
+        const VISION_RECENT = 6;
+        const history = list
+            .map((m, idx) => {
+                const role = m.role === 'assistant' ? 'assistant' : 'user';
+                const isRecent = idx >= list.length - VISION_RECENT;
+                if (role === 'user' && m.type === 'image' && isRecent && /^data:image\//.test(m.image || '')) {
+                    return {
+                        role,
+                        content: [
+                            { type: 'text', text: (m.text && m.text !== '[图片]') ? m.text : '[图片]' },
+                            { type: 'image_url', image_url: { url: m.image } }
+                        ]
+                    };
+                }
+                return { role, content: qqMessageToText(m) };
+            })
+            .filter(m => Array.isArray(m.content) ? m.content.length : m.content);
+
+        const enrichedHistory = injectCharRulesAtDepth(history, character, variables);
+        const presetPrompt = buildQqPresetPrompt(character, variables, userPersona, enrichedHistory, resolvedChatType);
+        // 预设按各条目 role 展开为多条消息；没有可用预设时回退到老的单条 system + 历史
+        const chatMessages = presetPrompt
+            ? (presetPrompt.includesChatHistory ? presetPrompt.messages : [...presetPrompt.messages, ...enrichedHistory])
+            : [{ role: 'system', content: buildCharacterSystemPrompt(character, variables, userPersona) }, ...enrichedHistory];
+
+        // 采样参数来自当前 QQ 预设；预设缺字段时回退到温和默认值
+        const presetId = getCurrentQqPromptPresetId();
+        const presetRaw = presetId ? readJsonFile(stPresetFile(presetId), null) : null;
+        const presetSampling = isSillyTavernPreset(presetRaw) ? presetRaw : {};
+        const pickNum = (val, fallback) => Number.isFinite(parseFloat(val)) ? parseFloat(val) : fallback;
+        const temperature = pickNum(presetSampling.temperature, 1);
+        const top_p = pickNum(presetSampling.top_p, 1);
+        const frequency_penalty = pickNum(presetSampling.frequency_penalty, 0);
+        const presence_penalty = pickNum(presetSampling.presence_penalty, 0);
+        const maxReply = Math.min(Math.max(parseInt(presetSampling.openai_max_tokens, 10) || 2048, 1), 200000);
+
+        const endpoint = apiUrl.endsWith('/chat/completions')
+            ? apiUrl
+            : `${apiUrl.replace(/\/+$/, '')}/chat/completions`;
+
+        // 抗截断设置
+        const antiCutoffEnabled = settings.mainApi_antiCutoffEnabled !== false && settings.mainApi_antiCutoffEnabled !== 'false';
+        const antiCutoffMax = Math.max(0, Math.min(parseInt(settings.mainApi_antiCutoffMaxRetries, 10) || 2, 5));
+
+        async function callUpstream(messages) {
+            const upstream = await fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    model, messages, temperature, max_tokens: maxReply,
+                    top_p, frequency_penalty, presence_penalty, stream: false
+                })
+            });
+            const rawText = await upstream.text();
+            return { upstream, rawText };
+        }
+
+        let cleanedAccumulated = '';        // 已剥离思维链的可见正文
+        let rawAccumulatedForRetry = '';    // 原始累加（用于续写时传给模型当 assistant 上下文）
+        let finishReason = '';
+        let lastRawText = '';
+        let workingMessages = chatMessages;
+        const attempts = 1 + antiCutoffMax; // 首发 + 抗截断续写次数
+        let attemptUsed = 0;
+        for (let attempt = 0; attempt < attempts; attempt++) {
+            attemptUsed = attempt + 1;
+            const { upstream, rawText } = await callUpstream(workingMessages);
+            lastRawText = rawText;
+            if (!upstream.ok) {
+                console.error('[QQ reply upstream error]', upstream.status, rawText.slice(0, 500));
+                return res.status(502).json({ error: `模型接口返回 ${upstream.status}`, detail: rawText.slice(0, 2000) });
+            }
+            let data;
+            try { data = JSON.parse(rawText); }
+            catch { return res.status(502).json({ error: '模型返回的不是有效 JSON', detail: rawText.slice(0, 500) }); }
+            const chunk = (data?.choices?.[0]?.message?.content || '').trim();
+            finishReason = data?.choices?.[0]?.finish_reason || '';
+
+            // 关键：每个 chunk 在自己上下文里剥思维链再累加。避免跨 chunk 的未闭合 <think> 把后续好内容连带砍掉
+            const chunkCleaned = stripThinkingTags(chunk);
+            cleanedAccumulated += (cleanedAccumulated && chunkCleaned ? '\n' : '') + chunkCleaned;
+            rawAccumulatedForRetry += chunk;
+
+            // 续写判定
+            const shouldRetry = antiCutoffEnabled && attempt < attempts - 1 && (
+                finishReason === 'length' ||                    // 被 max_tokens 截
+                (!cleanedAccumulated && chunk)                  // 当前累加仍无可见正文
+            );
+            if (!shouldRetry) break;
+            workingMessages = [
+                ...workingMessages,
+                { role: 'assistant', content: rawAccumulatedForRetry },
+                { role: 'user', content: '[续写上面被截断的回复。直接接着说，不要重复已有内容、不要解释、不要任何旁白。]' }
+            ];
+        }
+
+        if (!rawAccumulatedForRetry) {
+            return res.status(502).json({
+                error: `模型没有返回内容（finish_reason=${finishReason || '未知'}）`,
+                detail: lastRawText.slice(0, 2000)
+            });
+        }
+        const cleaned = cleanedAccumulated.trim();
+        if (!cleaned) {
+            return res.status(502).json({
+                error: `模型只返回了 <think> 思维链，剥离后无可见正文（finish_reason=${finishReason || '未知'}，已尝试 ${attemptUsed} 次）`,
+                detail: lastRawText.slice(0, 2000)
+            });
+        }
+        const segments = splitReplyToSegments(cleaned);
+        if (!segments.length) {
+            return res.status(502).json({
+                error: '清洗后切不出有效气泡段',
+                detail: lastRawText.slice(0, 2000)
+            });
+        }
+        // 后台推送：SW 收到后决定是否弹（焦点客户端会被 SW 跳过）
+        sendWebPushToAll({
+            title: character.name || '蒋幸怜',
+            body: String(segments[0] || '').slice(0, 120),
+            kind: 'success',
+            characterId,
+            characterName: character.name || '',
+            avatar: character.avatar || '',
+            appId: 'QQ'
+        }).catch(err => console.warn('[PUSH after reply]', err));
+        res.json({ segments, reply: cleaned });
+    } catch (e) {
+        console.error('[QQ reply error]', e);
+        res.status(500).json({ error: '生成回复失败：' + (e.message || '未知错误') });
+    }
+});
+
+// Web Push: 提供 VAPID 公钥
+app.get('/api/notify/vapid-public-key', (req, res) => {
+    res.json({ publicKey: VAPID_KEYS.publicKey });
+});
+
+// Web Push: 订阅（前端 swReg.pushManager.subscribe 后调用）
+app.post('/api/notify/subscribe', (req, res) => {
+    try {
+        const sub = req.body?.subscription;
+        if (!sub || !sub.endpoint) return res.status(400).json({ error: '订阅信息缺失' });
+        const subs = readPushSubscriptions();
+        if (!subs.find(s => s.endpoint === sub.endpoint)) {
+            subs.push(sub);
+            writePushSubscriptions(subs);
+        }
+        res.json({ success: true, total: subs.length });
+    } catch (e) {
+        res.status(500).json({ error: '保存订阅失败' });
+    }
+});
+
+// Web Push: 取消订阅
+app.post('/api/notify/unsubscribe', (req, res) => {
+    try {
+        const endpoint = req.body?.endpoint;
+        if (!endpoint) return res.status(400).json({ error: '缺少 endpoint' });
+        const subs = readPushSubscriptions().filter(s => s.endpoint !== endpoint);
+        writePushSubscriptions(subs);
+        res.json({ success: true, total: subs.length });
+    } catch (e) {
+        res.status(500).json({ error: '删除订阅失败' });
+    }
+});
+
+// Web Push: 查询订阅数量
+app.get('/api/notify/subscriptions', (req, res) => {
+    res.json({ total: readPushSubscriptions().length });
+});
+
+// Web Push: 测试推送
+app.post('/api/notify/test', async (req, res) => {
+    const result = await sendWebPushToAll({
+        title: 'BunnyOS 测试推送',
+        body: '如果你看到这条系统通知，说明 Web Push 已正常工作。',
+        kind: 'success',
+        characterId: '',
+        appId: 'QQ'
+    });
+    res.json({ success: true, ...result });
+});
+
+// AI 代回（impersonate）：用当前预设拼装上下文，追加代回指令，返回纯文本
+app.post('/api/qq/impersonate', async (req, res) => {
+    try {
+        const { characterId, messages, chatType } = req.body || {};
+        const resolvedChatType = chatType === 'group' ? 'group' : 'private';
+        if (!characterId) return res.status(400).json({ error: '缺少 characterId' });
+        const settings = readJsonFile(SETTINGS_FILE, {});
+        const apiUrl = (settings.mainApi_url || '').trim();
+        const apiKey = (settings.mainApi_key || '').trim();
+        const model = (settings.mainApi_model || '').trim();
+        if (!apiUrl || !apiKey || !model) return res.status(400).json({ error: '请先在设置里配置主 API' });
+        const character = readJsonFile(path.join(CHARACTERS_DIR, `${cleanName(characterId)}.json`), null);
+        if (!character) return res.status(404).json({ error: '未找到角色' });
+        const list = Array.isArray(messages) ? messages : [];
+        const userPersona = getCurrentUserPersona();
+        const variables = buildPromptVariables({ characterId, userName: userPersona?.name || '', messages: list });
+        const history = list
+            .map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: qqMessageToText(m) }))
+            .filter(m => m.content);
+        const enrichedHistory = injectCharRulesAtDepth(history, character, variables);
+        const presetPrompt = buildQqPresetPrompt(character, variables, userPersona, enrichedHistory, resolvedChatType);
+        const baseMessages = presetPrompt
+            ? (presetPrompt.includesChatHistory ? presetPrompt.messages : [...presetPrompt.messages, ...enrichedHistory])
+            : [{ role: 'system', content: buildCharacterSystemPrompt(character, variables, userPersona) }, ...enrichedHistory];
+
+        // 末尾追加代回指令，让模型从 user 视角输出
+        baseMessages.push({
+            role: 'system',
+            content: '学习user_input中user的语言习惯，代替user拟出回复。注意：user是独立人格成年人，禁止娇妻化塑造user。只输出user会发出的纯文字内容，不要任何动作、神态、括号旁白。'
+        });
+
+        // 采样参数同 reply：走预设
+        const presetId = getCurrentQqPromptPresetId();
+        const presetRaw = presetId ? readJsonFile(stPresetFile(presetId), null) : null;
+        const presetSampling = isSillyTavernPreset(presetRaw) ? presetRaw : {};
+        const pickNum = (val, fallback) => Number.isFinite(parseFloat(val)) ? parseFloat(val) : fallback;
+        const temperature = pickNum(presetSampling.temperature, 1);
+        const top_p = pickNum(presetSampling.top_p, 1);
+        const frequency_penalty = pickNum(presetSampling.frequency_penalty, 0);
+        const presence_penalty = pickNum(presetSampling.presence_penalty, 0);
+        const maxReply = Math.min(Math.max(parseInt(presetSampling.openai_max_tokens, 10) || 2048, 1), 200000);
+        const endpoint = apiUrl.endsWith('/chat/completions') ? apiUrl : `${apiUrl.replace(/\/+$/, '')}/chat/completions`;
+        const upstream = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model, messages: baseMessages, temperature, max_tokens: maxReply, top_p, frequency_penalty, presence_penalty, stream: false })
+        });
+        const rawText = await upstream.text();
+        if (!upstream.ok) return res.status(502).json({ error: `模型接口返回 ${upstream.status}`, detail: rawText.slice(0, 500) });
+        let data;
+        try { data = JSON.parse(rawText); }
+        catch { return res.status(502).json({ error: '模型返回的不是有效 JSON' }); }
+        const reply = data?.choices?.[0]?.message?.content?.trim();
+        const finishReason = data?.choices?.[0]?.finish_reason;
+        if (!reply) return res.status(502).json({
+            error: `模型没有返回内容（finish_reason=${finishReason || '未知'}）`,
+            detail: rawText.slice(0, 2000)
+        });
+        const cleaned = stripThinkingTags(reply);
+        if (!cleaned) return res.status(502).json({
+            error: `代回只返回了 <think> 思维链，剥离后无可见正文`,
+            detail: rawText.slice(0, 2000)
+        });
+        res.json({ text: cleaned });
+    } catch (e) {
+        console.error('[impersonate]', e);
+        res.status(500).json({ error: e.message || '代回失败' });
+    }
+});
+
+app.listen(PORT, () => {
+    console.log('===========================================');
+    console.log(`[BunnyOS v2-qq-413debug] booted ${new Date().toISOString()}`);
+    console.log(`  body limit: 200mb (json + urlencoded)`);
+    console.log(`  QQ routes:  /api/qq/characters, /api/qq/groups`);
+    console.log(`  url:        http://localhost:${PORT}/index.html`);
+    console.log('===========================================');
+});

@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>QQ - BunnyOS</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<main class="qq-root" id="qq-root">
+
+    <!-- 顶栏 -->
+    <header class="qq-topbar" id="qq-topbar">
+        <button class="qq-topbar-profile" id="qq-topbar-profile" data-tab="me" aria-label="我的资料">
+            <span class="qq-avatar qq-topbar-avatar" id="qq-topbar-avatar"></span>
+            <span class="qq-user-name" id="qq-user-name">默认</span>
+            <span class="qq-signature" id="qq-signature">幸福的路程是陆沉</span>
+        </button>
+        <span class="qq-topbar-title" id="qq-topbar-title">消息</span>
+        <div class="qq-topbar-spacer"></div>
+        <button class="qq-icon-btn" id="btn-topbar-action" aria-label="操作">
+            <i class="bi bi-plus-lg"></i>
+        </button>
+    </header>
+
+    <main class="qq-main">
+    <!-- 消息 -->
+    <section class="qq-panel active" data-panel="messages">
+        <div class="qq-chat-shell">
+            <aside class="qq-chat-list" id="chat-list">
+                <div class="qq-empty qq-empty-inline" id="empty-chats">
+                    <div class="qq-empty-title">还没有任何对话</div>
+                    <div class="qq-empty-sub">在联系人页添加好友后，可以开始聊天。</div>
+                </div>
+            </aside>
+            <section class="qq-chat-view" id="chat-view">
+                <div class="qq-empty" id="empty-chat-view">
+                    <i class="bi bi-chat-dots qq-empty-icon"></i>
+                    <div class="qq-empty-title">选择一个聊天</div>
+                    <div class="qq-empty-sub">横屏时左侧显示聊天列表，右侧显示聊天内容。</div>
+                </div>
+                <div class="qq-chat-room hidden" id="chat-room">
+                    <div class="qq-chat-header">
+                        <button type="button" class="qq-chat-back" id="chat-back" aria-label="返回列表"><i class="bi bi-chevron-left"></i></button>
+                        <span class="qq-avatar qq-chat-head-avatar" id="chat-head-avatar"></span>
+                        <div class="qq-chat-head-info">
+                            <div class="qq-chat-title" id="chat-title">聊天</div>
+                            <div class="qq-chat-status" id="chat-status">在线</div>
+                        </div>
+                        <div class="qq-chat-actions" aria-label="聊天操作">
+                            <button type="button" aria-label="语音通话"><i class="bi bi-telephone"></i></button>
+                            <button type="button" aria-label="视频通话"><i class="bi bi-camera-video"></i></button>
+                            <button type="button" aria-label="更多"><i class="bi bi-three-dots"></i></button>
+                        </div>
+                    </div>
+                    <div class="qq-chat-messages" id="chat-messages"></div>
+                    <form class="qq-chat-compose" id="chat-compose">
+                        <div class="qq-reply-draft hidden" id="reply-draft">
+                            <div class="qq-reply-draft-line">
+                                <span class="qq-reply-draft-name" id="reply-draft-name"></span>
+                                <button type="button" id="reply-draft-clear" aria-label="取消回复"><i class="bi bi-x-lg"></i></button>
+                            </div>
+                            <div class="qq-reply-draft-text" id="reply-draft-text"></div>
+                        </div>
+                        <div class="qq-delete-draft hidden" id="delete-draft">
+                            <div class="qq-delete-info" id="delete-info">选择要删除的信息</div>
+                            <label class="qq-delete-range">
+                                <input type="checkbox" id="delete-range-mode">
+                                <span>从选中楼层往下</span>
+                            </label>
+                            <button type="button" class="qq-delete-confirm" id="delete-confirm">删除</button>
+                            <button type="button" class="qq-delete-cancel" id="delete-cancel" aria-label="取消删除模式"><i class="bi bi-x-lg"></i></button>
+                        </div>
+                        <div class="qq-compose-tools hidden" id="compose-tools">
+                            <button type="button" id="btn-delete-mode" aria-label="删除信息"><i class="bi bi-trash"></i></button>
+                            <button type="button" id="btn-chat-image" aria-label="图片"><i class="bi bi-image"></i></button>
+                            <button type="button" id="btn-transfer" aria-label="转账"><i class="bi bi-wallet2"></i></button>
+                            <button type="button" id="btn-impersonate" aria-label="AI 代回"><i class="bi bi-megaphone"></i></button>
+                            <button type="button" id="btn-system-msg" aria-label="BUNNY 系统信息" title="BUNNY 系统信息">
+                                <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                    <ellipse cx="5.2" cy="3.6" rx="1.2" ry="2.7"/>
+                                    <ellipse cx="10.8" cy="3.6" rx="1.2" ry="2.7"/>
+                                    <ellipse cx="8" cy="10" rx="4.6" ry="4"/>
+                                    <circle cx="6.4" cy="9.4" r="0.65" fill="#fff"/>
+                                    <circle cx="9.6" cy="9.4" r="0.65" fill="#fff"/>
+                                </svg>
+                            </button>
+                            <button type="button" aria-label="礼物"><i class="bi bi-gift"></i></button>
+                            <button type="button" id="btn-voice-input" aria-label="语音输入"><i class="bi bi-mic"></i></button>
+                            <button type="button" id="btn-fav-list" aria-label="已收藏的对话"><i class="bi bi-clock"></i></button>
+                            <button type="button" id="btn-folder" aria-label="文件夹"><i class="bi bi-folder"></i></button>
+                            <button type="button" id="btn-link" aria-label="链接"><i class="bi bi-link-45deg"></i></button>
+                        </div>
+                        <div class="qq-compose-bar">
+                            <button type="button" class="qq-compose-attach" id="btn-attach" aria-label="更多工具"><i class="bi bi-plus-lg"></i></button>
+                            <button type="button" class="qq-compose-emoji" id="btn-emoji" aria-label="表情"><i class="bi bi-emoji-smile"></i></button>
+                            <textarea id="chat-input" class="qq-compose-field" rows="1" placeholder="消息"></textarea>
+                            <button class="qq-compose-insert" type="button" id="btn-input-message">输入</button>
+                            <button class="qq-compose-send" type="submit" aria-label="发送"><i class="bi bi-send-fill"></i></button>
+                        </div>
+                    </form>
+                    <div class="qq-emoji-panel hidden" id="emoji-panel">
+                        <div class="qq-emoji-picker-wrap">
+                            <emoji-picker id="emoji-picker"></emoji-picker>
+                        </div>
+                        <div class="qq-sticker-strip" id="sticker-strip">
+                            <button type="button" class="qq-sticker-tab active" data-pack="emoji"><i class="bi bi-emoji-smile"></i></button>
+                            <button type="button" class="qq-sticker-add" id="btn-add-sticker-pack" aria-label="新建表情包"><i class="bi bi-plus-lg"></i></button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </section>
+
+    <!-- 联系人 -->
+    <section class="qq-panel" data-panel="contacts">
+        <div class="qq-search-wrap">
+            <div class="qq-search">
+                <i class="bi bi-search"></i>
+                <input type="text" id="contact-search" placeholder="搜索">
+            </div>
+            <button class="qq-contact-add" id="btn-contact-add" aria-label="添加">
+                <i class="bi bi-plus-lg"></i>
+            </button>
+        </div>
+
+        <div class="qq-subtabs qq-subtabs-2" role="tablist">
+            <button class="qq-subtab active" data-subtab="friends" role="tab">好友</button>
+            <button class="qq-subtab" data-subtab="groupchats" role="tab">群聊</button>
+        </div>
+
+        <div class="qq-subpanel" data-subpanel="friends">
+            <div id="list-friends" class="qq-list"></div>
+            <div class="qq-empty qq-empty-inline" id="empty-friends">
+                <div class="qq-empty-title">还没有好友</div>
+                <div class="qq-empty-sub">点击搜索栏右侧 + 添加好友。</div>
+            </div>
+        </div>
+
+        <div class="qq-subpanel hidden" data-subpanel="groupchats">
+            <div id="list-groupchats" class="qq-list"></div>
+            <div class="qq-empty qq-empty-inline" id="empty-groupchats">
+                <div class="qq-empty-title">还没有群聊</div>
+                <div class="qq-empty-sub">点击搜索栏右侧 + 创建群聊。</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 我 -->
+    <section class="qq-panel" data-panel="me">
+        <div class="qq-me-page">
+            <button type="button" class="qq-me-avatar-btn" id="me-avatar-btn" aria-label="编辑人设">
+                <span class="qq-avatar qq-me-avatar" id="me-avatar"></span>
+            </button>
+            <div class="qq-me-identity">
+                <span class="qq-me-name" id="me-name">默认</span>
+                <span class="qq-me-status" id="me-status">超开心</span>
+            </div>
+            <button type="button" class="qq-me-signature" id="me-signature">情绪是一场雷阵雨</button>
+            <div class="qq-me-actions">
+                <button type="button" class="qq-me-action" id="me-wallet">
+                    <i class="bi bi-wallet2"></i><span>钱包</span><i class="bi bi-chevron-right"></i>
+                </button>
+                <label class="qq-me-action qq-me-select-action" for="me-prompt-preset">
+                    <i class="bi bi-braces"></i>
+                    <span>提示词预设</span>
+                    <select id="me-prompt-preset" aria-label="QQ 提示词预设">
+                        <option value="">加载中</option>
+                    </select>
+                </label>
+                <button type="button" class="qq-me-action" id="me-prompt-manager">
+                    <i class="bi bi-journal-text"></i><span>提示词管理</span><i class="bi bi-chevron-right"></i>
+                </button>
+                <button type="button" class="qq-me-action" id="me-switch-account">
+                    <i class="bi bi-person-badge"></i><span>切换账号</span><i class="bi bi-chevron-right"></i>
+                </button>
+            </div>
+        </div>
+    </section>
+
+    <!-- 动态 -->
+    <section class="qq-panel" data-panel="moments">
+        <div class="qq-empty">
+            <i class="bi bi-stars qq-empty-icon"></i>
+            <div class="qq-empty-title">还没有动态</div>
+            <div class="qq-empty-sub">后续可在此发布说说、查看好友动态。</div>
+        </div>
+    </section>
+
+    </main>
+
+    <!-- Tab Bar / 横屏下变左侧 rail -->
+    <nav class="qq-tabbar">
+        <button class="qq-tab active" data-tab="messages">
+            <i class="bi bi-chat"></i><span>消息</span>
+        </button>
+        <button class="qq-tab" data-tab="contacts">
+            <i class="bi bi-person"></i><span>联系人</span>
+        </button>
+        <button class="qq-tab" data-tab="moments">
+            <i class="bi bi-record-circle"></i><span>动态</span>
+        </button>
+        <button class="qq-tab qq-tab-me" data-tab="me">
+            <span class="qq-avatar qq-tab-avatar" id="qq-user-avatar"></span>
+            <span>我</span>
+        </button>
+        <div class="qq-tabbar-flex"></div>
+        <button class="qq-tab qq-tab-gear" data-tab="settings" aria-label="QQ 设置">
+            <i class="bi bi-gear"></i><span>设置</span>
+        </button>
+    </nav>
+
+    <!-- + 下拉菜单 -->
+    <div class="qq-dropdown hidden" id="add-menu" role="menu">
+        <button class="qq-dropdown-item" data-action="add-friend" role="menuitem">
+            <i class="bi bi-person-plus"></i><span>添加好友</span>
+        </button>
+        <button class="qq-dropdown-item" data-action="create-group" role="menuitem">
+            <i class="bi bi-people"></i><span>创建群聊</span>
+        </button>
+    </div>
+
+    <!-- 消息操作菜单 -->
+    <div class="qq-message-menu hidden" id="message-menu" role="menu">
+        <button class="qq-message-menu-item" data-action="regen" role="menuitem">
+            <i class="bi bi-arrow-clockwise"></i><span>重新生成</span>
+        </button>
+        <button class="qq-message-menu-item" data-action="edit" role="menuitem">
+            <i class="bi bi-pencil"></i><span>编辑</span>
+        </button>
+        <button class="qq-message-menu-item" data-action="fav" role="menuitem">
+            <i class="bi bi-heart"></i><span>收藏</span>
+        </button>
+        <button class="qq-message-menu-item" data-action="version" role="menuitem">
+            <i class="bi bi-chevron-right"></i><span>生成新版本</span>
+        </button>
+        <button class="qq-message-menu-item" data-action="reply" role="menuitem">
+            <i class="bi bi-reply"></i><span>回复引用</span>
+        </button>
+        <button class="qq-message-menu-item danger" data-action="delete" role="menuitem">
+            <i class="bi bi-trash"></i><span>删除</span>
+        </button>
+    </div>
+
+    <!-- 已收藏的对话 -->
+    <div class="qq-modal hidden" id="fav-list-modal" role="dialog" aria-modal="true">
+        <div class="qq-modal-mask" data-fav-close="1"></div>
+        <div class="qq-modal-card">
+            <div class="qq-modal-header">
+                <button class="qq-modal-back" data-fav-close="1"><i class="bi bi-x-lg"></i></button>
+                <div class="qq-modal-title">已收藏的对话</div>
+                <button type="button" class="qq-modal-action" id="fav-select-toggle">选择</button>
+                <button type="button" class="qq-modal-action danger hidden" id="fav-delete-confirm">删除</button>
+                <button type="button" class="qq-modal-action hidden" id="fav-select-cancel">取消</button>
+            </div>
+            <div class="qq-modal-body">
+                <div id="fav-list" class="qq-list"></div>
+                <div class="qq-empty qq-empty-inline hidden" id="fav-list-empty">
+                    <div class="qq-empty-title">还没有收藏的消息</div>
+                    <div class="qq-empty-sub">在对话里点心形按钮即可收藏。</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- QQ 内置提示词管理 -->
+    <div class="qq-modal hidden" id="prompt-manager-modal" role="dialog" aria-modal="true">
+        <div class="qq-modal-mask" data-prompt-manager-close="1"></div>
+        <div class="qq-prompt-manager-card">
+            <div class="qq-modal-header">
+                <button class="qq-modal-back" data-prompt-manager-close="1"><i class="bi bi-x-lg"></i></button>
+                <div class="qq-modal-title">提示词管理</div>
+                <span></span>
+            </div>
+            <iframe id="prompt-manager-frame" title="提示词管理"></iframe>
+        </div>
+    </div>
+
+    <!-- 好友创建 / 详情编辑 -->
+    <div class="qq-modal hidden" id="friend-modal" role="dialog" aria-modal="true">
+        <div class="qq-modal-mask" data-close="1"></div>
+        <div class="qq-modal-card">
+            <div class="qq-modal-header">
+                <button class="qq-modal-back" data-close="1"><i class="bi bi-x-lg"></i></button>
+                <div class="qq-modal-title" id="friend-modal-title">添加好友</div>
+                <button class="qq-modal-delete hidden" id="friend-delete">删除</button>
+            </div>
+            <div class="qq-modal-body">
+                <div class="qq-friend-editor">
+                    <button class="qq-friend-avatar-btn" id="friend-avatar-btn" type="button" aria-label="导入头像">
+                        <img id="friend-avatar-img" alt="">
+                    </button>
+                    <input type="file" id="friend-avatar-input" accept="image/*" hidden>
+                    <input type="text" id="friend-name" class="qq-friend-name-input" placeholder="名字">
+                </div>
+                <div class="qq-worldbook-binding">
+                    <div class="qq-worldbook-binding-label">绑定世界书（作为角色记忆注入 &lt;memories&gt;）</div>
+                    <div class="qq-chips" id="friend-worldbook-chips"></div>
+                    <div class="qq-chip-menu hidden" id="friend-worldbook-menu"></div>
+                </div>
+                <div class="qq-import-fields qq-friend-fields">
+                    <div class="qq-field">
+                        <label>角色设定</label>
+                        <textarea id="friend-role-setting" placeholder="必填。最主要的角色设定，会处于提示词体系靠近头部的位置。"></textarea>
+                    </div>
+                    <div class="qq-field">
+                        <div class="qq-field-label-row">
+                            <label>角色语气 / RP 规则</label>
+                            <label class="qq-depth-inline">
+                                <span>插入深度</span>
+                                <select id="friend-rp-rules-depth">
+                                    <option value="0">0（聊天末尾）</option>
+                                    <option value="1">1</option>
+                                    <option value="2">2</option>
+                                    <option value="3">3</option>
+                                    <option value="4">4</option>
+                                </select>
+                            </label>
+                        </div>
+                        <textarea id="friend-rp-rules" placeholder="可不填。角色语气、互动边界和 RP 规则，以 system 消息按上方深度插入聊天历史。"></textarea>
+                    </div>
+                    <div class="qq-field">
+                        <label>其它设定</label>
+                        <textarea id="friend-other-setting" placeholder="可不填。补充设定、禁忌、偏好或特殊规则。"></textarea>
+                    </div>
+                    <div class="qq-field">
+                        <label>场景信息</label>
+                        <textarea id="friend-scenario" placeholder="可不填。世界观、meta 设定、时代背景或故事边界；AI 应在这个设定范围内构建对话。"></textarea>
+                    </div>
+                    <div class="qq-field">
+                        <label>示例聊天</label>
+                        <textarea id="friend-mes-example" placeholder="可不填。填入 {{char}} 与 {{user}} 的示例对话，用作语气参考。"></textarea>
+                    </div>
+                </div>
+                <button class="qq-start-chat hidden" id="friend-start-chat">开始聊天</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- User 人设编辑 -->
+    <div class="qq-modal hidden" id="persona-modal" role="dialog" aria-modal="true">
+        <div class="qq-modal-mask" data-persona-close="1"></div>
+        <div class="qq-modal-card">
+            <div class="qq-modal-header">
+                <button class="qq-modal-back" data-persona-close="1"><i class="bi bi-x-lg"></i></button>
+                <div class="qq-modal-title" id="persona-modal-title">编辑人设</div>
+                <span></span>
+            </div>
+            <div class="qq-modal-body">
+                <div class="qq-friend-editor">
+                    <button class="qq-friend-avatar-btn" id="persona-avatar-btn" type="button" aria-label="导入头像">
+                        <img id="persona-avatar-img" alt="">
+                    </button>
+                    <input type="file" id="persona-avatar-input" accept="image/*" hidden>
+                    <input type="text" id="persona-name" class="qq-friend-name-input" placeholder="名字">
+                </div>
+                <div class="qq-import-fields qq-friend-fields">
+                    <div class="qq-field qq-field-row">
+                        <label>状态</label>
+                        <select id="persona-status"></select>
+                    </div>
+                    <div class="qq-field hidden" id="persona-custom-status-field">
+                        <label>自定义状态</label>
+                        <input type="text" id="persona-custom-status" placeholder="写一个状态">
+                    </div>
+                    <div class="qq-field">
+                        <label>性别</label>
+                        <input type="text" id="persona-gender" placeholder="自由填写">
+                    </div>
+                    <div class="qq-field">
+                        <label>生日</label>
+                        <input type="text" id="persona-birthday" placeholder="可不填">
+                    </div>
+                    <div class="qq-field">
+                        <label>个性签名</label>
+                        <input type="text" id="persona-signature" placeholder="情绪是一场雷阵雨">
+                    </div>
+                    <div class="qq-field">
+                        <label>切换账号备注</label>
+                        <input type="text" id="persona-note" placeholder="只在切换账号页面显示，可不填">
+                    </div>
+                    <div class="qq-field">
+                        <label>User 人设提示词</label>
+                        <textarea id="persona-prompt" placeholder="告诉 AI：你是谁、你的说话方式、关系定位或偏好。"></textarea>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 切换账号 -->
+    <div class="qq-account-modal hidden" id="account-modal" role="dialog" aria-modal="true">
+        <div class="qq-modal-mask" data-account-close="1"></div>
+        <div class="qq-account-card">
+            <div class="qq-account-title">切换账号</div>
+            <div class="qq-account-list" id="account-list"></div>
+            <div class="qq-account-actions">
+                <button type="button" id="account-new"><i class="bi bi-plus-lg"></i><span>新建人设</span></button>
+                <button type="button" id="account-delete"><i class="bi bi-trash"></i><span>删除人设</span></button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 新建表情包 -->
+    <div class="qq-pop-modal hidden" id="sticker-modal" role="dialog" aria-modal="true">
+        <div class="qq-pop-card">
+            <div class="qq-pop-title">新建表情包</div>
+            <input type="text" id="sticker-pack-name" placeholder="合集名称">
+            <textarea id="sticker-pack-lines" placeholder="一行一个，例如&#10;开心: https://example.com/a.png"></textarea>
+            <div class="qq-pop-actions">
+                <button type="button" data-pop-close="sticker-modal">取消</button>
+                <button type="button" id="sticker-pack-save">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- BUNNY 系统信息 -->
+    <div class="qq-pop-modal hidden" id="system-msg-modal" role="dialog" aria-modal="true">
+        <div class="qq-pop-card">
+            <div class="qq-pop-title">BUNNY 系统信息</div>
+            <div class="qq-pop-hint">user 与 BUNNY 元层交流，char 不可见、不会反应。会作为 +content+ 同步给 AI。</div>
+            <textarea id="system-msg-text" placeholder="例如：char 当前不在线，去洗澡了"></textarea>
+            <div class="qq-pop-actions">
+                <button type="button" data-pop-close="system-msg-modal">取消</button>
+                <button type="button" id="system-msg-send">发送</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 转账 -->
+    <div class="qq-pop-modal hidden" id="transfer-modal" role="dialog" aria-modal="true">
+        <div class="qq-pop-card">
+            <div class="qq-pop-title">转账</div>
+            <input type="number" min="0" step="0.01" id="transfer-amount" placeholder="金额">
+            <select id="transfer-currency">
+                <option value="¥">人民币 ¥</option>
+                <option value="$">美元 $</option>
+                <option value="£">英镑 £</option>
+                <option value="€">欧元 €</option>
+                <option value="¥">日元 ¥</option>
+                <option value="₩">韩元 ₩</option>
+                <option value="₽">俄罗斯元 ₽</option>
+            </select>
+            <textarea id="transfer-note" placeholder="留言"></textarea>
+            <div class="qq-pop-actions">
+                <button type="button" data-pop-close="transfer-modal">取消</button>
+                <button type="button" id="transfer-send">发送</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="qq-dialog hidden" id="qq-dialog" role="dialog" aria-modal="true">
+        <div class="qq-dialog-mask"></div>
+        <div class="qq-dialog-card">
+            <div class="qq-dialog-title" id="qq-dialog-title">确认</div>
+            <div class="qq-dialog-message" id="qq-dialog-message"></div>
+            <input type="text" id="qq-dialog-input" class="hidden">
+            <div class="qq-dialog-actions">
+                <button type="button" id="qq-dialog-cancel">取消</button>
+                <button type="button" id="qq-dialog-ok">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="qq-toast hidden" id="qq-toast"></div>
+
+    <input type="file" id="chat-image-input" accept="image/*" hidden>
+</main>
+
+<script src="scripts/state.js"></script>
+<script src="scripts/utils.js"></script>
+<script src="scripts/navigation.js"></script>
+<script src="scripts/api.js"></script>
+<script src="scripts/contacts.js"></script>
+<script src="scripts/personas.js"></script>
+<script src="scripts/prompt-settings.js"></script>
+<script src="scripts/chat-render.js"></script>
+<script src="scripts/message-actions.js"></script>
+<script src="scripts/media.js"></script>
+<script src="scripts/events.js"></script>
+<script src="QQ.js"></script>
+</body>
+</html>

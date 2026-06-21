@@ -1,0 +1,4 @@
+interface:
+  display_name: "BunnyOS"
+  short_description: "维护 BunnyOS、QQ 与提示词系统"
+  default_prompt: "Use $bunnyos to maintain BunnyOS QQ, prompt presets, storage, and UI conventions safely."

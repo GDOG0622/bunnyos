@@ -1,0 +1,10 @@
+{
+  "id": "prompt-manager",
+  "name": "提示词管理",
+  "entry": "index.html",
+  "icon": "bi-book-fill",
+  "bg": "bg-prompt",
+  "iconColor": "#2ED573",
+  "order": 50,
+  "hidden": true
+}

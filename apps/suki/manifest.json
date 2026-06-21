@@ -1,0 +1,9 @@
+{
+  "id": "suki",
+  "name": "Suki",
+  "entry": "",
+  "icon": "bi-suit-heart-fill",
+  "bg": "bg-suki",
+  "iconColor": "#FF6B6B",
+  "order": 30
+}

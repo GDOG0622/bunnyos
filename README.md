@@ -1,0 +1,227 @@
+# BunnyOS / 萝卜机
+
+本地"小手机"式 AI 聊天器外壳。`apps/` 装 App，`data/` 装用户数据，`settings.json` 装全局设置。
+
+## 启动
+
+**Windows 一键**：双击 `start.bat`。首次会自动 `npm install`（约 1-2 分钟），之后两秒后自动打开浏览器。关窗口即停服务。
+
+**macOS / Linux 一键**：`./start.sh`（必要时 `chmod +x start.sh`）。Ctrl+C 停。
+
+**手动**：
+```bash
+npm install
+npm start
+```
+
+访问 `http://localhost:3000/index.html`。文件统一 UTF-8。需要 Node.js v18+。
+
+## 文件地图
+
+```text
+BunnyOS/
+├─ index.html              主桌面骨架（含 PWA manifest 引用）
+├─ server.js               Express 本地服务 + 所有 API
+├─ service-worker.js       PWA + Web Push 接收（必须在根域）
+├─ manifest.webmanifest    PWA 安装信息
+├─ start.bat               Windows 一键启动
+├─ start.sh                macOS/Linux 一键启动
+├─ ecosystem.config.js     PM2 配置（VPS 部署用）
+├─ settings.json           全局设置
+├─ icon.png                网页 favicon + PWA 图标
+├─ assets/
+│  ├─ backgrounds/         用户上传的壁纸（thin-back.* 竖屏 / wide-back.* 横屏）
+│  ├─ app-icons/           用户上传的 App 图标
+│  ├─ styles/              base.css / desktop.css / window.css
+│  └─ scripts/             theme.js / apps.js / window-manager.js / clock.js / notify.js
+├─ apps/
+│  ├─ settings/            通用 API、美化（含提示音+推送）、生图、语音、存储、关于
+│  ├─ QQ/                  聊天主战场（index.html / styles.css / QQ.js / scripts/*）
+│  ├─ prompt-manager/      预设、世界书、变量手册（QQ 内置打开，桌面 hidden）
+│  ├─ suki/                占位
+│  └─ X/                   占位
+└─ data/
+   ├─ characters/          角色卡 <id>.json
+   ├─ chats/qq/            单人聊天 <characterId>.json
+   ├─ presets/
+   │  ├─ image-prompts.json     生图提示词预设
+   │  ├─ st-presets/            酒馆兼容预设工作副本
+   │  └─ st-presets-settings.json
+   ├─ qq/                  QQ App 自身的 settings/groups/sticker-packs
+   ├─ userpersonas/        user 人设，按名字命名
+   ├─ worlds/worldbooks.json   { books: [{id,name,entries:[{id,name,content}]}] }
+   ├─ assets/              头像、背景、生图、音频、贴纸池
+   ├─ vapid.json           Web Push VAPID 密钥对（自动生成，勿提交）
+   ├─ push-subscriptions.json  已订阅推送的设备列表
+   └─ backups/
+```
+
+## 后端 server.js
+
+端口 3000。常量名见文件头。
+
+### API 速查
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/api/apps` | 扫描 `apps/*/manifest.json` 返回 App 清单 |
+| GET / POST | `/api/settings` | 全局 settings.json 读写 |
+| POST | `/api/assets/upload` | 上传壁纸 / App 图标 |
+| GET / POST | `/api/presets` | 生图提示词预设 |
+| GET | `/api/st-presets` | 酒馆预设列表 + 当前 id |
+| POST | `/api/st-presets/new` | 新建空白预设（10 个 builtin marker + 默认采样） |
+| POST | `/api/st-presets/current` | 切换当前 |
+| GET / POST / DELETE | `/api/st-presets/:id` | 读 / 覆盖 / 删 |
+| POST | `/api/st-presets/:id/rename` `/copy` `/refresh-default` | 改名 / 复制 / 从 Liminal_online.json 重读 |
+| POST | `/api/st-presets/import-default` | 重新导入默认预设 |
+| GET / POST | `/api/worldbooks` | 全部世界书读 / 覆盖 |
+| POST | `/api/worldbooks/books` | 新建空白本 |
+| DELETE | `/api/worldbooks/books/:id` | 删整本（清角色绑定 + QQ 全局列表） |
+| POST | `/api/worldbooks/import-st` | 导入酒馆世界书 JSON（comment→name, content→content，其他字段丢） |
+| GET / POST | `/api/qq/global-worldbooks` | QQ 全局选中的书 id 列表 |
+| GET | `/api/qq/preset-marker-preview?characterId=` | 装配预览：world_info + memories 真实内容 |
+| GET / POST | `/api/prompt/variables` `/render` | 变量手册 + 模板渲染 |
+| GET / POST / PUT / DELETE | `/api/userpersonas[/:id]` `/current` | user 人设 |
+| GET / POST | `/api/qq/prompt-preset` | QQ 选用哪个预设 |
+| GET / POST / PUT / DELETE | `/api/qq/characters[/:id]` | 角色卡 |
+| GET / POST | `/api/qq/chats[/:characterId]` | 聊天记录 |
+| GET / POST | `/api/qq/groups` `/sticker-packs` | 群定义 / 自定义表情包合集 |
+| POST | `/api/qq/reply` | AI 回复（按预设装配 + 采样参数 + 抗截断） |
+| POST | `/api/qq/impersonate` | AI 代回（user 视角拟回复，填入输入框不发送） |
+| GET | `/api/notify/vapid-public-key` | Web Push 公钥（前端订阅时取）|
+| POST | `/api/notify/subscribe` `/unsubscribe` | 订阅 / 取消订阅本设备的推送 |
+| GET | `/api/notify/subscriptions` | 查询订阅数量 |
+| POST | `/api/notify/test` | 测试推送（向所有订阅设备发一条）|
+
+**静态路径必须放在 `:id` 之前**：`/api/st-presets/current` `/new` `/import-default` 都要先注册。
+
+### 装配链路（核心）
+
+`POST /api/qq/reply` 接收 `{characterId, messages, chatType}`：
+
+1. `buildPromptVariables` 算 18 个变量（{{now}} {{char}} {{user}} {{char_role_setting}} {{chat_history}} 等）
+2. `qqMessageToText` 把每条 QQ 消息映射为 AI 文本：
+   - text → 裸文本
+   - sticker → `[name]`
+   - image → `[图片]`（同时附 multimodal `image_url`）
+   - transfer → `[🧧¥10|备注]`
+   - system → `+content+`（BUNNY 元层，char 应忽略）
+3. `injectCharRulesAtDepth` 把角色卡 `rp_rules` 按 `rp_rules_depth` 0-4 splice 进 history 当 system 消息
+4. `buildQqPresetPrompt` 按当前预设 `prompt_order` 遍历 enabled 条目
+   - 普通条目：渲染 `prompt.content` 后按 `prompt.role`（system/user/assistant）独立成消息，相邻同 role 合并
+   - marker：调 `buildBuiltinPromptContent(identifier, character, userPersona, variables, chatType)` 拿动态内容
+   - `chatHistory` marker：原样展开为真实多条 user/assistant
+5. 采样参数从预设 JSON 顶层读：temperature / top_p / frequency_penalty / presence_penalty / openai_max_tokens
+6. **抗截断循环**（开关 `mainApi_antiCutoffEnabled` + 次数 `mainApi_antiCutoffMaxRetries`）：调主 API 后，若 finish_reason=length 或 strip 思维链后为空 → 把已生成内容当 assistant 消息 + 追 user「续写」再调，最多 N 次
+7. **关键**：每个 chunk 单独剥 `<think>...</think>`（含未闭合的）再累加。不能整体累加再 strip——多 chunk 间未闭合的 `<think>` 会让兜底正则吃掉后续好内容
+8. 累加结果用 `splitReplyToSegments`（仅按 `\n` 切，不剥任何文字）拆成多条气泡
+9. 完成时 `sendWebPushToAll(...)` fire-and-forget 推给所有订阅设备
+
+### 模板渲染 renderPromptTemplate
+
+按顺序：
+1. `{{// ... }}` 跨行注释剥离
+2. `{{random::a,b,c}}` 随机一个
+3. `{{roll::XdY}}` / `{{roll::Y}}` 骰点求和
+4. `{{name}}` / `<name>` 变量替换
+
+### 内置 marker（10 个，UI 锁死 / 内容由 server.js 决定）
+
+| identifier | 名称 | 内容来源 |
+| --- | --- | --- |
+| `bunnyosRealtime` | 实时模式 | 时间变量 |
+| `charDescription` | CHAR人设 | `<character_info>` 包角色卡 role_setting / other_setting（不含 rp_rules） |
+| `personaDescription` | USER人设 | `<user_info>` 包当前 user 人设 |
+| `worldInfoAfter` | 世界书 | `<world_info>` 包 QQ globalWorldbookIds 选中书 |
+| `worldInfoBefore` | 总结内容 | `<memories>` 包当前角色 worldbookIds 选中书（=AI 记忆） |
+| `scenario` | 场景信息 | 角色卡 scenario |
+| `dialogueExamples` | 示例聊天 | 角色卡 mes_example |
+| `onlinePrivateChat` | 线上·私聊 | chatType=private 时注入 `ONLINE_PRIVATE_CHAT_PROTOCOL` 常量 |
+| `onlineGroupChat` | 线上·群聊 | chatType=group 时注入 `ONLINE_GROUP_CHAT_PROTOCOL` 常量 |
+| `chatHistory` | 聊天记录 | 展开为真实多条 user/assistant |
+
+私聊/群聊 marker 内容在 server.js 顶部两个 const 定义，按 Liminal_online 原文精简到 1/3。
+
+## 关键数据模型
+
+**角色卡 `data/characters/<id>.json`**：核心字段 `name / avatar / role_setting / rp_rules / rp_rules_depth(0-4) / other_setting / scenario / mes_example / worldbookIds:[]`。`description / personality / nsfw_setting` 是旧兼容字段，分别映射 role_setting / rp_rules / other_setting。
+
+**聊天记录 `data/chats/qq/<characterId>.json`**：`{characterId, messages:[{role, type, text, created_at, ...}], updated_at}`。message type：`text / image / sticker / transfer / system`。可选字段：`reply_to`（回复引用） / `favorited` / `persona`（发送时 user 人设快照） / `reply_group_id` / `reply_group_versions` / `reply_group_version_index`（同一次 AI 生成的多气泡 + 多版本）。
+
+**user 人设 `data/userpersonas/<名字>.json`**：`id / name / gender / birthday / status / customStatus / signature / note / prompt / avatar`。注入 AI 的字段：name / gender / birthday / prompt。
+
+**世界书 `data/worlds/worldbooks.json`**：`{books: [{id, name, entries: [{id, name, content}]}]}`。条目就是文本块，无 key/depth/probability 命中引擎，纯打包集合。
+
+**酒馆预设**：标准 ST 结构。BunnyOS 在 `extensions.bunnyosPromptGroups` 存自定义分组，`extensions.bunnyosBuiltinArranged` 标记 builtin marker 已排序。
+
+**QQ 设置 `data/qq/settings.json`**：`currentPersonaId / currentPromptPresetId / globalWorldbookIds:[]`。
+
+## 前端约定
+
+- 主桌面响应宽窄屏切换：窄屏 iPhone 风、宽屏 macOS 风
+- App 用 iframe 挂载；iframe 通过 `postMessage` 发 `bunnyos:navigation-state`（含 title / canGoBack）让外层处理移动端返回栏
+- iframe 同源时外层会写 `documentElement.dataset.appLayout="mobile|desktop"`，App 内用 `html[data-app-layout]` 做窗口级响应式
+- 拖拽缩放时外层加 `.resizing` 类，禁掉 iframe 事件
+- 美化字体推荐 `.woff2`；`beauty_fontUrl` 支持 `.woff2/.woff/.ttf/.css`
+- 全屏 App 控制热区：鼠标靠近顶部展开红黄绿控制栏
+- QQ「我」页：钱包下拉旁是 QQ 专属预设选择 + 提示词管理入口（在 QQ 内全屏打开 prompt-manager）
+
+## 规划
+
+### 已完成的大件
+
+- 角色卡 ↔ 世界书绑定（多选 chip）
+- 角色 RP 规则按 depth 注入 history
+- 酒馆兼容预设 + 采样参数接管 + 新建空白预设
+- 私聊/群聊 marker 内置 + 按 chatType 互斥触发
+- BUNNY 系统信息 +xxx+
+- AI 代回（impersonate）
+- 模板宏：`{{//}} / {{random}} / {{roll}}`
+
+### 下一步
+
+**P0 总结模块**：自动给长对话生成摘要，写进角色绑定世界书的某本（"总结世界书"）。触发条件：消息数超阈值或 token 接近上下文上限。新增端点 `POST /api/qq/summarize`，由副 API 跑。
+
+**P1 群聊接入 AI**：`chatType=group` 路由已就位，需要：群聊 chat 界面、群聊聊天记录结构 `{groupId, members:[characterId], messages:[{senderId,...}]}`、`/api/qq/reply` 增加 `groupId` 支持、群成员轮替逻辑。
+
+**P1 主动发消息**：新增端点 `POST /api/qq/proactive`，按当前时间/上下文判断 char 是否会主动发。每次调用独立选 chatType。
+
+**P2 加号工具区扩展**：
+- 链接解析按钮：粘贴 URL → BunnyOS 抓 meta 描述给 AI。小红书等强反爬站点普通 `fetch` 只能兜底成链接卡片；若要标题、正文、封面图，需要配置第三方解析 API（设置 → 通用 API → 链接解析），接口返回 `title / description / image / url` 或包在 `data/result/note` 中均可。
+- 语音录入按钮：当前 Web Speech API 版本免费但不稳定，手机端可能因 HTTPS、iframe 权限或浏览器语音服务网络失败报 `not-allowed/network`。更稳定路线是浏览器 `MediaRecorder` 录 `audio/webm;codecs=opus` → 上传 BunnyOS 后端 → 后端调用 ASR（Whisper / SiliconFlow / OpenAI Transcription 等）→ 返回文字并填 `=MM:SS|content=`。
+- 礼物：保留占位
+
+**P3 设置 App 弹窗统一**：剩余的几个 `alert` 换成项目内 dialog
+
+**P3 存储层**：JSON 文件够用。若数据量起来再考虑 SQLite 索引层 + JSON 导入导出
+
+### PWA / 移动端注意
+
+- 设置、美化、API Key 等全局数据都来自后端 `settings.json`，不应依赖浏览器 `localStorage`。
+- PWA 安装版和浏览器版必须使用完全相同的 origin（协议、域名、端口都一致）。例如 `https://example.com` 与 `https://www.example.com`、`http://IP` 与 `https://域名` 都是不同来源，表现可能不同。
+- `/api/*` 响应必须 `no-store`，避免 Cloudflare、浏览器或安装版 PWA 拿到旧的空设置响应。若安装版仍显示旧设置，先删除桌面图标并清理该站点数据后重新安装。
+
+## VPS 部署
+
+```bash
+git clone <repo>
+cd BunnyOS
+npm install
+npm install -g pm2
+pm2 start ecosystem.config.js
+pm2 save && pm2 startup    # 开机自启
+```
+
+反代（Nginx/Caddy）把 HTTPS 域名指到 `localhost:3000`。务必 HTTPS（Web Push + PWA 强制）。Cloudflare 在前面代理可以，源站 HTTP 也行。
+
+首次启动会自动生成 `data/vapid.json`（VAPID 密钥对）——**不要提交到 git**，丢失会让所有已订阅设备失效。
+
+推送配置流程：在浏览器打开 BunnyOS → 设置 → 美化 → 自定义提示音 → 点「订阅本设备」→ 浏览器弹通知权限 → 同意。从此该设备就算关浏览器也能收到 AI 回复完成的 OS 系统通知。
+
+| 文件 | 用途 |
+| --- | --- |
+| `service-worker.js` | PWA + push 接收（根域，必须 `/service-worker.js`） |
+| `manifest.webmanifest` | PWA 安装信息 |
+| `data/vapid.json` | VAPID 密钥对（自动生成，加 .gitignore） |
+| `data/push-subscriptions.json` | 所有订阅本站推送的设备 |
+| `ecosystem.config.js` | PM2 配置 |
