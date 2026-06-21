@@ -151,148 +151,252 @@ async function sendTransfer() {
     closePopModal('transfer-modal');
 }
 
-// STT：Web Speech API 录音转字，填进输入框，格式 =MM:SS|content=
-const voiceState = { rec: null, startAt: 0, finalText: '', stopTimer: null, maxTimer: null, silenceTimer: null, stopping: false };
+// STT：MediaRecorder 录音 → 直传 Groq / 硅基流动 → 回填 =MM:SS|content=
+// 上次成功的服务商优先，配额/网络失败自动切对家；Key 无效不切（让用户去修）
+const voiceState = { recorder: null, stream: null, chunks: [], startAt: 0, mime: '', stopping: false, maxTimer: null };
+
+const ASR_PROVIDERS = {
+    siliconflow: {
+        label: '硅基流动',
+        url: 'https://api.siliconflow.cn/v1/audio/transcriptions',
+        model: 'FunAudioLLM/SenseVoiceSmall',
+        keyField: 'asr_siliconflowKey',
+    },
+    groq: {
+        label: 'Groq',
+        url: 'https://api.groq.com/openai/v1/audio/transcriptions',
+        model: 'whisper-large-v3-turbo',
+        keyField: 'asr_groqKey',
+    },
+};
 
 function setVoiceRecording(active) {
     const b = $('#btn-voice-input');
     b?.classList.toggle('recording', Boolean(active));
-    b?.setAttribute('aria-label', active ? '停止语音输入' : '语音输入');
+    b?.setAttribute('aria-label', active ? '停止录音' : '语音输入');
 }
 
-function finishVoiceInput(useCurrentInput = false) {
-    if (voiceState.stopTimer) {
-        clearTimeout(voiceState.stopTimer);
-        voiceState.stopTimer = null;
+function pickRecorderMime() {
+    const candidates = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/mp4;codecs=mp4a.40.2',
+        'audio/mp4',
+        'audio/ogg;codecs=opus',
+    ];
+    for (const m of candidates) {
+        if (window.MediaRecorder?.isTypeSupported?.(m)) return m;
     }
-    if (voiceState.maxTimer) {
-        clearTimeout(voiceState.maxTimer);
-        voiceState.maxTimer = null;
+    return '';
+}
+
+async function getAsrSettings() {
+    try {
+        const res = await fetch('/api/settings', { cache: 'no-store' });
+        if (!res.ok) return {};
+        const s = await res.json();
+        return {
+            groqKey: (s.asr_groqKey || '').trim(),
+            siliconflowKey: (s.asr_siliconflowKey || '').trim(),
+            lastWorking: s.asr_lastWorking || 'siliconflow',
+            raw: s,
+        };
+    } catch {
+        return {};
     }
-    if (voiceState.silenceTimer) {
-        clearTimeout(voiceState.silenceTimer);
-        voiceState.silenceTimer = null;
+}
+
+async function saveAsrLastWorking(name) {
+    try {
+        const res = await fetch('/api/settings', { cache: 'no-store' });
+        if (!res.ok) return;
+        const s = await res.json();
+        if (s.asr_lastWorking === name) return;
+        s.asr_lastWorking = name;
+        await fetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(s),
+        });
+    } catch {}
+}
+
+async function callAsrProvider(name, key, blob, mime) {
+    const cfg = ASR_PROVIDERS[name];
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 30000);
+    const form = new FormData();
+    const ext = mime.includes('webm') ? 'webm' : mime.includes('mp4') ? 'mp4' : mime.includes('ogg') ? 'ogg' : 'bin';
+    form.append('file', new File([blob], `audio.${ext}`, { type: mime }));
+    form.append('model', cfg.model);
+    let res;
+    try {
+        res = await fetch(cfg.url, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${key}` },
+            body: form,
+            signal: ctrl.signal,
+        });
+    } catch (e) {
+        clearTimeout(timer);
+        const err = new Error(e?.name === 'AbortError' ? '请求超时' : '网络失败');
+        err.kind = 'network';
+        throw err;
     }
-    const rec = voiceState.rec;
-    if (rec) {
-        rec.onresult = null;
-        rec.onerror = null;
-        rec.onend = null;
-        try { rec.abort?.(); } catch {}
+    clearTimeout(timer);
+    if (!res.ok) {
+        let body = '';
+        try { body = await res.text(); } catch {}
+        const err = new Error(`HTTP ${res.status}${body ? ': ' + body.slice(0, 160) : ''}`);
+        if (res.status === 401 || res.status === 403) err.kind = 'auth';
+        else if (res.status === 429 || /quota|rate.?limit|insufficient|exceed/i.test(body)) err.kind = 'quota';
+        else err.kind = 'http';
+        throw err;
     }
-    const duration = Math.max(1, Math.round((Date.now() - voiceState.startAt) / 1000));
+    const data = await res.json().catch(() => ({}));
+    return (data.text || '').trim();
+}
+
+async function transcribeWithFallback(blob, mime) {
+    const cfg = await getAsrSettings();
+    const all = [
+        { name: 'siliconflow', key: cfg.siliconflowKey },
+        { name: 'groq', key: cfg.groqKey },
+    ].map(p => ({ ...p, label: ASR_PROVIDERS[p.name].label }));
+    // 上次成功的优先
+    all.sort((a, b) => (a.name === cfg.lastWorking ? -1 : b.name === cfg.lastWorking ? 1 : 0));
+    const available = all.filter(p => p.key);
+    if (!available.length) {
+        toast('请先去 设置 - 语音 填入 Groq 或硅基流动的 API Key');
+        return null;
+    }
+    let lastErr = null;
+    for (let i = 0; i < available.length; i++) {
+        const p = available[i];
+        try {
+            const text = await callAsrProvider(p.name, p.key, blob, mime);
+            if (!text) {
+                lastErr = new Error('识别结果为空');
+                lastErr.kind = 'empty';
+                if (i < available.length - 1) {
+                    toast(`${p.label} 返回为空，切换到 ${available[i + 1].label}`);
+                }
+                continue;
+            }
+            if (p.name !== cfg.lastWorking) saveAsrLastWorking(p.name);
+            return text;
+        } catch (e) {
+            lastErr = e;
+            if (e.kind === 'auth') {
+                toast(`${p.label} Key 无效，请到 设置 - 语音 重填`);
+                return null;
+            }
+            if (i < available.length - 1) {
+                const reason = e.kind === 'quota' ? '免费额度用完' : e.kind === 'network' ? '网络失败' : '请求失败';
+                toast(`${p.label} ${reason}，切换到 ${available[i + 1].label}`);
+            }
+        }
+    }
+    toast(`语音识别失败：${lastErr?.message || '所有服务商均不可用'}`);
+    return null;
+}
+
+async function startVoiceRecording() {
+    if (!window.isSecureContext) {
+        toast('需要 HTTPS 或 localhost 环境');
+        return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+        toast('当前浏览器不支持 MediaRecorder，请换 Chrome / Edge / Safari');
+        return;
+    }
+    const cfg = await getAsrSettings();
+    if (!cfg.groqKey && !cfg.siliconflowKey) {
+        toast('请先去 设置 - 语音 填入 Groq 或硅基流动的 API Key');
+        return;
+    }
+    const mime = pickRecorderMime();
+    if (!mime) {
+        toast('当前浏览器不支持任何可用的音频编码');
+        return;
+    }
+    let stream;
+    try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+        toast('麦克风权限被拒绝：' + (e?.message || e?.name || '失败'));
+        return;
+    }
+    let recorder;
+    try {
+        recorder = new MediaRecorder(stream, { mimeType: mime });
+    } catch (e) {
+        try { stream.getTracks().forEach(t => t.stop()); } catch {}
+        toast('无法启动录音：' + (e?.message || e?.name || '失败'));
+        return;
+    }
+    voiceState.recorder = recorder;
+    voiceState.stream = stream;
+    voiceState.chunks = [];
+    voiceState.startAt = Date.now();
+    voiceState.mime = mime;
+    voiceState.stopping = false;
+    recorder.ondataavailable = (e) => { if (e.data?.size) voiceState.chunks.push(e.data); };
+    recorder.start();
+    setVoiceRecording(true);
+    toast('录音中，再点麦克风结束');
+    voiceState.maxTimer = setTimeout(() => {
+        if (voiceState.recorder) {
+            toast('已到 60 秒上限，自动结束');
+            stopVoiceRecording();
+        }
+    }, 60000);
+}
+
+async function stopVoiceRecording() {
+    const rec = voiceState.recorder;
+    const stream = voiceState.stream;
+    const mime = voiceState.mime;
+    const startAt = voiceState.startAt;
+    if (!rec) return;
+    if (voiceState.maxTimer) { clearTimeout(voiceState.maxTimer); voiceState.maxTimer = null; }
+    voiceState.recorder = null;
+    voiceState.stream = null;
+    setVoiceRecording(false);
+    const stopped = new Promise(resolve => {
+        rec.addEventListener('stop', resolve, { once: true });
+    });
+    try { rec.stop(); } catch {}
+    await stopped;
+    try { stream?.getTracks?.().forEach(t => t.stop()); } catch {}
+    const duration = Math.max(1, Math.round((Date.now() - startAt) / 1000));
     const mm = String(Math.floor(duration / 60)).padStart(2, '0');
     const ss = String(duration % 60).padStart(2, '0');
+    const blob = new Blob(voiceState.chunks, { type: mime });
+    voiceState.chunks = [];
+    if (!blob.size) {
+        toast('没录到声音');
+        return;
+    }
+    toast('识别中...');
+    const text = await transcribeWithFallback(blob, mime);
+    if (!text) return;
     const input = $('#chat-input');
-    const preview = input?.dataset.voicePreview ? input.value.trim() : '';
-    const content = (voiceState.finalText.trim() || (useCurrentInput ? preview : '')).trim();
     if (input) {
-        delete input.dataset.voicePreview;
-        input.value = content ? `=${mm}:${ss}|${content}=` : '';
+        input.value = `=${mm}:${ss}|${text}=`;
         input.focus();
         input.dispatchEvent(new Event('input', { bubbles: true }));
     }
-    voiceState.rec = null;
-    voiceState.startAt = 0;
-    voiceState.finalText = '';
-    voiceState.stopping = false;
-    setVoiceRecording(false);
 }
 
 function toggleVoiceInput() {
-    const btn = $('#btn-voice-input');
-    if (btn?.classList.contains('recording')) {
-        toast('已结束语音识别');
-        finishVoiceInput(true);
-        return;
-    }
-    if (!window.isSecureContext) {
-        toast('手机语音需要 HTTPS 域名或 localhost，当前页面不是安全上下文');
-        return;
-    }
-    const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!Rec) {
-        toast('当前浏览器不支持语音识别，建议用 Chrome / Edge 或 Safari');
-        return;
-    }
-    if (voiceState.rec) {
+    if (voiceState.recorder) {
         if (voiceState.stopping) return;
         voiceState.stopping = true;
-        finishVoiceInput(true);
+        stopVoiceRecording().finally(() => { voiceState.stopping = false; });
         return;
     }
-    const rec = new Rec();
-    rec.lang = 'zh-CN';
-    rec.continuous = true;
-    rec.interimResults = true;
-    voiceState.rec = rec;
-    voiceState.startAt = Date.now();
-    voiceState.finalText = '';
-    voiceState.stopping = false;
-    voiceState.maxTimer = setTimeout(() => {
-        toast('语音输入已到 60 秒上限');
-        finishVoiceInput(true);
-    }, 60000);
-    voiceState.silenceTimer = setTimeout(() => {
-        if (!voiceState.finalText.trim() && !$('#chat-input')?.dataset.voicePreview) {
-            toast('没有收到语音识别结果，当前浏览器语音服务可能不可用');
-            finishVoiceInput(true);
-        }
-    }, 10000);
-    setVoiceRecording(true);
-    toast('开始录音，再次点击麦克风结束');
-    rec.onresult = (event) => {
-        let finalPart = '';
-        let interim = '';
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-            const r = event.results[i];
-            if (r.isFinal) finalPart += r[0].transcript;
-            else interim += r[0].transcript;
-        }
-        if (finalPart) voiceState.finalText += finalPart;
-        const input = $('#chat-input');
-        if (input) {
-            const live = (voiceState.finalText + interim).trim();
-            input.dataset.voicePreview = '1';
-            input.value = live;
-        }
-        if ((voiceState.finalText + interim).trim() && voiceState.silenceTimer) {
-            clearTimeout(voiceState.silenceTimer);
-            voiceState.silenceTimer = null;
-        }
-    };
-    rec.onerror = (e) => {
-        const code = e.error || '未知错误';
-        const messages = {
-            'not-allowed': '麦克风权限被拒绝：请确认 HTTPS、浏览器麦克风权限，以及系统设置',
-            'service-not-allowed': '浏览器禁用了语音识别服务，可换 Chrome / Safari 或检查系统权限',
-            'audio-capture': '没有检测到可用麦克风',
-            'network': '语音识别网络服务不可用',
-            'no-speech': '没有识别到说话声'
-        };
-        toast(messages[code] || `语音识别失败：${code}`);
-        if (code === 'not-allowed' || code === 'service-not-allowed' || code === 'audio-capture' || code === 'network') {
-            finishVoiceInput(true);
-        }
-    };
-    rec.onend = () => {
-        finishVoiceInput(true);
-    };
-    try {
-        rec.start();
-    } catch (e) {
-        toast('无法启动麦克风，请检查权限');
-        rec.onend = null;
-        if (voiceState.stopTimer) clearTimeout(voiceState.stopTimer);
-        voiceState.stopTimer = null;
-        if (voiceState.maxTimer) clearTimeout(voiceState.maxTimer);
-        voiceState.maxTimer = null;
-        if (voiceState.silenceTimer) clearTimeout(voiceState.silenceTimer);
-        voiceState.silenceTimer = null;
-        voiceState.rec = null;
-        voiceState.stopping = false;
-        setVoiceRecording(false);
-    }
+    startVoiceRecording();
 }
 
 async function sendLinkCard() {

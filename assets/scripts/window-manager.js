@@ -399,18 +399,3 @@
             } catch (e) { console.error(e); }
         };
 
-        window.bunnyosRequestMicrophonePermission = async function() {
-            if (!window.isSecureContext) {
-                return { ok: false, error: '麦克风权限需要 HTTPS 域名或 localhost。' };
-            }
-            if (!navigator.mediaDevices?.getUserMedia) {
-                return { ok: false, error: '当前浏览器不支持麦克风权限申请。' };
-            }
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                stream.getTracks().forEach(track => track.stop());
-                return { ok: true };
-            } catch (e) {
-                return { ok: false, error: e?.message || e?.name || '未知错误' };
-            }
-        };

@@ -210,6 +210,30 @@
                         <button class="pill-btn" id="userMic_request" type="button" onclick="requestUserMicPermission()">授权</button>
                     </div>
                 </div>
+            </div>
+
+            <div class="section-footer" style="margin: 0 0 8px;">USER 语音转文字 (STT)</div>
+            <div class="list asr-list" style="margin-bottom: 24px;">
+                <div class="item asr-item">
+                    <label>
+                        硅基流动 Key
+                        <button type="button" class="asr-info-btn" onclick="showAsrHelp('siliconflow')" aria-label="说明"><i class="bi bi-info-circle"></i></button>
+                    </label>
+                    <input type="password" id="asr_siliconflowKey" placeholder="国内直连，推荐" oninput="saveData()" autocomplete="off">
+                </div>
+                <div class="item asr-item">
+                    <label>
+                        Groq Key
+                        <button type="button" class="asr-info-btn" onclick="showAsrHelp('groq')" aria-label="说明"><i class="bi bi-info-circle"></i></button>
+                    </label>
+                    <input type="password" id="asr_groqKey" placeholder="需要梯子访问" oninput="saveData()" autocomplete="off">
+                </div>
+                <div class="item">
+                    <span class="muted" style="font-size:12px; line-height:1.5;">两个都填会自动 fallback：优先用上次成功的，配额用完或网络失败时切到另一个。Key 仅保存在你本地 settings.json。</span>
+                </div>
+            </div>
+
+            <div class="list" style="margin-bottom: 24px;">
                 <div class="item">
                     <label>CHAR 语音服务商</label>
                     <span class="muted">用于角色语音</span>
@@ -589,6 +613,17 @@
             <p>版本 1.0.0 (Local Deploy)</p>
         </div>
     </div>
+    <!-- ASR 帮助弹窗（通用） -->
+    <div id="asr-help-modal" class="asr-help-modal hidden" onclick="closeAsrHelp(event)">
+        <div class="asr-help-card" onclick="event.stopPropagation()">
+            <div class="asr-help-title" id="asr-help-title"></div>
+            <div class="asr-help-body" id="asr-help-body"></div>
+            <div class="asr-help-actions">
+                <button class="pill-btn" type="button" onclick="closeAsrHelp()">知道了</button>
+            </div>
+        </div>
+    </div>
+
     <script src="settings.js"></script>
 </body>
 </html>

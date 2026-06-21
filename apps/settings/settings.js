@@ -637,13 +637,17 @@ let settings = {};
                 el.textContent = '浏览器不支持';
                 return;
             }
+            if (settings.userMicPermissionGranted) {
+                el.textContent = '已允许';
+                return;
+            }
             try {
                 const status = await navigator.permissions?.query?.({ name: 'microphone' });
                 if (status?.state === 'granted') el.textContent = '已允许';
                 else if (status?.state === 'denied') el.textContent = '已拒绝';
                 else el.textContent = '未授权';
             } catch {
-                el.textContent = settings.userMicPermissionGranted ? '已尝试授权' : '未授权';
+                el.textContent = '未授权';
             }
         }
 
@@ -652,39 +656,58 @@ let settings = {};
             const button = document.getElementById('userMic_request');
             if (statusEl) statusEl.textContent = '正在申请...';
             if (button) button.disabled = true;
-            if (!window.isSecureContext) {
-                alert('麦克风权限需要 HTTPS 域名或 localhost。');
-                await refreshUserMicStatus();
-                if (button) button.disabled = false;
-                return;
-            }
             try {
-                const parentRequest = window.parent !== window ? window.parent?.bunnyosRequestMicrophonePermission : null;
-                const result = typeof parentRequest === 'function'
-                    ? await parentRequest()
-                    : await (async () => {
-                        if (!navigator.mediaDevices?.getUserMedia) {
-                            return { ok: false, error: '当前浏览器不支持麦克风权限申请。' };
-                        }
-                        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                        stream.getTracks().forEach(track => track.stop());
-                        return { ok: true };
-                    })();
-                if (!result?.ok) {
-                    throw new Error(result?.error || '权限未允许');
-                }
+                if (!window.isSecureContext) throw new Error('需要 HTTPS 或 localhost');
+                if (!navigator.mediaDevices?.getUserMedia) throw new Error('浏览器不支持');
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                stream.getTracks().forEach(track => track.stop());
                 settings.userMicPermissionGranted = true;
+                if (statusEl) statusEl.textContent = '已允许';
                 await saveData();
-                await refreshUserMicStatus();
-                alert('USER 语音输入权限已允许。');
             } catch (e) {
                 settings.userMicPermissionGranted = false;
+                if (statusEl) statusEl.textContent = '未允许：' + (e?.message || e?.name || '失败');
                 await saveData();
-                await refreshUserMicStatus();
-                alert('麦克风权限未允许：' + (e?.message || e?.name || '未知错误'));
             } finally {
                 if (button) button.disabled = false;
             }
+        }
+
+        const ASR_HELP = {
+            siliconflow: {
+                title: '硅基流动 STT Key 获取',
+                body: `<p><b>免费 SenseVoice 中文识别，国内直连不需要梯子。</b></p>
+<ol>
+  <li>打开 <a href="https://cloud.siliconflow.cn" target="_blank" rel="noopener">https://cloud.siliconflow.cn</a>，用手机号注册登录</li>
+  <li>左侧菜单「API 密钥」→「新建 API 密钥」→ 复制</li>
+  <li>粘贴到下方输入框（实时自动保存）</li>
+</ol>
+<p class="muted">使用 <code>FunAudioLLM/SenseVoiceSmall</code> 模型，永久免费。中文识别质量比 Whisper 略好。Key 只存在你自己的 BunnyOS 后端，不会上传到任何地方。</p>`,
+            },
+            groq: {
+                title: 'Groq STT Key 获取',
+                body: `<p><b>免费 Whisper 语音识别，速度极快（1 秒内出结果）。</b></p>
+<ol>
+  <li>打开 <a href="https://console.groq.com" target="_blank" rel="noopener">https://console.groq.com</a>，用 Google / GitHub 登录</li>
+  <li>左侧「API Keys」→「Create API Key」→ 复制</li>
+  <li>粘贴到下方输入框（实时自动保存）</li>
+</ol>
+<p class="muted">Groq 是美国服务，国内访问需要梯子。免费档每天约 2000 次请求，单人用不完。Key 只存在你自己的 BunnyOS 后端，不会上传到任何地方。</p>`,
+            },
+        };
+
+        function showAsrHelp(provider) {
+            const info = ASR_HELP[provider];
+            if (!info) return;
+            const modal = document.getElementById('asr-help-modal');
+            document.getElementById('asr-help-title').textContent = info.title;
+            document.getElementById('asr-help-body').innerHTML = info.body;
+            modal?.classList.remove('hidden');
+        }
+
+        function closeAsrHelp(event) {
+            if (event && event.target !== event.currentTarget) return;
+            document.getElementById('asr-help-modal')?.classList.add('hidden');
         }
 
 
@@ -921,6 +944,8 @@ let settings = {};
             clampNumber,
             syncRangeValue,
             requestUserMicPermission,
+            showAsrHelp,
+            closeAsrHelp,
             saveData,
             loadPreset,
             savePreset,

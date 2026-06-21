@@ -168,22 +168,11 @@
     $('#btn-fav-list')?.addEventListener('click', openFavListModal);
     // 加号 → 链接：粘贴 URL 发链接卡片
     $('#btn-link')?.addEventListener('click', sendLinkCard);
-    // 加号 → 麦克风：语音输入。移动端同时兜住 touch / pointer / click，避免 PWA 中第二次点击丢失。
-    {
-        const voiceButton = $('#btn-voice-input');
-        let lastVoiceToggleAt = 0;
-        const onVoiceToggle = (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            const now = Date.now();
-            if (now - lastVoiceToggleAt < 260) return;
-            lastVoiceToggleAt = now;
-            toggleVoiceInput();
-        };
-        voiceButton?.addEventListener('touchstart', onVoiceToggle, { passive: false });
-        voiceButton?.addEventListener('pointerdown', onVoiceToggle);
-        voiceButton?.addEventListener('click', onVoiceToggle);
-    }
+    // 加号 → 麦克风：语音输入（MediaRecorder → ASR API）
+    $('#btn-voice-input')?.addEventListener('click', (event) => {
+        event.preventDefault();
+        toggleVoiceInput();
+    });
     $$('#fav-list-modal [data-fav-close]').forEach(el => {
         el.addEventListener('click', () => {
             setFavSelectMode(false);
