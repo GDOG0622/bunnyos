@@ -1384,7 +1384,12 @@ app.post('/api/qq/import-carrot', (req, res) => {
             return v;
         };
 
-        const report = { stickerPacks: 0, stickerItems: 0, frames: 0, avatars: 0, fonts: 0, notifSounds: 0, skipped: [] };
+        const report = {
+            stickerPacks: 0, stickerItems: 0, stickerSkipped: 0,
+            frames: 0, frameSkipped: 0,
+            avatars: 0, avatarSkipped: 0,
+            fonts: 0, notifSounds: 0, skipped: []
+        };
 
         // 1) 表情包：cip_sticker_data → {packName: [{desc, url}]}
         const stickerData = parseField('cip_sticker_data');
@@ -1403,7 +1408,8 @@ app.post('/api/qq/import-carrot', (req, res) => {
                 }
                 const urlSet = new Set((pack.items || []).map(it => it.url));
                 carrotItems.forEach(it => {
-                    if (!it || !it.url || urlSet.has(it.url)) return;
+                    if (!it || !it.url) return;
+                    if (urlSet.has(it.url)) { report.stickerSkipped += 1; return; }
                     pack.items = pack.items || [];
                     pack.items.push({ name: it.desc || '', url: it.url });
                     urlSet.add(it.url);
@@ -1424,7 +1430,7 @@ app.post('/api/qq/import-carrot', (req, res) => {
         const pushFrame = (name, url) => {
             if (!url) return;
             // 去重：相同 url 不再加
-            if (beauties.frames.some(f => f && f.url === url)) return;
+            if (beauties.frames.some(f => f && f.url === url)) { report.frameSkipped += 1; return; }
             beauties.frames.push({ id: shortId(), name, preview: url, url });
             report.frames += 1;
         };
@@ -1452,7 +1458,10 @@ app.post('/api/qq/import-carrot', (req, res) => {
                 const userUrl = prof.user || '';
                 if (!charUrl && !userUrl) return;
                 // 去重：char + user 都相同视为同一对
-                if (beauties.avatars.some(a => a && a.charUrl === charUrl && a.userUrl === userUrl)) return;
+                if (beauties.avatars.some(a => a && a.charUrl === charUrl && a.userUrl === userUrl)) {
+                    report.avatarSkipped += 1;
+                    return;
+                }
                 beauties.avatars.push({
                     id: shortId(),
                     name,

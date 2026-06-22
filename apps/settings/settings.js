@@ -553,9 +553,9 @@ let settings = {};
                 const r = data.report || {};
                 const lines = [
                     '✓ 导入完成（未扣 cc）',
-                    `· 表情包：新增 ${r.stickerPacks} 组，新增贴纸 ${r.stickerItems} 张`,
-                    `· 头像框：新增 ${r.frames} 条（已按 char/user 拆分）`,
-                    `· 头像对：新增 ${r.avatars} 对`,
+                    `· 表情包：新增 ${r.stickerPacks} 组，新增贴纸 ${r.stickerItems} 张` + (r.stickerSkipped ? `（重复跳过 ${r.stickerSkipped} 张）` : ''),
+                    `· 头像框：新增 ${r.frames} 条（已按 char/user 拆分）` + (r.frameSkipped ? `（重复跳过 ${r.frameSkipped} 条）` : ''),
+                    `· 头像对：新增 ${r.avatars} 对` + (r.avatarSkipped ? `（重复跳过 ${r.avatarSkipped} 对）` : ''),
                     `· 字体定义：${r.fonts || 0} 条（存到 settings.json.imported_carrot，待字体模块上线）`,
                     `· 提示音：${r.notifSounds || 0} 条（同上）`,
                 ];
