@@ -44,16 +44,9 @@ function normalizeInputLink(url) {
     return /^https?:\/\//i.test(value) ? value : `https://${value}`;
 }
 
-function compactLinkDescription(text) {
-    const value = String(text || '').replace(/\s+/g, ' ').trim();
-    if (value.length <= 42) return value;
-    return `${value.slice(0, 42)}...`;
-}
-
 async function appendLinkPreviewMessage(data, fallbackUrl) {
     const cleanTitle = String(data?.title || '').trim();
     const cleanDesc = String(data?.description || '').trim().replace(/^预览受限：.*/, '');
-    const cardDesc = compactLinkDescription(cleanDesc);
     const limitedReason = String(data?.limitedReason || '').trim();
     const source = String(data?.source || '').trim();
     const parts = [cleanTitle, cleanDesc].filter(Boolean).filter((p, i, a) => a.indexOf(p) === i);
@@ -61,7 +54,7 @@ async function appendLinkPreviewMessage(data, fallbackUrl) {
         role: 'user', type: 'link',
         url: data?.url || fallbackUrl,
         title: cleanTitle,
-        description: cardDesc,
+        description: cleanDesc,
         fullDescription: cleanDesc,
         image: data?.image || '',
         siteName: data?.siteName || '',
@@ -204,10 +197,10 @@ function parseFrontendXhsFromHtml(html, baseUrl) {
                 || images[0]?.infoList?.find(i => /WB_DFT|H5_DTL|DFT/i.test(i.imageScene))?.url
                 || images[0]?.infoList?.[0]?.url
                 || '';
-            const desc = String(note.desc || '').replace(/#[^#\n]{1,30}(?:\[话题\])?#/g, '').replace(/[ \t]+/g, ' ').trim();
+            const desc = String(note.desc || '').trim();
             return {
                 url: baseUrl,
-                title: String(note.title || '').trim() || desc.slice(0, 60) || '小红书笔记',
+                title: String(note.title || '').trim() || desc || '小红书笔记',
                 description: desc,
                 image,
                 siteName: '小红书',

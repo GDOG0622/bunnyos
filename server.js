@@ -1930,20 +1930,19 @@ app.post('/api/qq/link-preview', async (req, res) => {
             if (!title && !description && !imageCandidate) return null;
             return {
                 url: data.url || data.shareUrl || u.toString(),
-                title: String(title || inferSiteName(host)).slice(0, 200),
-                description: String(description || '').slice(0, 1200),
+                title: String(title || inferSiteName(host)),
+                description: String(description || ''),
                 image: imageCandidate ? new URL(String(imageCandidate), u.toString()).toString() : '',
                 siteName: data.siteName || data.source || inferSiteName(host),
                 source: 'third-party'
             };
         };
-        const trimMarkdownNoise = (text, max = 400) => String(text || '')
+        const trimMarkdownNoise = (text) => String(text || '')
             .replace(/!\[[^\]]*]\([^)]+\)/g, '')
             .replace(/\[[^\]]+]\([^)]+\)/g, '$1')
-            .replace(/[#>*_`~|-]+/g, ' ')
+            .replace(/[>*_`~|]+/g, ' ')
             .replace(/\s+/g, ' ')
-            .trim()
-            .slice(0, max);
+            .trim();
         const normalizeJinaMarkdown = (markdown, sourceUrl) => {
             const content = String(markdown || '').trim();
             if (!content) return null;
@@ -1966,12 +1965,12 @@ app.post('/api/qq/link-preview', async (req, res) => {
                     && !/^!\[[^\]]*]\(/.test(line)
                     && !/^(打开|下载|登录|注册|复制|扫码|点击|更多精彩|当前浏览器)/.test(line));
             const bodyText = trimMarkdownNoise(lines
-                .map(line => trimMarkdownNoise(line, 300))
+                .map(line => trimMarkdownNoise(line))
                 .filter(line => line.length >= 8)
                 .filter((line, index, arr) => arr.indexOf(line) === index)
-                .join(' '), 1200);
-            const description = trimMarkdownNoise(descriptionLine || sharedText || bodyText, 1200);
-            const title = trimMarkdownNoise((genericTitle ? '' : titleLine) || sharedText || description, 200);
+                .join(' '));
+            const description = trimMarkdownNoise(descriptionLine || sharedText || bodyText);
+            const title = trimMarkdownNoise((genericTitle ? '' : titleLine) || sharedText || description);
             if (!title && !description && !imageMatch?.[1]) return null;
             return {
                 url: sourceUrl || u.toString(),
@@ -2055,7 +2054,7 @@ app.post('/api/qq/link-preview', async (req, res) => {
             if (!resp.ok || !/text\/html|application\/xhtml/i.test(ctype)) {
                 return { finalUrl: finalU, html: '', resp };
             }
-            // 读最多 256KB
+            // 读最多 2MB，避免 __INITIAL_STATE__ 靠后时截断解析数据。
             const reader = resp.body?.getReader?.();
             let html = '', total = 0;
             const dec = new TextDecoder('utf-8');
@@ -2064,13 +2063,13 @@ app.post('/api/qq/link-preview', async (req, res) => {
                     const { done, value } = await reader.read();
                     if (done) break;
                     total += value.length;
-                    if (total > 256 * 1024) { try { await reader.cancel(); } catch {} break; }
+                    if (total > 2 * 1024 * 1024) { try { await reader.cancel(); } catch {} break; }
                     html += dec.decode(value, { stream: true });
                 }
                 html += dec.decode();
             } else {
                 html = await resp.text();
-                if (html.length > 256 * 1024) html = html.slice(0, 256 * 1024);
+                if (html.length > 2 * 1024 * 1024) html = html.slice(0, 2 * 1024 * 1024);
             }
             return { finalUrl: finalU, html, resp };
         };
@@ -2154,13 +2153,9 @@ app.post('/api/qq/link-preview', async (req, res) => {
                         || images[0]?.infoList?.find(i => /WB_DFT|H5_DTL|DFT/i.test(i.imageScene))?.url
                         || images[0]?.infoList?.[0]?.url
                         || '';
-                    // 去掉描述里的 #话题# / #话题[话题]# 标签
-                    const cleanDesc = desc
-                        .replace(/#[^#\n]{1,30}(?:\[话题\])?#/g, '')
-                        .replace(/[ \t]+/g, ' ')
-                        .trim();
+                    const cleanDesc = desc;
                     return {
-                        title: title || cleanDesc.slice(0, 60) || '小红书笔记',
+                        title: title || cleanDesc || '小红书笔记',
                         description: cleanDesc,
                         image,
                         siteName: '小红书',
@@ -2234,8 +2229,8 @@ app.post('/api/qq/link-preview', async (req, res) => {
                 : '小红书内容解析失败';
             return res.json({
                 url: finalUrl,
-                title: (xhsData?.title || sharedXhs || '小红书笔记').slice(0, 200),
-                description: (sharedXhs || '').slice(0, 1200),
+                title: xhsData?.title || sharedXhs || '小红书笔记',
+                description: sharedXhs || '',
                 image: xhsData?.image || '',
                 siteName: '小红书',
                 source: 'xhs-limited',
@@ -2251,8 +2246,8 @@ app.post('/api/qq/link-preview', async (req, res) => {
             if (hasUseful) {
                 return res.json({
                     url: finalUrl,
-                    title: og.title.slice(0, 200),
-                    description: og.description.slice(0, 1200),
+                    title: og.title,
+                    description: og.description,
                     image: og.image,
                     siteName: og.siteName.slice(0, 80),
                     source: 'og'
@@ -2266,7 +2261,7 @@ app.post('/api/qq/link-preview', async (req, res) => {
 
         // Step 6: 全失败 → 用 rawText 里的分享文字兜底
         if (sharedText) {
-            return res.json({ url: finalUrl, title: sharedText.slice(0, 200), description: '', image: '', siteName: inferSiteName(finalHost), source: 'shared-text' });
+            return res.json({ url: finalUrl, title: sharedText, description: '', image: '', siteName: inferSiteName(finalHost), source: 'shared-text' });
         }
         return res.json(fallbackPreview(finalUrl, '无法解析'));
     } catch (e) {
@@ -2967,12 +2962,16 @@ function qqMessageToText(msg) {
         case 'voice':
             return String(msg.text || '');
         case 'link': {
+            const url = String(msg.url || '').trim();
             const t = String(msg.title || '').trim();
             const d = String(msg.fullDescription || msg.description || '').trim();
+            const image = String(msg.image || '').trim();
             const s = String(msg.siteName || '').trim();
             const parts = [];
+            if (url) parts.push(`URL：${url}`);
             if (t) parts.push(`标题：${t}`);
             if (d) parts.push(`描述：${d}`);
+            if (image) parts.push(`封面图：${image}`);
             if (s) parts.push(`站点：${s}`);
             return `[链接卡片] ${parts.join('；')}`;
         }
