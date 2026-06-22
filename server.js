@@ -112,8 +112,37 @@ const USER_PERSONAS_DIR = path.join(DATA_DIR, 'userpersonas');
 const AVATARS_DIR = path.join(DATA_DIR, 'assets', 'avatars');
 const USER_PERSONA_AVATARS_DIR = path.join(AVATARS_DIR, 'userpersonas');
 const LINK_PREVIEWS_DIR = path.join(DATA_DIR, 'assets', 'link-previews');
+const LINK_PREVIEW_CACHE_MAX_BYTES = 100 * 1024 * 1024;
+const LINK_PREVIEW_CACHE_MAX_FILES = 500;
 const VAPID_FILE = path.join(DATA_DIR, 'vapid.json');
 const PUSH_SUBSCRIPTIONS_FILE = path.join(DATA_DIR, 'push-subscriptions.json');
+
+function cleanupLinkPreviewCache() {
+    try {
+        const root = path.resolve(LINK_PREVIEWS_DIR);
+        if (!fs.existsSync(root)) return;
+        const files = fs.readdirSync(root)
+            .map(name => {
+                const filePath = path.resolve(root, name);
+                if (!filePath.startsWith(root + path.sep)) return null;
+                const stat = fs.statSync(filePath);
+                if (!stat.isFile()) return null;
+                return { filePath, size: stat.size, mtimeMs: stat.mtimeMs };
+            })
+            .filter(Boolean)
+            .sort((a, b) => a.mtimeMs - b.mtimeMs);
+        let total = files.reduce((sum, item) => sum + item.size, 0);
+        let count = files.length;
+        for (const item of files) {
+            if (total <= LINK_PREVIEW_CACHE_MAX_BYTES && count <= LINK_PREVIEW_CACHE_MAX_FILES) break;
+            fs.rmSync(item.filePath, { force: true });
+            total -= item.size;
+            count -= 1;
+        }
+    } catch (e) {
+        console.warn('[link-preview cache cleanup failed]', e?.message || e);
+    }
+}
 
 // 辅助函数：确保目录和文件存在
 function ensureFileExist(filePath, defaultData = {}) {
@@ -1965,6 +1994,7 @@ app.post('/api/qq/link-preview', async (req, res) => {
             candidates.push(parsed.toString());
             const hash = crypto.createHash('sha1').update(parsed.toString()).digest('hex').slice(0, 20);
             fs.mkdirSync(LINK_PREVIEWS_DIR, { recursive: true });
+            cleanupLinkPreviewCache();
             for (const candidate of candidates) {
                 try {
                     const ctrl = new AbortController();
@@ -1990,7 +2020,13 @@ app.post('/api/qq/link-preview', async (req, res) => {
                     const ext = imageExtFromType(ctype, candidate);
                     const filename = `${hash}${ext}`;
                     const filePath = path.join(LINK_PREVIEWS_DIR, filename);
+                    if (fs.existsSync(filePath)) {
+                        const now = new Date();
+                        fs.utimesSync(filePath, now, now);
+                        return `/data/assets/link-previews/${filename}`;
+                    }
                     fs.writeFileSync(filePath, bytes);
+                    cleanupLinkPreviewCache();
                     return `/data/assets/link-previews/${filename}`;
                 } catch (e) {
                     console.warn('[link-preview image cache failed]', e?.message || e);
@@ -3594,6 +3630,7 @@ app.post('/api/qq/impersonate', async (req, res) => {
 });
 
 app.listen(PORT, () => {
+    cleanupLinkPreviewCache();
     console.log('===========================================');
     console.log(`[BunnyOS v2-qq-413debug] booted ${new Date().toISOString()}`);
     console.log(`  body limit: 200mb (json + urlencoded)`);
