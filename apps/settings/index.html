@@ -545,16 +545,40 @@
                     <label>启用</label>
                     <label class="switch"><input type="checkbox" id="notify_enabled" checked onchange="saveData()"><span></span></label>
                 </div>
+
+                <!-- 新增声音 -->
                 <div class="item vertical">
-                    <label>成功提示音 URL（HTTP 200 + 有内容）</label>
-                    <input type="text" id="notify_successSoundUrl" placeholder="https://.../success.mp3" oninput="saveData()">
-                    <button class="btn-text" type="button" onclick="previewNotifySound('notify_successSoundUrl')">试听</button>
+                    <label>添加新声音</label>
+                    <input type="text" id="notify_newSoundUrl" placeholder="填入音频直链（.mp3 / .wav / .ogg）">
+                    <div class="button-row" style="margin-top: 6px;">
+                        <button class="pill-btn" type="button" onclick="previewNewNotifySound()">试听</button>
+                        <button class="pill-btn" type="button" onclick="saveNewNotifySound()">保存</button>
+                    </div>
                 </div>
+
+                <!-- 已保存列表 -->
                 <div class="item vertical">
-                    <label>失败提示音 URL（空回 / 截断 / 报错）</label>
-                    <input type="text" id="notify_failSoundUrl" placeholder="https://.../fail.mp3" oninput="saveData()">
-                    <button class="btn-text" type="button" onclick="previewNotifySound('notify_failSoundUrl')">试听</button>
+                    <label>已保存的声音</label>
+                    <div id="notify_savedSoundsList" style="display:flex;flex-direction:column;gap:4px;margin-top:4px;"></div>
                 </div>
+
+                <!-- 选择 -->
+                <div class="item">
+                    <label>成功提示音</label>
+                    <select id="notify_successSoundName" onchange="onSelectNotifySound('success')">
+                        <option value="">--未选择--</option>
+                    </select>
+                </div>
+                <div class="item">
+                    <label>失败提示音</label>
+                    <select id="notify_failSoundName" onchange="onSelectNotifySound('fail')">
+                        <option value="">--未选择--</option>
+                    </select>
+                </div>
+
+                <!-- 隐藏字段：保持 notify.js 兼容性 -->
+                <input type="hidden" id="notify_successSoundUrl">
+                <input type="hidden" id="notify_failSoundUrl">
                 <div class="item">
                     <label>浏览器推送订阅 <span id="push_status" style="color:var(--text-sub);font-size:12px;margin-left:8px;"></span></label>
                     <div class="button-row">

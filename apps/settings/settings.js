@@ -131,8 +131,12 @@ let settings = {};
         }
 
         function applySettingsToForm() {
+            // 启动 / 切换设备同步前：合并 carrot 导入资源 + 旧字段迁移
+            mergeImportedAssets();
             renderApiConfigSelects();
             renderBeautyPresetSelects();
+            renderSavedSoundsList();
+            renderNotifySoundSelects();
 
             const elements = document.querySelectorAll('input, textarea, select');
             elements.forEach(el => {
@@ -1141,6 +1145,13 @@ let settings = {};
             renameBeautyPreset,
             deleteBeautyPreset,
             previewNotifySound,
+            previewNewNotifySound,
+            saveNewNotifySound,
+            deleteSavedSound,
+            onSelectNotifySound,
+            renderSavedSoundsList,
+            renderNotifySoundSelects,
+            mergeImportedAssets,
             showJinaReaderHelp,
             subscribePushHere,
             unsubscribePushHere,
@@ -1183,6 +1194,160 @@ let settings = {};
             } catch (e) { alert('测试推送失败：' + e.message); }
         }
         setTimeout(refreshPushStatus, 600);
+
+        // ===== 自定义提示音：声音库 + 下拉选择 =====
+        function getSavedSounds() {
+            if (!settings.notify_savedSounds || typeof settings.notify_savedSounds !== 'object') {
+                settings.notify_savedSounds = {};
+            }
+            return settings.notify_savedSounds;
+        }
+
+        function playSoundUrl(url) {
+            if (!url) { alert('URL 为空'); return; }
+            const previewFn = window.parent?.bunnyosPreviewNotifySound;
+            if (typeof previewFn === 'function') {
+                Promise.resolve(previewFn(url)).catch(err => alert('试听失败：' + (err?.message || '浏览器拦截了自动播放')));
+            } else {
+                const audio = new Audio(url);
+                audio.play().catch(err => alert('试听失败：' + (err?.message || '')));
+            }
+        }
+
+        function previewNewNotifySound() {
+            const url = (document.getElementById('notify_newSoundUrl')?.value || '').trim();
+            playSoundUrl(url);
+        }
+
+        async function saveNewNotifySound() {
+            const url = (document.getElementById('notify_newSoundUrl')?.value || '').trim();
+            if (!url) { alert('请先填入音频链接'); return; }
+            const name = prompt('给这个声音起个名字：', '');
+            if (!name || !name.trim()) return;
+            const saved = getSavedSounds();
+            saved[name.trim()] = url;
+            document.getElementById('notify_newSoundUrl').value = '';
+            renderSavedSoundsList();
+            renderNotifySoundSelects();
+            await saveData();
+        }
+
+        async function deleteSavedSound(name) {
+            if (!confirm(`删除声音「${name}」？\n如有提示音正在用它，会自动改成"未选择"。`)) return;
+            const saved = getSavedSounds();
+            delete saved[name];
+            if (settings.notify_successSoundName === name) {
+                settings.notify_successSoundName = '';
+                settings.notify_successSoundUrl = '';
+            }
+            if (settings.notify_failSoundName === name) {
+                settings.notify_failSoundName = '';
+                settings.notify_failSoundUrl = '';
+            }
+            renderSavedSoundsList();
+            renderNotifySoundSelects();
+            await saveData();
+        }
+
+        function renderSavedSoundsList() {
+            const wrap = document.getElementById('notify_savedSoundsList');
+            if (!wrap) return;
+            const saved = getSavedSounds();
+            const names = Object.keys(saved).sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
+            if (!names.length) {
+                wrap.innerHTML = '<div style="color:var(--text-sub);font-size:13px;padding:4px 0;">还没有保存任何声音</div>';
+                return;
+            }
+            wrap.innerHTML = names.map(name => `
+                <div style="display:flex;align-items:center;gap:8px;padding:4px 0;">
+                    <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;" title="${escapeAttrSet(saved[name])}">${escapeAttrSet(name)}</span>
+                    <button type="button" class="pill-btn" data-sound-play="${escapeAttrSet(name)}" style="padding:2px 10px;">▶</button>
+                    <button type="button" class="icon-btn danger" data-sound-del="${escapeAttrSet(name)}" title="删除">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 14h10l1-14"/><path d="M9 7V4h6v3"/></svg>
+                    </button>
+                </div>
+            `).join('');
+            wrap.querySelectorAll('[data-sound-play]').forEach(b => {
+                b.addEventListener('click', () => playSoundUrl(saved[b.dataset.soundPlay]));
+            });
+            wrap.querySelectorAll('[data-sound-del]').forEach(b => {
+                b.addEventListener('click', () => deleteSavedSound(b.dataset.soundDel));
+            });
+        }
+
+        function escapeAttrSet(s) {
+            return String(s).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+        }
+
+        function renderNotifySoundSelects() {
+            const saved = getSavedSounds();
+            const names = Object.keys(saved).sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
+            ['success', 'fail'].forEach(kind => {
+                const sel = document.getElementById(`notify_${kind}SoundName`);
+                if (!sel) return;
+                const cur = settings[`notify_${kind}SoundName`] || '';
+                sel.innerHTML = '<option value="">--未选择--</option>' + names.map(n =>
+                    `<option value="${escapeAttrSet(n)}"${n === cur ? ' selected' : ''}>${escapeAttrSet(n)}</option>`
+                ).join('');
+            });
+        }
+
+        async function onSelectNotifySound(kind) {
+            const sel = document.getElementById(`notify_${kind}SoundName`);
+            const name = sel?.value || '';
+            const saved = getSavedSounds();
+            settings[`notify_${kind}SoundName`] = name;
+            settings[`notify_${kind}SoundUrl`] = name ? (saved[name] || '') : '';
+            // 同步隐藏字段以便 notify.js 直接读
+            const hidden = document.getElementById(`notify_${kind}SoundUrl`);
+            if (hidden) hidden.value = settings[`notify_${kind}SoundUrl`];
+            await saveData();
+        }
+
+        // 启动时把老字段 + carrot 导入的字体/声音合并进各自的库
+        function mergeImportedAssets() {
+            // 老 notify_successSoundUrl / failSoundUrl → savedSounds（"成功-默认" / "失败-默认"）
+            const saved = getSavedSounds();
+            if (settings.notify_successSoundUrl && !settings.notify_successSoundName) {
+                const n = '成功-默认';
+                if (!saved[n]) saved[n] = settings.notify_successSoundUrl;
+                settings.notify_successSoundName = n;
+            }
+            if (settings.notify_failSoundUrl && !settings.notify_failSoundName) {
+                const n = '失败-默认';
+                if (!saved[n]) saved[n] = settings.notify_failSoundUrl;
+                settings.notify_failSoundName = n;
+            }
+            // carrot 导入的提示音
+            const ic = settings.imported_carrot || {};
+            if (ic.notifSounds && typeof ic.notifSounds === 'object') {
+                Object.entries(ic.notifSounds).forEach(([name, url]) => {
+                    if (!saved[name]) saved[name] = url;
+                });
+                // carrot 默认激活的声音
+                if (ic.notifSuccess && saved[ic.notifSuccess] && !settings.notify_successSoundName) {
+                    settings.notify_successSoundName = ic.notifSuccess;
+                    settings.notify_successSoundUrl = saved[ic.notifSuccess];
+                }
+                if (ic.notifFail && saved[ic.notifFail] && !settings.notify_failSoundName) {
+                    settings.notify_failSoundName = ic.notifFail;
+                    settings.notify_failSoundUrl = saved[ic.notifFail];
+                }
+            }
+            // carrot 导入的字体 → 合并到 beautyPresets.font
+            if (ic.fonts && typeof ic.fonts === 'object') {
+                const fontPresets = getBeautyPresets('font');
+                Object.entries(ic.fonts).forEach(([name, def]) => {
+                    if (!fontPresets[name]) {
+                        fontPresets[name] = {
+                            url: (def && def.url) || '',
+                            size: '',
+                            weight: ''
+                        };
+                    }
+                });
+            }
+        }
 
         function previewNotifySound(fieldId) {
             const url = (document.getElementById(fieldId)?.value || '').trim();
