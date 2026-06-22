@@ -1,9 +1,42 @@
 ﻿async function inputMessage() {
     const input = $('#chat-input');
-    const text = input.value.trim();
-    if (!text || !state.activeChatId) return;
+    const rawText = input.value.trim();
+    if (!rawText || !state.activeChatId) return;
     input.value = '';
-    await appendChatMessage({ role: 'user', type: parseVoiceText(text) ? 'voice' : 'text', text, created_at: Date.now() });
+
+    // 自动检测 URL → 解析链接卡片，失败则降级发纯文本
+    const urlMatch = rawText.match(/https?:\/\/[^\s"'<>，。！？、；）)】\]]+/i);
+    if (urlMatch) {
+        const url = urlMatch[0].replace(/[，。！？、；：:）)\]}]+$/g, '');
+        toast('正在解析链接...');
+        try {
+            const res = await fetch('/api/qq/link-preview', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url, rawText })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                const cleanTitle = String(data.title || '').trim();
+                const cleanDesc = String(data.description || '').trim().replace(/^预览受限：.*/, '');
+                const parts = [cleanTitle, cleanDesc].filter(Boolean).filter((p, i, a) => a.indexOf(p) === i);
+                await appendChatMessage({
+                    role: 'user', type: 'link',
+                    url: data.url || url,
+                    title: cleanTitle,
+                    description: cleanDesc,
+                    image: data.image || '',
+                    siteName: data.siteName || '',
+                    text: `[链接] ${parts.join('：') || data.siteName || url}`,
+                    created_at: Date.now()
+                });
+                return;
+            }
+        } catch {}
+        // 解析失败：静默降级为普通文本
+    }
+
+    await appendChatMessage({ role: 'user', type: parseVoiceText(rawText) ? 'voice' : 'text', text: rawText, created_at: Date.now() });
 }
 
 let isGenerating = false;

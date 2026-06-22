@@ -211,8 +211,6 @@
     });
     // 加号 → 钟表：已收藏的对话
     $('#btn-fav-list')?.addEventListener('click', openFavListModal);
-    // 加号 → 链接：粘贴 URL 发链接卡片
-    $('#btn-link')?.addEventListener('click', sendLinkCard);
     // 加号 → 麦克风：语音输入（MediaRecorder → ASR API）
     // Edge Android 录音中按钮 click 偶发不触发，绑 pointerup + click + touchend 三重兜底
     // 同时录音中输入栏上方会显示红色「点此结束」横幅作为最稳定入口

@@ -532,61 +532,6 @@ function toggleVoiceInput() {
     startVoiceRecording();
 }
 
-async function sendLinkCard() {
-    if (!state.activeChatId) {
-        toast('先选个聊天');
-        return;
-    }
-    const url = await askQqText('粘贴链接', '');
-    if (!url) return;
-    const rawText = String(url).trim();
-    const urlMatch = rawText.match(/https?:\/\/[^\s"'<>，。！？、；）)】\]]+/i);
-    const trimmed = (urlMatch ? urlMatch[0] : rawText).replace(/[，。！？、；：:）)\]}]+$/g, '');
-    if (!/^https?:\/\//i.test(trimmed)) {
-        toast('请输入 http(s) 链接');
-        return;
-    }
-    let data;
-    try {
-        const res = await fetch('/api/qq/link-preview', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url: trimmed, rawText })
-        });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            const msg = err?.error || `HTTP ${res.status}`;
-            const cont = await askQqConfirm(`该链接无法预览（${msg}），是否仍然发送纯文本？`);
-            if (cont) {
-                await appendChatMessage({ role: 'user', type: 'text', text: trimmed, created_at: Date.now() });
-            }
-            return;
-        }
-        data = await res.json();
-    } catch (e) {
-        const cont = await askQqConfirm('该链接无法预览（抓取失败），是否仍然发送纯文本？');
-        if (cont) {
-            await appendChatMessage({ role: 'user', type: 'text', text: trimmed, created_at: Date.now() });
-        }
-        return;
-    }
-    const cleanTitle = String(data.title || '').trim();
-    const cleanDescription = String(data.description || '').trim().replace(/^预览受限：.*/, '');
-    const linkTextParts = [cleanTitle, cleanDescription]
-        .filter(Boolean)
-        .filter((part, index, arr) => arr.indexOf(part) === index);
-    await appendChatMessage({
-        role: 'user',
-        type: 'link',
-        url: data.url || trimmed,
-        title: cleanTitle,
-        description: cleanDescription,
-        image: data.image || '',
-        siteName: data.siteName || '',
-        text: `[链接] ${linkTextParts.join('：') || data.siteName || trimmed}`,
-        created_at: Date.now()
-    });
-}
 
 async function saveChat(chat) {
     const persistMessages = (chat.messages || []).map(message => {
