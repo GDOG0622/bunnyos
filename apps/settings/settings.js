@@ -1134,6 +1134,8 @@ let settings = {};
             refreshImageCacheStats,
             loadImageHostConfig,
             saveImageHostConfig,
+            showImageHostHelp,
+            showHelpModal,
             saveBeautyPreset,
             applyBeautyPreset,
             renameBeautyPreset,
@@ -1199,7 +1201,58 @@ let settings = {};
         }
 
         function showJinaReaderHelp() {
-            alert('Jina Reader 是内置链接解析兜底：第三方解析失败、原生抓取拿不到标题/摘要时会尝试使用。Token 可选；不填走免 key 模式，填写后用 Bearer Token 请求 Jina。');
+            showHelpModal('Jina Reader Token', `
+                <p><b>Jina Reader 是内置链接解析兜底</b>：第三方解析失败、原生抓取拿不到标题/摘要时自动调用。</p>
+                <ol>
+                  <li>打开 <a href="https://jina.ai/reader" target="_blank" rel="noopener">https://jina.ai/reader</a>，右上角「Get an API Key」</li>
+                  <li>用 Google / GitHub 登录，复制 <code>jina_</code> 开头的 token</li>
+                  <li>粘贴到本输入框（自动保存）</li>
+                </ol>
+                <p class="muted">不填也能用——免 key 模式有限速但够个人偶尔用。填了走 Bearer Token 请求，配额更大。</p>
+            `);
+        }
+
+        function showImageHostHelp() {
+            showHelpModal('图床配置', `
+                <p>美化编辑页里所有"上传图床"按钮都走这里。两个推荐 endpoint：</p>
+                <h4 style="margin: 12px 0 4px;">① catbox（默认主用，匿名 / 永久 / 海外）</h4>
+                <ul>
+                  <li>endpoint: 已内置，不用填</li>
+                  <li>免登录、永久保存、单文件 ≤ 200MB</li>
+                  <li><b>中国大陆访问不通</b>，需要梯子或自建反代</li>
+                  <li>官网：<a href="https://catbox.moe" target="_blank" rel="noopener">https://catbox.moe</a></li>
+                </ul>
+                <h4 style="margin: 12px 0 4px;">② postimages（国内可达）</h4>
+                <ul>
+                  <li>endpoint: <code>https://api.imgbb.com/1/upload?key=YOUR_KEY</code>（imgbb 系；postimages 自己没公开 API）</li>
+                  <li>到 <a href="https://api.imgbb.com" target="_blank" rel="noopener">api.imgbb.com</a> 免费注册拿 key</li>
+                  <li>fileField: <code>image</code></li>
+                  <li>urlField: <code>data.url</code></li>
+                  <li>key field 留空（key 已在 URL 里）</li>
+                </ul>
+                <h4 style="margin: 12px 0 4px;">③ smms（也国内可达）</h4>
+                <ul>
+                  <li>endpoint: <code>https://sm.ms/api/v2/upload</code></li>
+                  <li>到 <a href="https://sm.ms" target="_blank" rel="noopener">sm.ms</a> 注册拿 token</li>
+                  <li>key field 填 token；header 走 <code>Authorization</code></li>
+                  <li>fileField: <code>smfile</code></li>
+                  <li>urlField: <code>data.url</code></li>
+                </ul>
+                <p class="muted">所有 endpoint 失败后报"所有图床均失败"；优先级：上次成功 → 主用 → catbox。</p>
+            `);
+        }
+
+        function showHelpModal(title, bodyHtml) {
+            const modal = document.getElementById('asr-help-modal');
+            const titleEl = document.getElementById('asr-help-title');
+            const bodyEl = document.getElementById('asr-help-body');
+            if (!modal || !titleEl || !bodyEl) {
+                alert(title + '\n\n' + bodyHtml.replace(/<[^>]+>/g, ''));
+                return;
+            }
+            titleEl.textContent = title;
+            bodyEl.innerHTML = bodyHtml;
+            modal.classList.remove('hidden');
         }
 
         window.onload = init;

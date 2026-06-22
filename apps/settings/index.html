@@ -602,16 +602,12 @@
             <span class="breadcrumb-title">设置 / 存储配置</span>
         </div>
         <div class="section">
-            <div class="section-title">图床配置</div>
+            <div class="section-title">图床配置 <button class="btn-text" type="button" onclick="showImageHostHelp()" aria-label="图床配置说明" style="margin-left:6px;"><i class="bi bi-info-circle"></i></button></div>
             <div class="list">
-                <div class="item vertical">
+                <div class="item">
                     <label>主用图床</label>
-                    <div style="color: var(--text-sub); font-size: 13px; margin: 4px 0 8px;">
-                        所有"上传图床"按钮（美化编辑页里的头像 / 头像框）走这里。catbox 是免登录公网图床。<br>
-                        失败时会按"上次成功 → 主用 → catbox"顺序自动 fallback。
-                    </div>
                     <select id="imageHost_primary" onchange="saveImageHostConfig()">
-                        <option value="catbox">catbox（公网，免登录）</option>
+                        <option value="catbox">catbox（海外）</option>
                         <option value="custom">自定义 endpoint</option>
                     </select>
                 </div>
