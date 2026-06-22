@@ -2459,11 +2459,12 @@ app.delete('/api/qq/characters/:id', (req, res) => {
 
 // 单人聊天记录
 function sanitizeChatMessagesForStorage(messages) {
+    // 图片：dataURL 不进存盘（前端 localStorage 兜底，详见 §1.x 图片处理 2026-06-22）；
+    // 但 client_image_id 必须保留，让重载后 localStorage 还能找到图。
     return (Array.isArray(messages) ? messages : []).map(message => {
         if (!message || typeof message !== 'object' || message.type !== 'image') return message;
         const clean = { ...message, text: message.text || '[图片]' };
         delete clean.image;
-        delete clean.client_image_id;
         return clean;
     });
 }

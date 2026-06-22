@@ -127,6 +127,9 @@ async function onChatImagePicked(e) {
     const image = await fileToDataUrl(file);
     const clientImageId = `img_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     state.imageAttachments[clientImageId] = { dataUrl: image, consumed: false, characterId: state.activeChatId };
+    // 持久化到 localStorage：重载后历史图片仍能正常显示（仅前端用，不进 prompt）
+    try { localStorage.setItem(`qq:img:${clientImageId}`, image); }
+    catch (err) { console.warn('[QQ] localStorage 写入图片失败（可能配额满）', err); }
     await appendChatMessage({
         role: 'user',
         type: 'image',
@@ -507,9 +510,9 @@ async function sendLinkCard() {
 async function saveChat(chat) {
     const persistMessages = (chat.messages || []).map(message => {
         if (message?.type !== 'image') return message;
+        // 只剥 dataURL，保留 client_image_id 让 localStorage 缓存可找回
         const clean = { ...message, text: message.text || '[图片]' };
         delete clean.image;
-        delete clean.client_image_id;
         return clean;
     });
     const res = await fetch(`/api/qq/chats/${encodeURIComponent(chat.characterId)}`, {

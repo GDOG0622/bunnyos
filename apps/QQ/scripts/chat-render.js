@@ -170,9 +170,18 @@ function messageContentHtml(msg, idx) {
         </div>`;
     }
     if (msg.type === 'sticker' || msg.type === 'image') {
-        const imageSrc = msg.type === 'image'
-            ? (msg.image || state.imageAttachments?.[msg.client_image_id]?.dataUrl || '')
-            : (msg.image || '');
+        // 图片优先级：当次 in-memory dataURL > state.imageAttachments > localStorage（历史回放）
+        let imageSrc = '';
+        if (msg.type === 'image') {
+            imageSrc = msg.image
+                || state.imageAttachments?.[msg.client_image_id]?.dataUrl
+                || '';
+            if (!imageSrc && msg.client_image_id) {
+                try { imageSrc = localStorage.getItem(`qq:img:${msg.client_image_id}`) || ''; } catch {}
+            }
+        } else {
+            imageSrc = msg.image || '';
+        }
         if (!imageSrc) {
             return `<div class="qq-message">${reply}${escapeHtml(msg.text || '[图片]')}</div>`;
         }

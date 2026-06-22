@@ -212,8 +212,8 @@ function consumeImageAttachments(chat, imageIds = []) {
     }
     for (const message of chat.messages || []) {
         if (message?.type === 'image' && ids.has(message.client_image_id)) {
+            // 只清 in-memory dataURL；保留 client_image_id 让 localStorage 还能找回
             delete message.image;
-            delete message.client_image_id;
             message.text = message.text || '[图片]';
         }
     }
