@@ -31,6 +31,10 @@
     $$('#beauty-editor [data-beauty-editor-close]').forEach(el => {
         el.addEventListener('click', () => closeBeautyEditor(false));
     });
+    $('#chat-more')?.addEventListener('click', openChatSettings);
+    $$('#chat-settings-modal [data-chat-settings-close]').forEach(el => {
+        el.addEventListener('click', closeChatSettings);
+    });
     $('#me-prompt-preset')?.addEventListener('change', event => savePromptPresetSetting(event.target.value));
     $('#me-prompt-manager')?.addEventListener('click', openPromptManager);
     $('#me-switch-account')?.addEventListener('click', openAccountModal);

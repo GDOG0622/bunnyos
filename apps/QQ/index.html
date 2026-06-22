@@ -55,7 +55,9 @@
                 <div class="qq-chat-room hidden" id="chat-room">
                     <div class="qq-chat-header">
                         <button type="button" class="qq-chat-back" id="chat-back" aria-label="返回列表"><i class="bi bi-chevron-left"></i></button>
-                        <span class="qq-avatar qq-chat-head-avatar" id="chat-head-avatar"></span>
+                        <span class="bunny-qq-frame qq-chat-head-frame">
+                            <span class="qq-avatar qq-chat-head-avatar" id="chat-head-avatar"></span>
+                        </span>
                         <div class="qq-chat-head-info">
                             <div class="qq-chat-title" id="chat-title">聊天</div>
                             <div class="qq-chat-status" id="chat-status">在线</div>
@@ -63,7 +65,7 @@
                         <div class="qq-chat-actions" aria-label="聊天操作">
                             <button type="button" aria-label="语音通话"><i class="bi bi-telephone"></i></button>
                             <button type="button" aria-label="视频通话"><i class="bi bi-camera-video"></i></button>
-                            <button type="button" aria-label="更多"><i class="bi bi-three-dots"></i></button>
+                            <button type="button" id="chat-more" aria-label="更多"><i class="bi bi-three-dots"></i></button>
                         </div>
                     </div>
                     <div class="qq-chat-messages" id="chat-messages"></div>
@@ -458,6 +460,19 @@
         </div>
     </div>
 
+    <!-- 聊天设置面板（聊天页右上三个点） -->
+    <div class="qq-modal hidden" id="chat-settings-modal" role="dialog" aria-modal="true">
+        <div class="qq-modal-mask" data-chat-settings-close="1"></div>
+        <div class="qq-modal-card qq-chat-settings-card">
+            <div class="qq-modal-header">
+                <button class="qq-modal-back" data-chat-settings-close="1"><i class="bi bi-x-lg"></i></button>
+                <div class="qq-modal-title">聊天设置</div>
+                <span></span>
+            </div>
+            <div class="qq-modal-body" id="chat-settings-body"></div>
+        </div>
+    </div>
+
     <!-- 美化编辑页（全屏覆盖式，盖在商城弹窗上） -->
     <div class="qq-modal hidden" id="beauty-editor" role="dialog" aria-modal="true">
         <div class="qq-modal-mask" data-beauty-editor-close="1"></div>
@@ -574,6 +589,7 @@
 <script src="scripts/wallet.js"></script>
 <script src="scripts/beauty-defaults.js"></script>
 <script src="scripts/beauty.js"></script>
+<script src="scripts/chat-settings.js"></script>
 <script src="scripts/events.js"></script>
 <script src="QQ.js"></script>
 </body>

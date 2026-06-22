@@ -554,6 +554,48 @@ html[data-app-layout="desktop"] .qq-topbar {
 }
 .qq-beauty-hint { padding-top: 16px; }
 
+/* ===== 聊天设置面板 ===== */
+.qq-chat-settings-card { display: flex; flex-direction: column; }
+.qq-chat-settings-row {
+    display: grid;
+    grid-template-columns: 90px 1fr;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 4px;
+}
+.qq-chat-settings-row label {
+    color: var(--qq-text-sub, #555);
+    font-size: 14px;
+}
+.qq-chat-settings-row select {
+    padding: 6px 10px;
+    border: 1px solid var(--qq-border, #eaeaea);
+    border-radius: 8px;
+    background: var(--qq-bg, #fff);
+    font: inherit;
+}
+.qq-chat-settings-row.qq-chat-settings-disabled select { opacity: 0.5; }
+.qq-chat-settings-divider {
+    border-top: 1px solid var(--qq-border, #eaeaea);
+    margin: 10px 0;
+}
+.qq-chat-settings-actions { display: flex; flex-direction: column; gap: 6px; }
+.qq-chat-settings-action {
+    padding: 10px 12px;
+    border: 1px solid var(--qq-border, #eaeaea);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--qq-text, #333);
+    text-align: left;
+    font: inherit;
+    cursor: pointer;
+}
+.qq-chat-settings-action:disabled { opacity: 0.5; cursor: not-allowed; }
+.qq-chat-settings-action.danger:not(:disabled) { color: var(--qq-danger, #e74c3c); }
+
+/* 聊天页标题头像加框：包一层 .bunny-qq-frame 用作 ::after 锚点 */
+.qq-chat-head-frame { display: inline-flex; }
+
 /* 头像框 = 头像上一层的透明 PNG 覆盖（::after 实现）。预览/应用时仅注入 background-image。 */
 .bunny-qq-frame {
     position: relative;

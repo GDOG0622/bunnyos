@@ -52,6 +52,8 @@ function renderActiveChat() {
     $('#chat-title').textContent = character.name || '未命名';
     const headAvatar = $('#chat-head-avatar');
     if (headAvatar) headAvatar.innerHTML = avatarHtml(character.avatar);
+    // 套用该 char 的美化（M4：头像框；M5：气泡/背景）
+    applyCharBeauty(character.id);
     const statusEl = $('#chat-status');
     if (statusEl && !statusEl.dataset.typing) statusEl.textContent = '在线';
     const box = $('#chat-messages');

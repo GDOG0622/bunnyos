@@ -65,7 +65,7 @@
 | M6 转账闭环 · S36+S37 领取闭环 | 完成 | `ceca8f1` | 后端 receive 端点 + 前端点击领取 |
 | M2 美化库后端+商城骨架 | 完成 | `7af2b5c` | S5-S10：beauties/char-beauty 端点 + #me-beauty 入口 + 5 tab 骨架 |
 | M3 头像框跑通（样板模块） | 完成 | `0e406ca` | S11-S17：mockup + 槽位网格 + 新建/编辑/预览/选择删除全套；预览注入逻辑顺手接好 bubble/bg 字段供 M5 复用 |
-| M4 套到 char + 三个点菜单 | 未开始 | — | — |
+| M4 套到 char + 三个点菜单 | 完成 | _待填_ | S18-S23：#chat-more + #chat-settings-modal；applyCharBeauty 注入 4 个 style 节点；M4 只通头像框，气泡/背景在 M5 |
 | M5 复制到其他 3 个模块 | 未开始 | — | 皮肤/气泡/背景图；头像已剔除（§7.1 已决） |
 | M7 教程 + 图床 + 全局背景 | 未开始 | — | 含 S40 需先确认 §7.3 |
 | M8 对话框管理 + 收尾 | 未开始 | — | 含 S47 需先确认 §7.2 |
@@ -552,14 +552,12 @@ postimages 的免登录 API 不如 catbox 稳；是否要换成别的（如 0x0.
 
 ### 里程碑 4 · 套用到 char + 三个点菜单
 
-- [ ] **S18** 改 `apps/QQ/index.html`：聊天页标题栏加 `#chat-more` 按钮
-- [ ] **S19** 新建 `apps/QQ/scripts/chat-settings.js`：点 #chat-more → 弹聊天设置面板
-- [ ] **S20** 面板里头像框下拉（option 从 beauties.json 拉、当前值从 char-beauty 拉）→ onChange 调 PUT
-- [ ] **S21** CSS 注入器：进入聊天时建 `<style id="bunny-style-frame">`，写入当前 char 选中头像框的 CSS
-- [ ] **S22** chat-render.js 给头像 wrapper 加 `bunny-qq-frame` 类
-  - 验证：给某 char 选头像框 → 进聊天看到生效；切到另一个没选的 char → 头像恢复默认
-- [ ] **S23** 两个 char 选同一个头像框 → 编辑该 CSS → 两边都同步变
-  - 验证：印证"共享库"语义
+- [x] **S18** 改 `apps/QQ/index.html`：聊天页"更多"按钮加 `id="chat-more"`，原有 SVG 不动
+- [x] **S19** 新建 `apps/QQ/scripts/chat-settings.js`：点 #chat-more → 弹 `#chat-settings-modal`
+- [x] **S20** 面板里头像框下拉（option 从 `/api/qq/beauties`、当前值从 `/api/qq/char-beauty/:id`）→ onChange 调 PUT
+- [x] **S21** CSS 注入器 `applyCharBeauty(charId)`：建 `<style id="bunny-style-{skin,frame,bubble,bg}">` 四节点，写入当前 char 选中头像框的 `::after { background-image }`（M5 接气泡/背景）
+- [x] **S22** index.html 把 `#chat-head-avatar` 包进 `.bunny-qq-frame` wrapper（聊天页标题头像）
+- [x] **S23** 共享库语义：两个 char 选同一 frameId → 编辑同一记录 → 切回任意 char 进入即同步生效（applyCharBeauty 每次进入聊天都拉最新）
 
 ### 里程碑 5 · 复制模式到其他 4 个模块
 
