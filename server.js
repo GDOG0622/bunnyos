@@ -90,12 +90,14 @@ const WALLET_INITIAL_BALANCE = 20000;
 const QQ_BEAUTIES_FILE = path.join(QQ_DIR, 'beauties.json');
 const QQ_CHAR_BEAUTY_FILE = path.join(QQ_DIR, 'char-beauty.json');
 const QQ_BEAUTY_BG_DIR = path.join(QQ_DIR, 'beauty-backgrounds');
-// 美化分类 + 创建价（cc）。详见 QQ美化系统计划.md §1.4。头像不算美化模块。
-const BEAUTY_TYPES = ['skins', 'frames', 'bubbles', 'backgrounds'];
-const BEAUTY_PRICES = { skins: 20, frames: 5, bubbles: 5, backgrounds: 0 };
+// 美化分类 + 创建价（cc）。详见 QQ美化系统计划.md §1.4。
+// 头像：公共库，成对（charUrl + userUrl），换也成对换（用户决策 2026-06-22 反转）
+const BEAUTY_TYPES = ['skins', 'avatars', 'frames', 'bubbles', 'backgrounds'];
+const BEAUTY_PRICES = { skins: 20, avatars: 5, frames: 5, bubbles: 5, backgrounds: 0 };
 function defaultBeautyItem(type) {
     const base = { id: 'default', name: '默认', preview: '' };
     if (type === 'bubbles') return { ...base, userCss: '', charCss: '' };
+    if (type === 'avatars') return { ...base, charUrl: '', userUrl: '' };
     // 头像框 = 透明 PNG 直链；背景图 = 上传图片。都是 url 字段。
     if (type === 'backgrounds' || type === 'frames') return { ...base, url: '' };
     return { ...base, css: '' };
@@ -1027,6 +1029,7 @@ function readCharBeauty() {
 }
 function beautySlotKey(type) {
     if (type === 'skins') return 'skinId';
+    if (type === 'avatars') return 'avatarId';
     if (type === 'frames') return 'frameId';
     if (type === 'bubbles') return 'bubbleId';
     if (type === 'backgrounds') return 'backgroundId';
@@ -1085,7 +1088,7 @@ app.put('/api/qq/beauties/:type/:id', (req, res) => {
         if (idx < 0) return res.status(404).json({ error: '未找到美化项' });
         if (id === 'default') return res.status(400).json({ error: '默认项不可编辑' });
         const body = req.body || {};
-        const allowed = ['name', 'preview', 'css', 'userCss', 'charCss', 'url'];
+        const allowed = ['name', 'preview', 'css', 'userCss', 'charCss', 'url', 'charUrl', 'userUrl'];
         const patch = {};
         allowed.forEach(k => { if (k in body) patch[k] = body[k]; });
         list[idx] = { ...list[idx], ...patch, id };
@@ -1141,6 +1144,7 @@ app.get('/api/qq/char-beauty/:characterId', (req, res) => {
         const cb = readCharBeauty();
         const cur = cb[req.params.characterId] || {};
         res.set('Cache-Control', 'no-store').json({
+            avatarId:     cur.avatarId     || 'default',
             frameId:      cur.frameId      || 'default',
             bubbleId:     cur.bubbleId     || 'default',
             backgroundId: cur.backgroundId || 'default',
@@ -1154,7 +1158,7 @@ app.put('/api/qq/char-beauty/:characterId', (req, res) => {
         const cb = readCharBeauty();
         const cur = cb[cid] || {};
         const body = req.body || {};
-        ['frameId', 'bubbleId', 'backgroundId'].forEach(k => {
+        ['avatarId', 'frameId', 'bubbleId', 'backgroundId'].forEach(k => {
             if (k in body && typeof body[k] === 'string') cur[k] = body[k];
         });
         cb[cid] = cur;

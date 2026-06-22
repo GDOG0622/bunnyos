@@ -1,9 +1,11 @@
 // QQ 美化商城 · M3 头像框跑通（样板模块）
 // 详见 QQ美化系统计划.md §1.4 §1.6 §8 M3
 //
-// 头像不算美化模块（用户决策 2026-06-21）。tab 顺序：皮肤 / 头像框 / 气泡 / 背景图
+// tab 顺序：皮肤 / 头像 / 头像框 / 气泡 / 背景图
+// 头像加回美化模块（用户决策 2026-06-22 反转）：公共库、成对（charUrl + userUrl）、5cc
 const BEAUTY_TAB_DEFS = [
     { type: 'skins',       label: '皮肤',   price: 20 },
+    { type: 'avatars',     label: '头像',   price: 5 },
     { type: 'frames',      label: '头像框', price: 5 },
     { type: 'bubbles',     label: '气泡',   price: 5 },
     { type: 'backgrounds', label: '背景图', price: 0 },
@@ -15,7 +17,7 @@ const MOCKUP_HTML = `
     <div class="qq-beauty-mockup-frame bunny-qq-bg">
         <div class="qq-beauty-mockup-row">
             <span class="bunny-qq-frame">
-                <span class="qq-avatar lg"><img src="${DEFAULT_AVATAR_URL}" alt=""></span>
+                <span class="qq-avatar lg" data-mockup-avatar="char"><img src="${DEFAULT_AVATAR_URL}" alt=""></span>
             </span>
             <div class="qq-message bunny-qq-bubble bunny-qq-bubble-char">
                 <div class="qq-bubble">你好呀～ 这是 char 的气泡示例</div>
@@ -26,7 +28,7 @@ const MOCKUP_HTML = `
                 <div class="qq-bubble">我是 user 的气泡示例</div>
             </div>
             <span class="bunny-qq-frame">
-                <span class="qq-avatar lg"><img src="${DEFAULT_AVATAR_URL}" alt=""></span>
+                <span class="qq-avatar lg" data-mockup-avatar="user"><img src="${DEFAULT_AVATAR_URL}" alt=""></span>
             </span>
         </div>
     </div>
@@ -218,11 +220,26 @@ function renderBeautyPanel(panel, def, list) {
 
 function renderSlotCard(def, it) {
     const isDefault = it.id === 'default';
-    const previewSrc = it.preview;
-    const previewBg = previewSrc
-        ? `style="background-image:url('${previewSrc.replace(/'/g, "\\'")}')"`
-        : '';
-    const initial = (it.name || '?').slice(0, 1);
+    const isAvatar = def.type === 'avatars';
+    // 头像卡片：左 char、右 user 两张小圆头像并排
+    let previewArea;
+    if (isAvatar) {
+        const c = it.charUrl ? `<img src="${escapeAttr(it.charUrl)}" alt="">` : 'C';
+        const u = it.userUrl ? `<img src="${escapeAttr(it.userUrl)}" alt="">` : 'U';
+        previewArea = `
+            <div class="qq-beauty-slot-preview qq-beauty-avatar-pair">
+                <span class="qq-beauty-avatar-pair-cell">${c}</span>
+                <span class="qq-beauty-avatar-pair-cell">${u}</span>
+            </div>
+        `;
+    } else {
+        const previewSrc = it.preview;
+        const previewBg = previewSrc
+            ? `style="background-image:url('${previewSrc.replace(/'/g, "\\'")}')"`
+            : '';
+        const initial = (it.name || '?').slice(0, 1);
+        previewArea = `<div class="qq-beauty-slot-preview" ${previewBg}>${previewSrc ? '' : initial}</div>`;
+    }
     const checkboxHtml = (state.beautySelectMode && !isDefault)
         ? `<input type="checkbox" class="qq-beauty-slot-check" data-beauty-check="${it.id}"
                   ${state.beautySelected.has(it.id) ? 'checked' : ''}>`
@@ -237,13 +254,17 @@ function renderSlotCard(def, it) {
         <div class="qq-beauty-slot${isDefault ? ' is-default' : ''}${state.beautySelected.has(it.id) ? ' selected' : ''}"
              data-id="${it.id}">
             ${checkboxHtml}
-            <div class="qq-beauty-slot-preview" ${previewBg}>
-                ${previewSrc ? '' : initial}
-            </div>
+            ${previewArea}
             <div class="qq-beauty-slot-name">${escapeHtmlText(it.name || '未命名')}</div>
             ${actionsHtml}
         </div>
     `;
+}
+
+function escapeAttr(s) {
+    return String(s).replace(/[&<>"']/g, ch => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[ch]));
 }
 
 function escapeHtmlText(s) {
@@ -311,11 +332,19 @@ function previewSlot(type, id) {
     if (!styleEl) return;
     // frames: 透明 PNG 直链覆盖在头像上（::after 实现）
     // bubbles: userCss+charCss；skins: CSS；backgrounds: 不走预览（用户决策）
+    // avatars: 直接换 mockup 两张头像 src
     if (type === 'frames') {
         const url = item.url || '';
         styleEl.textContent = url
             ? `.bunny-qq-frame::after { background-image: url('${url.replace(/'/g, "\\'")}'); }`
             : '';
+    }
+    else if (type === 'avatars') {
+        styleEl.textContent = '';
+        const charImg = document.querySelector('[data-mockup-avatar="char"] img');
+        const userImg = document.querySelector('[data-mockup-avatar="user"] img');
+        if (charImg) charImg.src = item.charUrl || DEFAULT_AVATAR_URL;
+        if (userImg) userImg.src = item.userUrl || DEFAULT_AVATAR_URL;
     }
     else if (type === 'bubbles') styleEl.textContent = (item.userCss || '') + '\n' + (item.charCss || '');
     else if (type === 'skins') styleEl.textContent = item.css || '';
@@ -390,6 +419,16 @@ function openBeautyEditor(type, id) {
             <input id="beauty-editor-url" type="text" placeholder="https://...">
         `;
         editor.querySelector('#beauty-editor-url').value = item.url || '';
+    } else if (type === 'avatars') {
+        // 头像 = 成对（charUrl + userUrl），公共库共享
+        cssArea.innerHTML = `
+            <label class="qq-beauty-editor-label">char 头像直链</label>
+            <input id="beauty-editor-charUrl" type="text" placeholder="https://...">
+            <label class="qq-beauty-editor-label">user 头像直链</label>
+            <input id="beauty-editor-userUrl" type="text" placeholder="https://...">
+        `;
+        editor.querySelector('#beauty-editor-charUrl').value = item.charUrl || '';
+        editor.querySelector('#beauty-editor-userUrl').value = item.userUrl || '';
     } else if (isSkin) {
         cssArea.innerHTML = `
             <label class="qq-beauty-editor-label">CSS</label>
@@ -452,6 +491,9 @@ async function flushBeautyAutoSave() {
         patch.charCss = editor.querySelector('#beauty-editor-charCss')?.value || '';
     } else if (type === 'frames') {
         patch.url = editor.querySelector('#beauty-editor-url')?.value || '';
+    } else if (type === 'avatars') {
+        patch.charUrl = editor.querySelector('#beauty-editor-charUrl')?.value || '';
+        patch.userUrl = editor.querySelector('#beauty-editor-userUrl')?.value || '';
     } else if (type === 'skins') {
         patch.css = editor.querySelector('#beauty-editor-css')?.value || '';
     }

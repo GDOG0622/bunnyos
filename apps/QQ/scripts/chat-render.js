@@ -50,7 +50,7 @@ function renderActiveChat() {
     if (!chat || !character) return;
 
     $('#chat-title').textContent = character.name || '未命名';
-    // 套用该 char 的美化（M4：头像框；M5：气泡/背景）
+    // 套用该 char 的美化：头像对 + 头像框（applyCharBeauty 完成后会 refreshMessageAvatars 把已渲染头像 src 换掉）
     applyCharBeauty(character.id);
     const statusEl = $('#chat-status');
     if (statusEl && !statusEl.dataset.typing) statusEl.textContent = '在线';
@@ -92,10 +92,14 @@ function renderActiveChat() {
         item.classList.toggle('delete-mode', state.deleteMode);
         item.classList.toggle('selected', state.selectedDeleteIndexes.has(i));
         item.dataset.idx = i;
-        // 气泡侧头像：char 用角色卡 avatar（套头像框）；user 用当前人设 avatar（不套框）
+        // 气泡侧头像：char 用角色卡 avatar（套头像框）；user 用当前人设 avatar
+        // 若 char-beauty 选了一对头像（公共库），优先用 pair.charUrl/userUrl
+        const pair = state.charBeautyAvatars;
+        const fallbackChar = character.avatar || DEFAULT_AVATAR_URL;
+        const fallbackUser = (typeof currentPersona === 'function' ? currentPersona()?.avatar : state.currentPersona?.avatar) || DEFAULT_AVATAR_URL;
         const avatarUrl = isAssistant
-            ? (character.avatar || DEFAULT_AVATAR_URL)
-            : ((typeof currentPersona === 'function' ? currentPersona()?.avatar : state.currentPersona?.avatar) || DEFAULT_AVATAR_URL);
+            ? (pair?.charUrl || fallbackChar)
+            : (pair?.userUrl || fallbackUser);
         const avatarWrapClass = isAssistant ? 'qq-message-avatar bunny-qq-frame' : 'qq-message-avatar';
         const avatarHtmlStr = `<span class="${avatarWrapClass}"><span class="qq-avatar">${avatarHtml(avatarUrl)}</span></span>`;
         item.innerHTML = avatarHtmlStr
@@ -270,4 +274,22 @@ function formatDateDivider(ts) {
     if (dk === dayKey(now - 86400000)) return '昨天';
     const d = new Date(ts);
     return `${d.getMonth() + 1}月${d.getDate()}日`;
+}
+
+// 当 applyCharBeauty 拿到最新头像对后，把已渲染消息行的头像 src 换掉，免去整体重渲
+function refreshMessageAvatars() {
+    const box = document.querySelector('#chat-messages');
+    if (!box) return;
+    const character = state.characters.find(item => item.id === state.activeChatId);
+    if (!character) return;
+    const pair = state.charBeautyAvatars;
+    const fallbackChar = character.avatar || DEFAULT_AVATAR_URL;
+    const fallbackUser = (typeof currentPersona === 'function' ? currentPersona()?.avatar : state.currentPersona?.avatar) || DEFAULT_AVATAR_URL;
+    const charUrl = pair?.charUrl || fallbackChar;
+    const userUrl = pair?.userUrl || fallbackUser;
+    box.querySelectorAll('.qq-message-row').forEach(row => {
+        const isAssistant = row.classList.contains('assistant');
+        const slot = row.querySelector('.qq-message-avatar .qq-avatar');
+        if (slot) slot.innerHTML = avatarHtml(isAssistant ? charUrl : userUrl);
+    });
 }

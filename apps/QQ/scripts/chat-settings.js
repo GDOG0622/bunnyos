@@ -43,6 +43,12 @@ async function applyCharBeauty(characterId) {
                 ? `.bunny-qq-frame::after { background-image: url('${frame.url.replace(/'/g, "\\'")}'); }`
                 : '';
         }
+        // 头像对：char/user 两张图（公共库共享）。default 走原 char/persona avatar
+        const avatar = (beauties.avatars || []).find(x => x.id === cb.avatarId);
+        state.charBeautyAvatars = (avatar && avatar.id !== 'default')
+            ? { charUrl: avatar.charUrl || '', userUrl: avatar.userUrl || '' }
+            : null;
+        if (typeof refreshMessageAvatars === 'function') refreshMessageAvatars();
         // 气泡（M5 接入）
         const bubble = (beauties.bubbles || []).find(x => x.id === cb.bubbleId);
         if (bubbleStyle) {
@@ -92,10 +98,15 @@ async function renderChatSettings() {
         const cb = await cbRes.json();
         const beauties = await beautyRes.json();
         const frames = beauties.frames || [];
+        const avatars = beauties.avatars || [];
         const opt = (list, currentId) => list.map(it =>
             `<option value="${it.id}"${it.id === currentId ? ' selected' : ''}>${escapeHtmlText(it.name || it.id)}</option>`
         ).join('');
         body.innerHTML = `
+            <div class="qq-chat-settings-row">
+                <label>头像（一对）</label>
+                <select id="chat-settings-avatar">${opt(avatars, cb.avatarId)}</select>
+            </div>
             <div class="qq-chat-settings-row">
                 <label>头像框</label>
                 <select id="chat-settings-frame">${opt(frames, cb.frameId)}</select>
@@ -116,21 +127,24 @@ async function renderChatSettings() {
             </div>
         `;
         body.querySelector('#chat-settings-frame').addEventListener('change', e =>
-            onChatSettingsFrameChange(e.target.value)
+            onChatSettingsBeautyChange('frameId', e.target.value)
+        );
+        body.querySelector('#chat-settings-avatar').addEventListener('change', e =>
+            onChatSettingsBeautyChange('avatarId', e.target.value)
         );
     } catch (err) {
         body.innerHTML = `<div class="qq-beauty-empty">加载失败：${err.message}</div>`;
     }
 }
 
-async function onChatSettingsFrameChange(frameId) {
+async function onChatSettingsBeautyChange(field, value) {
     const charId = state.chatSettingsCharId;
     if (!charId) return;
     try {
         const res = await fetch(`/api/qq/char-beauty/${encodeURIComponent(charId)}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ frameId })
+            body: JSON.stringify({ [field]: value })
         });
         if (!res.ok) {
             const d = await res.json().catch(() => ({}));
@@ -138,7 +152,7 @@ async function onChatSettingsFrameChange(frameId) {
             return;
         }
         await applyCharBeauty(charId);
-        toast('已更新头像框');
+        toast('已更新');
     } catch (err) {
         toast('保存失败：' + (err.message || '未知错误'));
     }
