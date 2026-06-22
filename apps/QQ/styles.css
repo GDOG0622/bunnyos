@@ -571,6 +571,43 @@ html[data-app-layout="desktop"] .qq-topbar {
     pointer-events: none;
 }
 
+/* 背景图 tab 专用：裸方块网格（无 card chrome、无名字、无按钮） */
+.qq-beauty-grid-bare {
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 8px;
+}
+.qq-beauty-bg-tile {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1;
+    border: 1px solid var(--qq-border, #eaeaea);
+    border-radius: 10px;
+    background-color: var(--qq-bg-soft, #f5f5f5);
+    background-size: cover;
+    background-position: center;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--qq-text-fade, #aaa);
+    font-size: 24px;
+    overflow: hidden;
+    padding: 0;
+}
+.qq-beauty-bg-tile.has-image { color: transparent; }
+.qq-beauty-bg-add {
+    border-style: dashed;
+    font-size: 28px;
+}
+.qq-beauty-bg-tile.selected {
+    box-shadow: 0 0 0 2px var(--qq-accent, #ff6b6b) inset;
+    border-color: var(--qq-accent, #ff6b6b);
+}
+.qq-beauty-bg-tile .qq-beauty-slot-check {
+    position: absolute;
+    top: 6px; left: 6px;
+}
+
 /* 仿设置 App 的 .wallpaper-pick：方块上传按钮 */
 .qq-beauty-wallpaper-pick {
     width: 100%;

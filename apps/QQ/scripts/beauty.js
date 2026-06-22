@@ -118,27 +118,36 @@ async function loadBeautyPanel(type) {
 }
 
 function renderBeautyPanel(panel, def, list) {
-    // 当前 M3 实现：frames 走完整流程；其他类目暂留骨架（M5 复用）
     const isFrame = def.type === 'frames';
-    const showMockup = def.type !== 'skins'; // 皮肤是"全屏临时预览"按钮，M5 落地
-
-    const mockup = showMockup
-        ? `<div class="qq-beauty-mockup-wrap">
+    const isBackground = def.type === 'backgrounds';
+    // 背景图：不显示 mockup 预览；皮肤：全屏预览按钮（M5 落地）；其他：标准 mockup
+    let mockup = '';
+    if (isBackground) {
+        mockup = '';
+    } else if (def.type === 'skins') {
+        mockup = `<div class="qq-beauty-mockup-wrap qq-beauty-mockup-skin">
+              <button class="qq-beauty-fullscreen-preview" disabled>全屏预览 (M5)</button>
+           </div>`;
+    } else {
+        mockup = `<div class="qq-beauty-mockup-wrap">
               <div class="qq-beauty-mockup-title">预览</div>
               ${MOCKUP_HTML}
               <style id="beauty-mockup-style"></style>
-           </div>`
-        : `<div class="qq-beauty-mockup-wrap qq-beauty-mockup-skin">
-              <button class="qq-beauty-fullscreen-preview" disabled>全屏预览 (M5)</button>
            </div>`;
+    }
 
     const slots = list.map(it => renderSlotCard(def, it)).join('');
+    // 背景图的 + tile 也是裸方块；其他类目带名字 + 价格
     const addTile = state.beautySelectMode
         ? ''
-        : `<button class="qq-beauty-slot qq-beauty-slot-add" data-beauty-add="${def.type}">
-              <i class="bi bi-plus-lg"></i>
-              <div class="qq-beauty-slot-name">新建 (${def.price}cc)</div>
-           </button>`;
+        : (isBackground
+            ? `<button class="qq-beauty-bg-tile qq-beauty-bg-add" data-beauty-add="${def.type}" aria-label="新建背景">
+                  <i class="bi bi-plus-lg"></i>
+               </button>`
+            : `<button class="qq-beauty-slot qq-beauty-slot-add" data-beauty-add="${def.type}">
+                  <i class="bi bi-plus-lg"></i>
+                  <div class="qq-beauty-slot-name">新建 (${def.price}cc)</div>
+               </button>`);
 
     const deleteBar = state.beautySelectMode
         ? `<div class="qq-beauty-delete-bar">
@@ -146,10 +155,15 @@ function renderBeautyPanel(panel, def, list) {
            </div>`
         : '';
 
+    // 背景图 tab 不显示标题行，更干净
+    const sectionTitle = isBackground
+        ? ''
+        : `<div class="qq-beauty-section-title">${def.label} · ${list.length} 项${isFrame ? '' : '（M3 仅头像框完整可用，其他模块在 M5 落地）'}</div>`;
+
     panel.innerHTML = `
         ${mockup}
-        <div class="qq-beauty-section-title">${def.label} · ${list.length} 项${isFrame ? '' : '（M3 仅头像框完整可用，其他模块在 M5 落地）'}</div>
-        <div class="qq-beauty-grid">
+        ${sectionTitle}
+        <div class="qq-beauty-grid${isBackground ? ' qq-beauty-grid-bare' : ''}">
             ${slots}
             ${addTile}
         </div>
@@ -176,8 +190,33 @@ function renderBeautyPanel(panel, def, list) {
 function renderSlotCard(def, it) {
     const isDefault = it.id === 'default';
     const isBackground = def.type === 'backgrounds';
-    // 背景图的"自身图"即缩略；其他类用 preview 字段
-    const previewSrc = isBackground ? (it.url || it.preview) : it.preview;
+
+    // 背景图：裸方块（无 card chrome、无名字、无按钮）；点击整块直接打开编辑器
+    if (isBackground) {
+        // 默认项是空槽位，不展示
+        if (isDefault) return '';
+        const url = it.url || it.preview || '';
+        const bg = url ? `style="background-image:url('${url.replace(/'/g, "\\'")}')"` : '';
+        const checkbox = state.beautySelectMode
+            ? `<input type="checkbox" class="qq-beauty-slot-check" data-beauty-check="${it.id}"
+                      ${state.beautySelected.has(it.id) ? 'checked' : ''}>`
+            : '';
+        const action = state.beautySelectMode
+            ? ''
+            : `data-beauty-edit="${it.id}"`;
+        // 整块作为可点击 button：点击 → 打开编辑器（即重新上传/更换）
+        return `
+            <button type="button"
+                    class="qq-beauty-bg-tile${url ? ' has-image' : ''}${state.beautySelected.has(it.id) ? ' selected' : ''}"
+                    ${action} ${bg} data-id="${it.id}">
+                ${checkbox}
+                ${url ? '' : '<i class="bi bi-image"></i>'}
+            </button>
+        `;
+    }
+
+    // 其他类目：常规卡片
+    const previewSrc = it.preview;
     const previewBg = previewSrc
         ? `style="background-image:url('${previewSrc.replace(/'/g, "\\'")}')"`
         : '';
@@ -186,15 +225,11 @@ function renderSlotCard(def, it) {
         ? `<input type="checkbox" class="qq-beauty-slot-check" data-beauty-check="${it.id}"
                   ${state.beautySelected.has(it.id) ? 'checked' : ''}>`
         : '';
-    // 背景图不展示名字、不展示"预览"按钮（用户决策 2026-06-21）
-    const nameHtml = isBackground
-        ? ''
-        : `<div class="qq-beauty-slot-name">${escapeHtmlText(it.name || '未命名')}</div>`;
     const actionsHtml = state.beautySelectMode
         ? ''
         : `<div class="qq-beauty-slot-actions">
-              ${isBackground ? '' : `<button type="button" data-beauty-preview="${it.id}">预览</button>`}
-              ${isDefault ? '' : `<button type="button" data-beauty-edit="${it.id}">${isBackground ? '更换' : '编辑'}</button>`}
+              <button type="button" data-beauty-preview="${it.id}">预览</button>
+              ${isDefault ? '' : `<button type="button" data-beauty-edit="${it.id}">编辑</button>`}
            </div>`;
     return `
         <div class="qq-beauty-slot${isDefault ? ' is-default' : ''}${state.beautySelected.has(it.id) ? ' selected' : ''}"
@@ -203,7 +238,7 @@ function renderSlotCard(def, it) {
             <div class="qq-beauty-slot-preview" ${previewBg}>
                 ${previewSrc ? '' : initial}
             </div>
-            ${nameHtml}
+            <div class="qq-beauty-slot-name">${escapeHtmlText(it.name || '未命名')}</div>
             ${actionsHtml}
         </div>
     `;

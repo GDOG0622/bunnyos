@@ -162,6 +162,8 @@ body:has(.pm-root) {
     grid-template-columns: 26px 28px 44px minmax(0, 1fr) auto;
 }
 .prompt-row.dragging { opacity: 0.5; }
+.prompt-row.drag-target { box-shadow: 0 -2px 0 var(--pm-accent) inset, 0 2px 0 var(--pm-accent) inset; }
+.drag-handle { touch-action: none; -webkit-user-select: none; user-select: none; }
 .group-check {
     grid-column: 1;
     width: 22px;

@@ -488,6 +488,9 @@ function createPromptRow({ entry, index, prompt }) {
     row.addEventListener('dragover', handleDragOver);
     row.addEventListener('drop', handleDrop);
     row.addEventListener('dragend', handleDragEnd);
+    // 移动端：HTML5 drag/drop 在 iOS Safari 不工作；从握把走 touch 事件
+    const handle = row.querySelector('.drag-handle');
+    if (handle) handle.addEventListener('touchstart', handleTouchDragStart, { passive: false });
     return row;
 }
 
@@ -591,6 +594,59 @@ function handleDrop(event) {
 
 function handleDragEnd(event) {
     event.currentTarget.classList.remove('dragging');
+}
+
+// ========== 移动端 touch 拖拽 ==========
+let touchDragState = null;
+
+function handleTouchDragStart(event) {
+    if (event.touches.length !== 1) return;
+    const row = event.currentTarget.closest('.prompt-row');
+    if (!row) return;
+    const idx = Number(row.dataset.index);
+    if (getGroupForIndex(idx)) {
+        toast('分组内条目请先取消分组再拖动');
+        return;
+    }
+    event.preventDefault();
+    touchDragState = { row, sourceIndex: idx, targetIndex: idx };
+    row.classList.add('dragging');
+    document.addEventListener('touchmove', handleTouchDragMove, { passive: false });
+    document.addEventListener('touchend', handleTouchDragEnd);
+    document.addEventListener('touchcancel', handleTouchDragEnd);
+}
+
+function handleTouchDragMove(event) {
+    if (!touchDragState || event.touches.length !== 1) return;
+    event.preventDefault();
+    const t = event.touches[0];
+    const el = document.elementFromPoint(t.clientX, t.clientY);
+    document.querySelectorAll('.prompt-row.drag-target').forEach(r => r.classList.remove('drag-target'));
+    const targetRow = el && el.closest ? el.closest('.prompt-row') : null;
+    if (targetRow && targetRow !== touchDragState.row) {
+        const idx = Number(targetRow.dataset.index);
+        if (Number.isInteger(idx) && !getGroupForIndex(idx)) {
+            targetRow.classList.add('drag-target');
+            touchDragState.targetIndex = idx;
+        }
+    }
+}
+
+function handleTouchDragEnd() {
+    document.removeEventListener('touchmove', handleTouchDragMove);
+    document.removeEventListener('touchend', handleTouchDragEnd);
+    document.removeEventListener('touchcancel', handleTouchDragEnd);
+    document.querySelectorAll('.prompt-row.drag-target').forEach(r => r.classList.remove('drag-target'));
+    document.querySelectorAll('.prompt-row.dragging').forEach(r => r.classList.remove('dragging'));
+    if (!touchDragState) return;
+    const { sourceIndex, targetIndex } = touchDragState;
+    touchDragState = null;
+    if (sourceIndex === targetIndex) return;
+    const order = getPromptOrder();
+    const [moved] = order.splice(sourceIndex, 1);
+    order.splice(targetIndex, 0, moved);
+    markDirty();
+    renderPromptList();
 }
 
 function getGroupForIndex(index) {
