@@ -240,6 +240,22 @@ function messageContentHtml(msg, idx) {
     if (voice) {
         return `<div class="qq-message qq-voice-message"><div class="qq-voice-card collapsed" data-voice-toggle>${reply}<div class="qq-voice-row"><span class="qq-voice-play"><i class="bi bi-play-fill"></i></span><span class="qq-voice-wave" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span></span><span class="qq-voice-duration">${escapeHtml(voice.duration)}</span></div><div class="qq-voice-text">${escapeHtml(voice.content)}</div></div></div>`;
     }
+    // AI 发的 [表情包名] → 查库渲染图片
+    if (msg.role === 'assistant') {
+        const text = activeMessageText(msg);
+        const stickerMatch = text.match(/^\[([^\]]+)\]$/);
+        if (stickerMatch) {
+            const stickerName = stickerMatch[1];
+            let stickerUrl = null;
+            for (const pack of state.stickerPacks || []) {
+                const item = (pack.items || []).find(it => it.name === stickerName);
+                if (item) { stickerUrl = item.url; break; }
+            }
+            if (stickerUrl) {
+                return `<div class="qq-message qq-message-media">${reply}<img src="${escapeAttr(stickerUrl)}" alt="${escapeAttr(stickerName)}"></div>`;
+            }
+        }
+    }
     return `<div class="qq-message">${reply}${escapeHtml(activeMessageText(msg))}</div>`;
 }
 

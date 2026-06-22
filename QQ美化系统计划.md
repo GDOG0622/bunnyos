@@ -85,7 +85,7 @@
 | 图床 / Jina 教程升级模态 | 完成 | `51e28d1` | 复用 #asr-help-modal；图床 section 加感叹号弹 catbox+imgbb+smms 三家配置；Jina alert 改 modal |
 | 自定义提示音改造 + carrot 字体合并 | 完成 | `00edcd8` | 新声音库（URL/试听/保存命名/删除）+ 成功/失败下拉；启动合并 imported_carrot.notifSounds/fonts 到 savedSounds+beautyPresets.font |
 | 表情包细节 + ✕ 延迟修复 | 完成 | `5ec518f` | 4 列 + !important + min-width:0；进编辑模式不再 innerHTML 重渲，原地加 class + 插 ✕；抖动 0.4s→0.25s |
-| M7 教程 + 图床 + 全局背景 | 未开始 | — | 含 S40 需先确认 §7.3 |
+| M7 教程 + 图床 + 全局背景 | 完成 | `4a8aa9a` | S38-S42 全部完成；S43/S44 废弃 |
 | 编辑气泡 v2 + README/计划同步 | 完成 | `ebbe9d9` | textarea field-sizing:content；JS 兜底；README 加美化/钱包/图床/迁移 API + 下一步指向 M8 |
 | M8 对话框管理 | 完成 | `de3db72` | 三端点：DELETE messages 清空 / PATCH hidden / DELETE chat（含 char-beauty + 背景文件清理）；聊天列表过滤 hidden + 顶部"显示隐藏聊天"toggle |
 

@@ -131,7 +131,7 @@ async function requestImpersonateReply() {
 async function requestAssistantReply(chat) {
     isGenerating = true;
     abortController = new AbortController();
-    const { messages: requestMessages, imageIds: sentImageIds } = prepareMessagesForReply(chat);
+    const { messages: requestMessages, imageIds: sentImageIds } = await prepareMessagesForReply(chat.messages);
     setSendButtonAborting(true);
     setTyping(true);
     try {
@@ -173,26 +173,42 @@ async function requestAssistantReply(chat) {
     }
 }
 
-function prepareMessagesForReply(chat) {
-    const messages = Array.isArray(chat?.messages) ? chat.messages : [];
-    const imageCandidates = [];
-    for (const message of messages) {
-        if (message?.role !== 'user' || message.type !== 'image') continue;
-        const id = message.client_image_id;
+// 找最后一张"AI 还没看到"的用户图片（最后 assistant 消息之后的最后一张 user image）
+// async 是为了在 consumed 后能从 IDB 回退取 dataUrl（re-roll 场景）
+async function prepareMessagesForReply(messages) {
+    messages = Array.isArray(messages) ? messages : [];
+
+    // 找最后一条 assistant 消息的下标
+    let lastAssistantIdx = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i]?.role === 'assistant') { lastAssistantIdx = i; break; }
+    }
+
+    // 只在 lastAssistantIdx 之后找最后一张 user 图片（AI 尚未响应过的）
+    let latestImage = null;
+    for (let i = messages.length - 1; i > lastAssistantIdx; i--) {
+        const m = messages[i];
+        if (m?.role !== 'user' || m.type !== 'image') continue;
+        const id = m.client_image_id;
         const attachment = id ? state.imageAttachments?.[id] : null;
-        const dataUrl = attachment?.dataUrl || message.image || '';
-        if (!attachment?.consumed && /^data:image\//.test(dataUrl)) {
-            imageCandidates.push({ id, message, dataUrl });
+        let dataUrl = attachment?.dataUrl || m.image || '';
+        // consumed 后内存已清 → 尝试从 IDB 恢复（re-roll 场景）
+        if (!(/^data:image\//.test(dataUrl)) && id) {
+            dataUrl = await getImageBlob(id).catch(() => null) || '';
+        }
+        if (/^data:image\//.test(dataUrl)) {
+            latestImage = { id, message: m, dataUrl };
+            break;
         }
     }
-    const latest = imageCandidates[imageCandidates.length - 1] || null;
+
     return {
-        imageIds: latest?.id ? [latest.id] : [],
+        imageIds: latestImage?.id ? [latestImage.id] : [],
         messages: messages.map(message => {
             if (message?.type !== 'image') return message;
             const copy = { ...message, text: message.text || '[图片]' };
-            if (latest && message === latest.message) {
-                copy.image = latest.dataUrl;
+            if (latestImage && message === latestImage.message) {
+                copy.image = latestImage.dataUrl;
             } else {
                 delete copy.image;
             }
@@ -481,7 +497,9 @@ async function generateMessageVersion(idx) {
     setTyping(true);
     try {
         const group = getReplyGroup(chat, idx);
-        const context = chat.messages.slice(0, group.start);
+        const rawContext = chat.messages.slice(0, group.start);
+        // 同 requestAssistantReply：处理图片附件（含 re-roll 后从 IDB 恢复 dataUrl）
+        const { messages: context } = await prepareMessagesForReply(rawContext);
         const res = await fetch('/api/qq/reply', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
