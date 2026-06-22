@@ -5,11 +5,17 @@
     input.value = '';
 
     // 自动检测 URL → 解析链接卡片，失败则降级发纯文本
-    const urlMatch = rawText.match(/https?:\/\/[^\s"'<>，。！？、；）)】\]]+/i);
+    const urlMatch = extractFirstLink(rawText);
     if (urlMatch) {
-        const url = urlMatch[0].replace(/[，。！？、；：:）)\]}]+$/g, '');
+        const url = normalizeInputLink(urlMatch);
         toast('正在解析链接...');
         try {
+            const frontData = await tryFrontendLinkPreview(url, rawText);
+            if (isUsefulLinkPreview(frontData)) {
+                await appendLinkPreviewMessage(frontData, url);
+                return;
+            }
+
             const res = await fetch('/api/qq/link-preview', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -17,19 +23,7 @@
             });
             if (res.ok) {
                 const data = await res.json();
-                const cleanTitle = String(data.title || '').trim();
-                const cleanDesc = String(data.description || '').trim().replace(/^预览受限：.*/, '');
-                const parts = [cleanTitle, cleanDesc].filter(Boolean).filter((p, i, a) => a.indexOf(p) === i);
-                await appendChatMessage({
-                    role: 'user', type: 'link',
-                    url: data.url || url,
-                    title: cleanTitle,
-                    description: cleanDesc,
-                    image: data.image || '',
-                    siteName: data.siteName || '',
-                    text: `[链接] ${parts.join('：') || data.siteName || url}`,
-                    created_at: Date.now()
-                });
+                await appendLinkPreviewMessage(data, url);
                 return;
             }
         } catch {}
@@ -37,6 +31,191 @@
     }
 
     await appendChatMessage({ role: 'user', type: parseVoiceText(rawText) ? 'voice' : 'text', text: rawText, created_at: Date.now() });
+}
+
+function extractFirstLink(text) {
+    const match = String(text || '').match(/(?:https?:\/\/)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?::\d+)?(?:\/[^\s"'<>，。！？、；）)】\]]*)?/i);
+    if (!match) return '';
+    return match[0].replace(/[，。！？、；：:）)\]}]+$/g, '');
+}
+
+function normalizeInputLink(url) {
+    const value = String(url || '').trim();
+    return /^https?:\/\//i.test(value) ? value : `https://${value}`;
+}
+
+function compactLinkDescription(text) {
+    const value = String(text || '').replace(/\s+/g, ' ').trim();
+    if (value.length <= 42) return value;
+    return `${value.slice(0, 42)}...`;
+}
+
+async function appendLinkPreviewMessage(data, fallbackUrl) {
+    const cleanTitle = String(data?.title || '').trim();
+    const cleanDesc = String(data?.description || '').trim().replace(/^预览受限：.*/, '');
+    const cardDesc = compactLinkDescription(cleanDesc);
+    const limitedReason = String(data?.limitedReason || '').trim();
+    const source = String(data?.source || '').trim();
+    const parts = [cleanTitle, cleanDesc].filter(Boolean).filter((p, i, a) => a.indexOf(p) === i);
+    await appendChatMessage({
+        role: 'user', type: 'link',
+        url: data?.url || fallbackUrl,
+        title: cleanTitle,
+        description: cardDesc,
+        fullDescription: cleanDesc,
+        image: data?.image || '',
+        siteName: data?.siteName || '',
+        source,
+        limitedReason,
+        text: `[链接] ${parts.join('：') || data?.siteName || fallbackUrl}`,
+        created_at: Date.now()
+    });
+    if (limitedReason) toast(limitedReason);
+}
+
+function isUsefulLinkPreview(data) {
+    if (!data) return false;
+    return Boolean(
+        String(data.description || '').trim()
+        || String(data.image || '').trim()
+        || String(data.title || '').trim()
+    );
+}
+
+async function tryFrontendLinkPreview(url, rawText) {
+    try {
+        const first = await fetchFrontendHtml(url);
+        if (!first?.html) return null;
+        let finalUrl = first.finalUrl || url;
+        let html = first.html;
+        const redirectTarget = extractFrontendHtmlRedirect(html, finalUrl);
+        if (redirectTarget && redirectTarget !== finalUrl) {
+            const second = await fetchFrontendHtml(redirectTarget);
+            if (second?.html) {
+                finalUrl = second.finalUrl || redirectTarget;
+                html = second.html;
+            }
+        }
+        const host = new URL(finalUrl).hostname;
+        if (/(^|\.)xhslink\.com$|(^|\.)xiaohongshu\.com$|(^|\.)xhscdn\.com$/i.test(host)) {
+            const xhs = parseFrontendXhsFromHtml(html, finalUrl);
+            if (isUsefulLinkPreview(xhs)) return xhs;
+        }
+        const og = parseFrontendOgFromHtml(html, finalUrl);
+        if (isUsefulLinkPreview(og)) return og;
+    } catch (err) {
+        console.info('[link-preview frontend failed]', err?.message || err);
+    }
+    return null;
+}
+
+async function fetchFrontendHtml(url) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 9000);
+    try {
+        const resp = await fetch(url, {
+            method: 'GET',
+            redirect: 'follow',
+            credentials: 'include',
+            signal: ctrl.signal,
+            headers: { 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' }
+        });
+        const ctype = resp.headers.get('content-type') || '';
+        if (!resp.ok || !/text\/html|application\/xhtml/i.test(ctype)) return null;
+        return { finalUrl: resp.url || url, html: await resp.text() };
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+function extractFrontendHtmlRedirect(html, baseUrl) {
+    const metaR = html.match(/<meta[^>]+http-equiv=["']refresh["'][^>]+content=["'][^;]*;\s*url=([^"'\s>]+)/i)
+        || html.match(/content=["'][^;]*;\s*url=([^"'\s>]+)[^>]+http-equiv=["']refresh["']/i);
+    const target = metaR?.[1]
+        || html.match(/(?:window\.location(?:\.href)?|location\.replace\()\s*[=\(]\s*["'](https?:\/\/[^"']+)["']/i)?.[1]
+        || '';
+    if (!target) return '';
+    try { return new URL(target, baseUrl).toString(); } catch { return ''; }
+}
+
+function parseFrontendOgFromHtml(html, baseUrl) {
+    const decEnt = (s) => String(s || '')
+        .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n));
+    const pick = (re) => decEnt(html.match(re)?.[1] || '');
+    const metaC = (prop) => {
+        const r1 = new RegExp(`<meta[^>]+(?:property|name)\\s*=\\s*["']${prop}["'][^>]*content\\s*=\\s*["']([^"']+)["']`, 'i');
+        const r2 = new RegExp(`<meta[^>]+content\\s*=\\s*["']([^"']+)["'][^>]+(?:property|name)\\s*=\\s*["']${prop}["']`, 'i');
+        return pick(r1) || pick(r2);
+    };
+    let host = '';
+    try { host = new URL(baseUrl).hostname; } catch {}
+    const imageRaw = metaC('og:image') || metaC('twitter:image');
+    let image = '';
+    try { image = imageRaw ? new URL(imageRaw, baseUrl).toString() : ''; } catch {}
+    return {
+        url: baseUrl,
+        title: metaC('og:title') || pick(/<title[^>]*>([^<]+)<\/title>/i),
+        description: metaC('og:description') || metaC('description'),
+        image,
+        siteName: metaC('og:site_name') || host,
+        source: 'frontend-og'
+    };
+}
+
+function extractFrontendJsonObjectAfterKey(html, key) {
+    let from = 0;
+    while (true) {
+        const k = html.indexOf(key, from);
+        if (k === -1) return null;
+        const start = k + key.length;
+        from = start;
+        if (html[start] !== '{') continue;
+        let depth = 0, inStr = false, esc = false, end = -1;
+        for (let j = start; j < html.length; j++) {
+            const c = html[j];
+            if (esc) { esc = false; continue; }
+            if (c === '\\') { esc = true; continue; }
+            if (c === '"') { inStr = !inStr; continue; }
+            if (inStr) continue;
+            if (c === '{') depth++;
+            else if (c === '}') {
+                depth--;
+                if (depth === 0) { end = j + 1; break; }
+            }
+        }
+        if (end === -1) continue;
+        try { return JSON.parse(html.slice(start, end)); } catch {}
+    }
+}
+
+function parseFrontendXhsFromHtml(html, baseUrl) {
+    let from = 0;
+    const key = '"noteData":';
+    while (true) {
+        const k = html.indexOf(key, from);
+        if (k === -1) break;
+        from = k + key.length;
+        const note = extractFrontendJsonObjectAfterKey(html.slice(k), key);
+        if (note && (note.title || note.desc)) {
+            const images = Array.isArray(note.imageList) ? note.imageList : [];
+            const image = note.cover?.urlDefault
+                || images[0]?.url
+                || images[0]?.infoList?.find(i => /WB_DFT|H5_DTL|DFT/i.test(i.imageScene))?.url
+                || images[0]?.infoList?.[0]?.url
+                || '';
+            const desc = String(note.desc || '').replace(/#[^#\n]{1,30}(?:\[话题\])?#/g, '').replace(/[ \t]+/g, ' ').trim();
+            return {
+                url: baseUrl,
+                title: String(note.title || '').trim() || desc.slice(0, 60) || '小红书笔记',
+                description: desc,
+                image,
+                siteName: '小红书',
+                source: 'frontend-xhs-state'
+            };
+        }
+    }
+    return null;
 }
 
 let isGenerating = false;

@@ -1859,9 +1859,12 @@ app.post('/api/qq/prompt-preset', (req, res) => {
 // 链接预览：拉 HTML，解析 OG/meta，返回卡片字段
 app.post('/api/qq/link-preview', async (req, res) => {
     try {
-        const raw = String(req.body?.url || '').trim();
+        let raw = String(req.body?.url || '').trim();
         const rawText = String(req.body?.rawText || raw).trim();
         if (!raw) return res.status(400).json({ error: '缺少 URL' });
+        if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) && /^(?:[a-z0-9-]+\.)+[a-z]{2,}(?::\d+)?(?:\/|$)/i.test(raw)) {
+            raw = `https://${raw}`;
+        }
         let u;
         try { u = new URL(raw); } catch { return res.status(400).json({ error: 'URL 格式无效' }); }
         if (!/^https?:$/.test(u.protocol)) return res.status(400).json({ error: '仅支持 http/https' });
@@ -1910,6 +1913,7 @@ app.post('/api/qq/link-preview', async (req, res) => {
                 description: '',
                 image: '',
                 siteName: inferSiteName(finalHost),
+                source: 'fallback',
                 limitedReason: reason || ''
             };
         };
@@ -1929,7 +1933,8 @@ app.post('/api/qq/link-preview', async (req, res) => {
                 title: String(title || inferSiteName(host)).slice(0, 200),
                 description: String(description || '').slice(0, 1200),
                 image: imageCandidate ? new URL(String(imageCandidate), u.toString()).toString() : '',
-                siteName: data.siteName || data.source || inferSiteName(host)
+                siteName: data.siteName || data.source || inferSiteName(host),
+                source: 'third-party'
             };
         };
         const trimMarkdownNoise = (text, max = 400) => String(text || '')
@@ -1973,13 +1978,15 @@ app.post('/api/qq/link-preview', async (req, res) => {
                 title: title || inferSiteName(host),
                 description: description && description !== title ? description : '',
                 image: imageMatch?.[1] ? new URL(imageMatch[1], sourceUrl || u.toString()).toString() : '',
-                siteName: inferSiteName(new URL(sourceUrl || u.toString()).hostname)
+                siteName: inferSiteName(new URL(sourceUrl || u.toString()).hostname),
+                source: 'jina'
             };
         };
         const tryJinaReader = async (targetUrl, token = '') => {
             const controller = new AbortController();
             const timer = setTimeout(() => controller.abort(), 12000);
             try {
+                console.log(`[link-preview jina] target=${targetUrl} token=${token ? 'yes' : 'no'}`);
                 const readerResp = await fetch(`https://r.jina.ai/${targetUrl}`, {
                     method: 'GET',
                     redirect: 'follow',
@@ -2157,6 +2164,7 @@ app.post('/api/qq/link-preview', async (req, res) => {
                         description: cleanDesc,
                         image,
                         siteName: '小红书',
+                        source: 'xhs-state',
                         url: baseUrl
                     };
                 }
@@ -2165,20 +2173,14 @@ app.post('/api/qq/link-preview', async (req, res) => {
             const og = parseOgFromHtml(html, baseUrl);
             const finalHost = (() => { try { return new URL(baseUrl).hostname; } catch { return ''; } })();
             if (og.title && !isGenericPreviewText(og.title, finalHost)) {
-                return { ...og, url: baseUrl };
+                return { ...og, source: 'xhs-og', url: baseUrl };
             }
             return null;
         };
 
         // ── 主流程 ─────────────────────────────────────────────────────────────────
 
-        // Step 1: 如果有 Jina token，优先用 Jina（对绝大多数网站效果最好）
-        if (jinaToken) {
-            const jinaFirst = await tryJinaReader(u.toString(), jinaToken);
-            if (isUsefulPreview(jinaFirst, host)) return res.json(jinaFirst);
-        }
-
-        // Step 2: 抓原始 URL，拿到 finalUrl（追 HTTP redirect）
+        // Step 1: 抓原始 URL，拿到 finalUrl（追 HTTP redirect）
         let fetchResult;
         try { fetchResult = await fetchHtml(u.toString()); } catch (e) {
             // 网络完全失败 → 直接 Jina 兜底
@@ -2187,7 +2189,7 @@ app.post('/api/qq/link-preview', async (req, res) => {
         }
         let { finalUrl, html } = fetchResult;
 
-        // Step 3: 如果 HTML 里有 JS/meta redirect（常见于短链跳转页），追一跳
+        // Step 2: 如果 HTML 里有 JS/meta redirect（常见于短链跳转页），追一跳
         if (!html && !isXhsHost(host)) {
             // 非 XHS 短链，直接 Jina 兜底
             const jinaFb = await tryJinaReader(finalUrl, jinaToken);
@@ -2210,7 +2212,7 @@ app.post('/api/qq/link-preview', async (req, res) => {
         const finalHost = (() => { try { return new URL(finalUrl).hostname; } catch { return host; } })();
         try { if (isBlockedHost(finalHost)) return res.status(400).json({ error: '禁止访问内网地址' }); } catch {}
 
-        // Step 4: 针对小红书特化解析（OG + __INITIAL_STATE__）
+        // Step 3: 针对小红书特化解析（OG + __INITIAL_STATE__）
         if (isXhsHost(finalHost)) {
             // 诊断：VPS 机房 IP 常被小红书反爬，返回的页面里没有 __INITIAL_STATE__/noteData
             const hasState = html.includes('__INITIAL_STATE__');
@@ -2236,11 +2238,12 @@ app.post('/api/qq/link-preview', async (req, res) => {
                 description: (sharedXhs || '').slice(0, 1200),
                 image: xhsData?.image || '',
                 siteName: '小红书',
+                source: 'xhs-limited',
                 limitedReason: reason
             });
         }
 
-        // Step 5: 通用 OG 解析
+        // Step 4: 通用 OG 解析
         const sharedText = cleanSharedText(rawText);
         if (html) {
             const og = parseOgFromHtml(html, finalUrl);
@@ -2251,18 +2254,19 @@ app.post('/api/qq/link-preview', async (req, res) => {
                     title: og.title.slice(0, 200),
                     description: og.description.slice(0, 1200),
                     image: og.image,
-                    siteName: og.siteName.slice(0, 80)
+                    siteName: og.siteName.slice(0, 80),
+                    source: 'og'
                 });
             }
         }
 
-        // Step 6: OG 没内容 → Jina（用 finalUrl，比原始短链更准）
+        // Step 5: OG 没内容 → Jina（用 finalUrl，比原始短链更准）
         const jinaFinal = await tryJinaReader(finalUrl, jinaToken);
         if (isUsefulPreview(jinaFinal, finalHost)) return res.json(jinaFinal);
 
-        // Step 7: 全失败 → 用 rawText 里的分享文字兜底
+        // Step 6: 全失败 → 用 rawText 里的分享文字兜底
         if (sharedText) {
-            return res.json({ url: finalUrl, title: sharedText.slice(0, 200), description: '', image: '', siteName: inferSiteName(finalHost) });
+            return res.json({ url: finalUrl, title: sharedText.slice(0, 200), description: '', image: '', siteName: inferSiteName(finalHost), source: 'shared-text' });
         }
         return res.json(fallbackPreview(finalUrl, '无法解析'));
     } catch (e) {
@@ -2964,7 +2968,7 @@ function qqMessageToText(msg) {
             return String(msg.text || '');
         case 'link': {
             const t = String(msg.title || '').trim();
-            const d = String(msg.description || '').trim();
+            const d = String(msg.fullDescription || msg.description || '').trim();
             const s = String(msg.siteName || '').trim();
             const parts = [];
             if (t) parts.push(`标题：${t}`);

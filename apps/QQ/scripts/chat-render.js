@@ -229,12 +229,13 @@ function messageContentHtml(msg, idx) {
     if (msg.type === 'link') {
         const t = escapeHtml(msg.title || msg.url || '链接');
         const d = msg.description ? `<div class="qq-link-desc">${escapeHtml(msg.description)}</div>` : '';
+        const limited = msg.limitedReason ? `<div class="qq-link-limited">${escapeHtml(msg.limitedReason)}</div>` : '';
         const site = escapeHtml(msg.siteName || '');
         const img = msg.image
             ? `<img class="qq-link-thumb" src="${escapeAttr(msg.image)}" alt="" onerror="this.remove()">`
             : '';
         const href = escapeAttr(msg.url || '');
-        return `<div class="qq-message qq-link-card">${reply}<a class="qq-link-card-inner" href="${href}" target="_blank" rel="noopener noreferrer">${img}<div class="qq-link-body"><div class="qq-link-title">${t}</div>${d}<div class="qq-link-site">${site}</div></div></a></div>`;
+        return `<div class="qq-message qq-link-card">${reply}<a class="qq-link-card-inner" href="${href}" target="_blank" rel="noopener noreferrer">${img}<div class="qq-link-body"><div class="qq-link-title">${t}</div>${d}${limited}<div class="qq-link-site">${site}</div></div></a></div>`;
     }
     const voice = parseVoiceText(activeMessageText(msg));
     if (voice) {
