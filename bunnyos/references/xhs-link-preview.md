@@ -107,7 +107,7 @@
 - 限制图片大小，当前最大 8MB
 - 保存到 `data/assets/link-previews/<sha1>.<ext>`
 - 返回 `imageLocal: "/data/assets/link-previews/xxx.jpg"`
-- 缓存有自动清理上限：默认最多 100MB、最多 500 个文件，按最旧访问/修改时间删除。
+- 缓存有自动清理上限：默认最多 10MB、最多 500 个文件，按最旧访问/修改时间删除。
 
 前端卡片优先显示 `imageLocal`，失败才显示原始 `image`。
 
