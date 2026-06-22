@@ -86,7 +86,8 @@
 | 自定义提示音改造 + carrot 字体合并 | 完成 | `00edcd8` | 新声音库（URL/试听/保存命名/删除）+ 成功/失败下拉；启动合并 imported_carrot.notifSounds/fonts 到 savedSounds+beautyPresets.font |
 | 表情包细节 + ✕ 延迟修复 | 完成 | `5ec518f` | 4 列 + !important + min-width:0；进编辑模式不再 innerHTML 重渲，原地加 class + 插 ✕；抖动 0.4s→0.25s |
 | M7 教程 + 图床 + 全局背景 | 未开始 | — | 含 S40 需先确认 §7.3 |
-| M8 对话框管理 + 收尾 | 未开始 | — | 含 S47 需先确认 §7.2 |
+| 编辑气泡 v2 + README/计划同步 | 完成 | `ebbe9d9` | textarea field-sizing:content；JS 兜底；README 加美化/钱包/图床/迁移 API + 下一步指向 M8 |
+| M8 对话框管理 | 完成 | `de3db72` | 三端点：DELETE messages 清空 / PATCH hidden / DELETE chat（含 char-beauty + 背景文件清理）；聊天列表过滤 hidden + 顶部"显示隐藏聊天"toggle |
 
 状态枚举：`未开始 / 进行中 / 完成`。完成时 commit 列填 `git rev-parse --short HEAD` 拿到的 hash。
 
@@ -622,13 +623,13 @@ postimages 的免登录 API 不如 catbox 稳；是否要换成别的（如 0x0.
 
 ### 里程碑 8 · 对话框管理 + 收尾
 
-- [ ] **S45** 聊天设置面板下方加分割线 + 三个按钮：清空 / 隐藏 / 删除
-- [ ] **S46** 后端：chat 数据加 `hidden` 字段；写 PUT/DELETE 端点
-- [ ] **S47** 联系人列表过滤 `hidden`；顶部加"显示隐藏聊天"toggle（默认关）
-- [ ] **S48** 把 `/api/settings/events` SSE 扩展为也广播 wallet-updated（如果还没做）；前端钱包/商城订阅
-- [ ] **S49** 把"待决"3 项的最终决策写回本文件 §1 对应小节
-- [ ] **S50** 更新 README.md（API 速查、文件地图、下一步）
-- [ ] **S51** 跑 §9 验收清单
+- [x] **S45** 聊天设置面板分割线下三个按钮启用：清空 / 隐藏 / 删除
+- [x] **S46** 后端：chat 加 `hidden`；`DELETE /api/qq/chats/:cid/messages`、`PATCH /api/qq/chats/:cid/hidden`、`DELETE /api/qq/chats/:cid`（删 chat 时清 char-beauty + 专属背景）
+- [x] **S47** renderChats 过滤 `hidden`；顶部"显示隐藏聊天"toggle 自动出现（有隐藏才显，state.showHiddenChats）
+- [ ] ~~**S48** SSE 广播 wallet-updated~~ → 暂缓：钱包当前是显式 fetch，没真正出现"多端同步漂移"，等真有需求再加
+- [x] **S49** 待决项决策都已落回 §1.4/§1.5/§1.6/§7.1
+- [x] **S50** README.md 已同步美化/钱包/图床/迁移 API + 下一步指向
+- [ ] **S51** 跑 §9 验收清单（留给你手动验）
 
 ### 关键依赖（避免乱序）
 
