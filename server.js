@@ -1289,6 +1289,50 @@ app.get('/api/qq/char-beauty-usage/:type/:id', (req, res) => {
     }
 });
 
+// Prompt token 估算（沿用 SillyTavern fallback 思路：CJK 字符 ≈ 1tk，其余 ≈ 4 字符 / tk）
+// 没有上 gpt-tokenizer lib；这是粗估，用于面板显示当前 prompt 大致体积
+function estimateTokens(text) {
+    if (!text) return 0;
+    let cjk = 0;
+    let other = 0;
+    for (const ch of String(text)) {
+        if (/[一-鿿㐀-䶿぀-ヿ　-〿가-힯]/.test(ch)) cjk++;
+        else other++;
+    }
+    return Math.ceil(cjk + other / 4);
+}
+
+// GET /api/qq/chat-tokens/:characterId：把当前 char 的最新 prompt（system + 历史）拼起来估算 token
+app.get('/api/qq/chat-tokens/:characterId', (req, res) => {
+    try {
+        const characterId = req.params.characterId;
+        const character = readJsonFile(path.join(CHARACTERS_DIR, `${cleanName(characterId)}.json`), null);
+        if (!character) return res.status(404).json({ error: '未找到角色' });
+        const chatFile = path.join(CHATS_DIR, `${characterId}.json`);
+        const chatRaw = readJsonFile(chatFile, { messages: [] });
+        const list = Array.isArray(chatRaw?.messages) ? chatRaw.messages : [];
+        const userPersona = getCurrentUserPersona();
+        const variables = buildPromptVariables({ characterId, userName: userPersona?.name || '', messages: list });
+        const history = list
+            .map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: qqMessageToText(m) }))
+            .filter(m => m.content);
+        const enriched = injectCharRulesAtDepth(history, character, variables);
+        const presetPrompt = buildQqPresetPrompt(character, variables, userPersona, enriched, 'private');
+        const messages = presetPrompt
+            ? (presetPrompt.includesChatHistory ? presetPrompt.messages : [...presetPrompt.messages, ...enriched])
+            : [{ role: 'system', content: buildCharacterSystemPrompt(character, variables, userPersona) }, ...enriched];
+        const allText = messages.map(m => {
+            if (typeof m.content === 'string') return m.content;
+            if (Array.isArray(m.content)) return m.content.map(p => p?.text || '').join(' ');
+            return '';
+        }).join('\n');
+        res.json({ tokens: estimateTokens(allText), messageCount: messages.length, chars: allText.length });
+    } catch (e) {
+        console.error('[CHAT-TOKENS]', e);
+        res.status(500).json({ error: 'token 估算失败' });
+    }
+});
+
 // 全局皮肤（写 settings.json.currentSkinId，QQ App 启动时拉一次）
 app.get('/api/qq/skin', (req, res) => {
     try {

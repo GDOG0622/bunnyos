@@ -118,6 +118,7 @@ async function renderChatSettings() {
             `<option value="${it.id}"${it.id === currentId ? ' selected' : ''}>${escapeHtmlText(it.name || it.id)}</option>`
         ).join('');
         body.innerHTML = `
+            <div class="qq-chat-settings-tokens" id="chat-settings-tokens">当前 prompt ≈ — tk（估算中...）</div>
             <div class="qq-chat-settings-row">
                 <label>头像（一对）</label>
                 <select id="chat-settings-avatar">${opt(avatars, cb.avatarId)}</select>
@@ -175,8 +176,23 @@ async function renderChatSettings() {
         }
         const bgClearBtn = body.querySelector('#chat-settings-bg-clear');
         if (bgClearBtn) bgClearBtn.addEventListener('click', clearCharBackground);
+        // 拉 prompt token 数显示在顶部（粗估，没用 gpt-tokenizer，沿用酒馆 fallback 思路）
+        loadChatTokens(charId);
     } catch (err) {
         body.innerHTML = `<div class="qq-beauty-empty">加载失败：${err.message}</div>`;
+    }
+}
+
+async function loadChatTokens(charId) {
+    const el = $('#chat-settings-tokens');
+    if (!el) return;
+    try {
+        const res = await fetch(`/api/qq/chat-tokens/${encodeURIComponent(charId)}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        el.textContent = `当前 prompt ≈ ${data.tokens} tk · ${data.messageCount} 段 · ${data.chars} 字（粗估，CJK≈1tk、其余 4 字/tk）`;
+    } catch (err) {
+        el.textContent = `token 估算失败：${err.message || ''}`;
     }
 }
 
