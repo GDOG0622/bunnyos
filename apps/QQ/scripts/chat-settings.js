@@ -118,7 +118,7 @@ async function renderChatSettings() {
             `<option value="${it.id}"${it.id === currentId ? ' selected' : ''}>${escapeHtmlText(it.name || it.id)}</option>`
         ).join('');
         body.innerHTML = `
-            <div class="qq-chat-settings-tokens" id="chat-settings-tokens">当前 prompt ≈ — tk（估算中...）</div>
+            <button type="button" class="qq-chat-settings-tokens" id="chat-settings-tokens">当前 prompt ≈ — tk（估算中...）</button>
             <div class="qq-chat-settings-row">
                 <label>头像（一对）</label>
                 <select id="chat-settings-avatar">${opt(avatars, cb.avatarId)}</select>
@@ -180,6 +180,7 @@ async function renderChatSettings() {
         body.querySelector('#chat-settings-clear')?.addEventListener('click', () => clearChatMessages(charId));
         body.querySelector('#chat-settings-hide')?.addEventListener('click', () => hideChat(charId));
         body.querySelector('#chat-settings-delete')?.addEventListener('click', () => deleteChat(charId));
+        body.querySelector('#chat-settings-tokens')?.addEventListener('click', () => openPromptPreview(charId));
         // 拉 prompt token 数显示在顶部（粗估，没用 gpt-tokenizer，沿用酒馆 fallback 思路）
         loadChatTokens(charId);
     } catch (err) {
@@ -262,8 +263,41 @@ async function loadChatTokens(charId) {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         el.textContent = `当前 prompt ≈ ${data.tokens} tk · ${data.messageCount} 段 · ${data.chars} 字（粗估，CJK≈1tk、其余 4 字/tk）`;
+        el.dataset.promptLoaded = '1';
     } catch (err) {
         el.textContent = `token 估算失败：${err.message || ''}`;
+        delete el.dataset.promptLoaded;
+    }
+}
+
+async function openPromptPreview(charId) {
+    const modal = $('#prompt-preview-modal');
+    const textEl = $('#prompt-preview-text');
+    if (!modal || !textEl || !charId) return;
+    modal.classList.remove('hidden');
+    textEl.textContent = '加载中...';
+    try {
+        const res = await fetch(`/api/qq/chat-tokens/${encodeURIComponent(charId)}`);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        textEl.textContent = data.promptText || '（空）';
+    } catch (err) {
+        textEl.textContent = `加载失败：${err.message || ''}`;
+    }
+}
+
+function closePromptPreview() {
+    $('#prompt-preview-modal')?.classList.add('hidden');
+}
+
+async function copyPromptPreview() {
+    const text = $('#prompt-preview-text')?.textContent || '';
+    if (!text.trim()) return;
+    try {
+        await navigator.clipboard?.writeText(text);
+        toast('已复制提示词');
+    } catch {
+        await askQqConfirm(text, '手动复制提示词');
     }
 }
 

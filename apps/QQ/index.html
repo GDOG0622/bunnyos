@@ -470,6 +470,18 @@
         </div>
     </div>
 
+    <div class="qq-modal hidden" id="prompt-preview-modal" role="dialog" aria-modal="true">
+        <div class="qq-modal-mask" data-prompt-preview-close="1"></div>
+        <div class="qq-modal-card qq-prompt-preview-card">
+            <div class="qq-modal-header">
+                <button class="qq-modal-back" data-prompt-preview-close="1"><i class="bi bi-x-lg"></i></button>
+                <div class="qq-modal-title">完整提示词</div>
+                <button type="button" class="qq-modal-action" id="prompt-preview-copy">复制</button>
+            </div>
+            <pre class="qq-prompt-preview-text" id="prompt-preview-text"></pre>
+        </div>
+    </div>
+
     <!-- 美化编辑页（全屏覆盖式，盖在商城弹窗上） -->
     <div class="qq-modal hidden" id="beauty-editor" role="dialog" aria-modal="true">
         <div class="qq-modal-mask" data-beauty-editor-close="1"></div>

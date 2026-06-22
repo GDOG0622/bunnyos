@@ -1307,6 +1307,23 @@ function estimateTokens(text) {
     return Math.ceil(cjk + other / 4);
 }
 
+function promptMessagesToText(messages = []) {
+    return (Array.isArray(messages) ? messages : []).map((m, idx) => {
+        const role = m?.role || 'unknown';
+        let content = '';
+        if (typeof m?.content === 'string') {
+            content = m.content;
+        } else if (Array.isArray(m?.content)) {
+            content = m.content.map(part => {
+                if (part?.type === 'text') return part.text || '';
+                if (part?.type === 'image_url') return '[图片附件]';
+                return '';
+            }).filter(Boolean).join('\n');
+        }
+        return `### ${idx + 1}. ${role}\n${content}`;
+    }).join('\n\n');
+}
+
 // GET /api/qq/chat-tokens/:characterId：把当前 char 的最新 prompt（system + 历史）拼起来估算 token
 app.get('/api/qq/chat-tokens/:characterId', (req, res) => {
     try {
@@ -1326,12 +1343,8 @@ app.get('/api/qq/chat-tokens/:characterId', (req, res) => {
         const messages = presetPrompt
             ? (presetPrompt.includesChatHistory ? presetPrompt.messages : [...presetPrompt.messages, ...enriched])
             : [{ role: 'system', content: buildCharacterSystemPrompt(character, variables, userPersona) }, ...enriched];
-        const allText = messages.map(m => {
-            if (typeof m.content === 'string') return m.content;
-            if (Array.isArray(m.content)) return m.content.map(p => p?.text || '').join(' ');
-            return '';
-        }).join('\n');
-        res.json({ tokens: estimateTokens(allText), messageCount: messages.length, chars: allText.length });
+        const promptText = promptMessagesToText(messages);
+        res.json({ tokens: estimateTokens(promptText), messageCount: messages.length, chars: promptText.length, promptText });
     } catch (e) {
         console.error('[CHAT-TOKENS]', e);
         res.status(500).json({ error: 'token 估算失败' });

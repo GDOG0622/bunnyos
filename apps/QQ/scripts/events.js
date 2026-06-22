@@ -35,6 +35,10 @@
     $$('#chat-settings-modal [data-chat-settings-close]').forEach(el => {
         el.addEventListener('click', closeChatSettings);
     });
+    $$('#prompt-preview-modal [data-prompt-preview-close]').forEach(el => {
+        el.addEventListener('click', closePromptPreview);
+    });
+    $('#prompt-preview-copy')?.addEventListener('click', copyPromptPreview);
     $('#me-prompt-preset')?.addEventListener('change', event => savePromptPresetSetting(event.target.value));
     $('#me-prompt-manager')?.addEventListener('click', openPromptManager);
     $('#me-switch-account')?.addEventListener('click', openAccountModal);
