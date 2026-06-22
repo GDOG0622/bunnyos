@@ -108,6 +108,10 @@ function renderActiveChat() {
         item.innerHTML = avatarHtmlStr
             + `<div class="qq-msg-col">${messageContentHtml(msg, i)}${versionNavHtml(chat, i)}</div>${metaHtml(msg)}`
             + (isAssistant ? msgActionsHtml(chat, i) : '');
+        // 气泡包裹类：让 user 自定义气泡 CSS 命中（§1.6）
+        item.querySelectorAll('.qq-message').forEach(el => {
+            el.classList.add('bunny-qq-bubble', isAssistant ? 'bunny-qq-bubble-char' : 'bunny-qq-bubble-user');
+        });
         box.appendChild(item);
     }
     box.scrollTop = box.scrollHeight;

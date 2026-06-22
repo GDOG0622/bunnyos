@@ -54,15 +54,20 @@ async function applyCharBeauty(characterId) {
             ? { charUrl: avatar.charUrl || '', userUrl: avatar.userUrl || '' }
             : null;
         if (typeof refreshMessageAvatars === 'function') refreshMessageAvatars();
-        // 气泡（M5 接入）
+        // 气泡：注入 user/char 两段 CSS（user 决定 .bunny-qq-bubble-user 形态）
         const bubble = (beauties.bubbles || []).find(x => x.id === cb.bubbleId);
         if (bubbleStyle) {
-            bubbleStyle.textContent = bubble
+            bubbleStyle.textContent = (bubble && bubble.id !== 'default')
                 ? `${bubble.userCss || ''}\n${bubble.charCss || ''}`
                 : '';
         }
-        // 背景（M5 接入：M4 暂不注入，避免和 M3 的 mockup 预览冲突）
-        if (bgStyle) bgStyle.textContent = '';
+        // 背景：char-beauty.backgroundId 非 default 时，注入到 .bunny-qq-bg
+        const bg = (beauties.backgrounds || []).find(x => x.id === cb.backgroundId);
+        if (bgStyle) {
+            bgStyle.textContent = (bg && bg.id !== 'default' && bg.url)
+                ? `.bunny-qq-bg { background-image: url('${bg.url.replace(/'/g, "\\'")}'); background-size: cover; background-position: center; }`
+                : '';
+        }
     } catch (err) {
         console.warn('[chat-settings] apply failed', err);
     }
@@ -104,6 +109,8 @@ async function renderChatSettings() {
         const beauties = await beautyRes.json();
         const frames = beauties.frames || [];
         const avatars = beauties.avatars || [];
+        const bubbles = beauties.bubbles || [];
+        const bgs = beauties.backgrounds || [];
         const opt = (list, currentId) => list.map(it =>
             `<option value="${it.id}"${it.id === currentId ? ' selected' : ''}>${escapeHtmlText(it.name || it.id)}</option>`
         ).join('');
@@ -120,13 +127,13 @@ async function renderChatSettings() {
                 <label>user 头像框</label>
                 <select id="chat-settings-frame-user">${opt(frames, cb.frameUserId)}</select>
             </div>
-            <div class="qq-chat-settings-row qq-chat-settings-disabled">
+            <div class="qq-chat-settings-row">
                 <label>气泡组</label>
-                <select disabled><option>M5 落地</option></select>
+                <select id="chat-settings-bubble">${opt(bubbles, cb.bubbleId)}</select>
             </div>
-            <div class="qq-chat-settings-row qq-chat-settings-disabled">
+            <div class="qq-chat-settings-row">
                 <label>聊天背景</label>
-                <select disabled><option>M5 落地</option></select>
+                <select id="chat-settings-bg">${opt(bgs, cb.backgroundId)}</select>
             </div>
             <div class="qq-chat-settings-divider"></div>
             <div class="qq-chat-settings-actions">
@@ -143,6 +150,12 @@ async function renderChatSettings() {
         );
         body.querySelector('#chat-settings-frame-user').addEventListener('change', e =>
             onChatSettingsBeautyChange('frameUserId', e.target.value)
+        );
+        body.querySelector('#chat-settings-bubble').addEventListener('change', e =>
+            onChatSettingsBeautyChange('bubbleId', e.target.value)
+        );
+        body.querySelector('#chat-settings-bg').addEventListener('change', e =>
+            onChatSettingsBeautyChange('backgroundId', e.target.value)
         );
     } catch (err) {
         body.innerHTML = `<div class="qq-beauty-empty">加载失败：${err.message}</div>`;
