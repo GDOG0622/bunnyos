@@ -617,6 +617,28 @@ html[data-app-layout="desktop"] .qq-topbar {
     font: inherit;
 }
 
+/* M8 聊天列表顶部"显示隐藏"开关 */
+.qq-chat-hidden-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 14px;
+    margin: 6px 8px;
+    font-size: 12px;
+    color: var(--qq-text-sub, #666);
+    background: var(--qq-bg-soft, #f5f5f5);
+    border-radius: 8px;
+}
+.qq-chat-hidden-toggle button {
+    border: none;
+    background: var(--qq-accent, #ff6b6b);
+    color: #fff;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
 /* 聊天页标题头像加框：包一层 .bunny-qq-frame 用作 ::after 锚点 */
 .qq-chat-head-frame { display: inline-flex; }
 

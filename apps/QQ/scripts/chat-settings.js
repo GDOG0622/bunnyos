@@ -150,9 +150,9 @@ async function renderChatSettings() {
             </div>
             <div class="qq-chat-settings-divider"></div>
             <div class="qq-chat-settings-actions">
-                <button type="button" class="qq-chat-settings-action" disabled>清空聊天记录 (M8)</button>
-                <button type="button" class="qq-chat-settings-action" disabled>隐藏此聊天 (M8)</button>
-                <button type="button" class="qq-chat-settings-action danger" disabled>删除聊天 (M8)</button>
+                <button type="button" class="qq-chat-settings-action" id="chat-settings-clear">清空聊天记录</button>
+                <button type="button" class="qq-chat-settings-action" id="chat-settings-hide">隐藏此聊天</button>
+                <button type="button" class="qq-chat-settings-action danger" id="chat-settings-delete">删除聊天</button>
             </div>
         `;
         body.querySelector('#chat-settings-avatar').addEventListener('change', e =>
@@ -176,10 +176,81 @@ async function renderChatSettings() {
         }
         const bgClearBtn = body.querySelector('#chat-settings-bg-clear');
         if (bgClearBtn) bgClearBtn.addEventListener('click', clearCharBackground);
+        // M8 三个按钮
+        body.querySelector('#chat-settings-clear')?.addEventListener('click', () => clearChatMessages(charId));
+        body.querySelector('#chat-settings-hide')?.addEventListener('click', () => hideChat(charId));
+        body.querySelector('#chat-settings-delete')?.addEventListener('click', () => deleteChat(charId));
         // 拉 prompt token 数显示在顶部（粗估，没用 gpt-tokenizer，沿用酒馆 fallback 思路）
         loadChatTokens(charId);
     } catch (err) {
         body.innerHTML = `<div class="qq-beauty-empty">加载失败：${err.message}</div>`;
+    }
+}
+
+// ========== M8 对话框管理 ==========
+async function clearChatMessages(charId) {
+    if (!confirm('确定清空这段聊天记录？\n聊天本身保留，但所有消息会删除，不可恢复。')) return;
+    try {
+        const res = await fetch(`/api/qq/chats/${encodeURIComponent(charId)}/messages`, { method: 'DELETE' });
+        if (!res.ok) {
+            const d = await res.json().catch(() => ({}));
+            toast(d.error || '清空失败');
+            return;
+        }
+        const chat = state.chats.find(c => c.characterId === charId);
+        if (chat) { chat.messages = []; chat.updated_at = Date.now(); }
+        renderChats();
+        renderActiveChat();
+        closeChatSettings();
+        toast('已清空聊天记录');
+    } catch (err) {
+        toast('清空失败：' + (err.message || '未知错误'));
+    }
+}
+
+async function hideChat(charId) {
+    try {
+        const res = await fetch(`/api/qq/chats/${encodeURIComponent(charId)}/hidden`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ hidden: true })
+        });
+        if (!res.ok) {
+            const d = await res.json().catch(() => ({}));
+            toast(d.error || '隐藏失败');
+            return;
+        }
+        const chat = state.chats.find(c => c.characterId === charId);
+        if (chat) chat.hidden = true;
+        // 当前打开的就是它 → 关掉聊天页
+        if (state.activeChatId === charId) state.activeChatId = '';
+        renderChats();
+        renderActiveChat();
+        closeChatSettings();
+        toast('已隐藏。开关"显示隐藏聊天"可以找回');
+    } catch (err) {
+        toast('隐藏失败：' + (err.message || '未知错误'));
+    }
+}
+
+async function deleteChat(charId) {
+    const character = state.characters.find(c => c.id === charId);
+    if (!confirm(`确定删除与「${character?.name || charId}」的聊天？\n聊天记录 + 该 char 的美化绑定 + 专属背景都会清除，不可恢复（角色卡本身保留）。`)) return;
+    try {
+        const res = await fetch(`/api/qq/chats/${encodeURIComponent(charId)}`, { method: 'DELETE' });
+        if (!res.ok) {
+            const d = await res.json().catch(() => ({}));
+            toast(d.error || '删除失败');
+            return;
+        }
+        state.chats = state.chats.filter(c => c.characterId !== charId);
+        if (state.activeChatId === charId) state.activeChatId = '';
+        renderChats();
+        renderActiveChat();
+        closeChatSettings();
+        toast('已删除聊天');
+    } catch (err) {
+        toast('删除失败：' + (err.message || '未知错误'));
     }
 }
 

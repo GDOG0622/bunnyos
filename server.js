@@ -2683,15 +2683,70 @@ app.post('/api/qq/chats/:characterId', (req, res) => {
         const characterId = req.params.characterId;
         const messages = sanitizeChatMessagesForStorage(req.body?.messages);
         settleUserTransfers(messages);
+        const chatFile = path.join(CHATS_DIR, `${characterId}.json`);
+        // 保留原 chat 的辅助字段（如 hidden），只覆盖 messages + updated_at
+        const prev = fs.existsSync(chatFile) ? readJsonFile(chatFile, {}) : {};
         const data = {
+            ...prev,
             characterId,
             messages,
             updated_at: Date.now()
         };
-        fs.writeFileSync(path.join(CHATS_DIR, `${characterId}.json`), JSON.stringify(data, null, 2), 'utf-8');
+        fs.writeFileSync(chatFile, JSON.stringify(data, null, 2), 'utf-8');
         res.json(data);
     } catch (e) {
         res.status(500).json({ error: '保存聊天失败' });
+    }
+});
+
+// M8 清空 messages（保留 chat 文件 + hidden 等字段）
+app.delete('/api/qq/chats/:characterId/messages', (req, res) => {
+    try {
+        const characterId = req.params.characterId;
+        const chatFile = path.join(CHATS_DIR, `${characterId}.json`);
+        if (!fs.existsSync(chatFile)) return res.json({ characterId, messages: [] });
+        const prev = readJsonFile(chatFile, {});
+        const data = { ...prev, characterId, messages: [], updated_at: Date.now() };
+        fs.writeFileSync(chatFile, JSON.stringify(data, null, 2), 'utf-8');
+        res.json(data);
+    } catch (e) {
+        res.status(500).json({ error: '清空聊天失败' });
+    }
+});
+
+// M8 隐藏 / 显示聊天（联系人列表默认过滤 hidden）
+app.patch('/api/qq/chats/:characterId/hidden', (req, res) => {
+    try {
+        const characterId = req.params.characterId;
+        const chatFile = path.join(CHATS_DIR, `${characterId}.json`);
+        const prev = fs.existsSync(chatFile) ? readJsonFile(chatFile, {}) : { characterId, messages: [] };
+        const data = { ...prev, characterId, hidden: !!req.body?.hidden };
+        fs.writeFileSync(chatFile, JSON.stringify(data, null, 2), 'utf-8');
+        res.json(data);
+    } catch (e) {
+        res.status(500).json({ error: '隐藏聊天失败' });
+    }
+});
+
+// M8 删除整个 chat（chat 文件 + char-beauty 绑定 + char 专属背景文件）
+app.delete('/api/qq/chats/:characterId', (req, res) => {
+    try {
+        const characterId = req.params.characterId;
+        const chatFile = path.join(CHATS_DIR, `${characterId}.json`);
+        if (fs.existsSync(chatFile)) fs.rmSync(chatFile, { force: true });
+        // 顺手清 char 专属背景文件
+        if (fs.existsSync(QQ_CHAR_BG_DIR)) {
+            fs.readdirSync(QQ_CHAR_BG_DIR)
+                .filter(f => f === characterId || f.startsWith(`${characterId}.`))
+                .forEach(f => fs.rmSync(path.join(QQ_CHAR_BG_DIR, f), { force: true }));
+        }
+        // 清 char-beauty 绑定
+        const cb = readCharBeauty();
+        if (cb[characterId]) { delete cb[characterId]; writeJsonFile(QQ_CHAR_BEAUTY_FILE, cb); }
+        res.json({ success: true });
+    } catch (e) {
+        console.error('[DELETE chat]', e);
+        res.status(500).json({ error: '删除聊天失败' });
     }
 });
 

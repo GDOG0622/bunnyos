@@ -1,13 +1,31 @@
 ﻿function renderChats() {
     const list = $('#chat-list');
     const empty = $('#empty-chats');
-    list.querySelectorAll('.qq-chat-row').forEach(el => el.remove());
-    if (!state.chats.length) {
+    list.querySelectorAll('.qq-chat-row, .qq-chat-hidden-toggle').forEach(el => el.remove());
+    // M8：默认过滤 hidden；state.showHiddenChats=true 时全显
+    const visibleChats = state.showHiddenChats
+        ? state.chats
+        : state.chats.filter(c => !c.hidden);
+    const hiddenCount = state.chats.filter(c => c.hidden).length;
+    // 顶部"显示隐藏聊天"切换条（只在有隐藏聊天时显示）
+    if (hiddenCount > 0) {
+        const bar = document.createElement('div');
+        bar.className = 'qq-chat-hidden-toggle';
+        bar.innerHTML = state.showHiddenChats
+            ? `<span><i class="bi bi-eye-slash"></i> 显示了 ${hiddenCount} 条隐藏聊天</span><button type="button">收回</button>`
+            : `<span><i class="bi bi-eye-slash"></i> 有 ${hiddenCount} 条隐藏聊天</span><button type="button">显示</button>`;
+        bar.querySelector('button').addEventListener('click', () => {
+            state.showHiddenChats = !state.showHiddenChats;
+            renderChats();
+        });
+        list.insertBefore(bar, list.firstChild);
+    }
+    if (!visibleChats.length) {
         empty.classList.remove('hidden');
         return;
     }
     empty.classList.add('hidden');
-    for (const chat of state.chats) {
+    for (const chat of visibleChats) {
         const c = state.characters.find(item => item.id === chat.characterId);
         if (!c) continue;
         const row = document.createElement('div');
