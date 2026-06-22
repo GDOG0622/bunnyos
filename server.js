@@ -2102,26 +2102,35 @@ app.post('/api/qq/link-preview', async (req, res) => {
         // ── 工具：小红书 __INITIAL_STATE__ / 内嵌 JSON 提取 ─────────────────────────
         const parseXhsFromHtml = (html, baseUrl) => {
             // 方案 A：window.__INITIAL_STATE__ 内嵌 JSON
-            const stateMatch = html.match(/window\.__INITIAL_STATE__\s*=\s*(\{[\s\S]*?\})\s*(?:<\/script>|;window)/i);
+            // 实测路径：state.noteData.data.noteData（2025-06 版本）
+            const stateMatch = html.match(/window\.__INITIAL_STATE__\s*=\s*(\{[\s\S]*?)(?=\s*<\/script>|\s*;?\s*window\.__)/ );
             if (stateMatch) {
                 try {
-                    const state = JSON.parse(stateMatch[1].replace(/undefined/g, 'null'));
-                    // 路径因版本不同，遍历常见位置
-                    const note = state?.noteDetailMap && Object.values(state.noteDetailMap)[0]?.note
-                        || state?.homeFeed?.feedsForYou?.[0]
+                    const state = JSON.parse(stateMatch[1].replace(/\bundefined\b/g, 'null'));
+                    // 尝试多个已知路径，兼容版本差异
+                    const note = state?.noteData?.data?.noteData
+                        || (state?.noteDetailMap && Object.values(state.noteDetailMap)[0]?.note)
                         || state?.note?.noteDetail;
                     if (note) {
-                        const title = String(note.title || note.desc || '').trim().slice(0, 200);
-                        const desc = String(note.desc || '').trim().slice(0, 1200);
+                        const title = String(note.title || '').trim();
+                        const desc = String(note.desc || '').trim();
                         const images = Array.isArray(note.imageList) ? note.imageList : [];
-                        const image = note.cover?.urlDefault || images[0]?.urlDefault || images[0]?.url || '';
+                        const image = note.cover?.urlDefault || images[0]?.url || images[0]?.urlDefault || '';
                         if (title || desc || image) {
-                            return { title: title || desc.slice(0, 60), description: desc, image, siteName: '小红书', url: baseUrl };
+                            // 去掉描述里的 #话题# 标签
+                            const cleanDesc = desc.replace(/#[^#\[]+(?:\[话题\])?#?/g, '').replace(/\s+/g, ' ').trim();
+                            return {
+                                title: title || cleanDesc.slice(0, 60),
+                                description: cleanDesc,
+                                image,
+                                siteName: '小红书',
+                                url: baseUrl
+                            };
                         }
                     }
                 } catch {}
             }
-            // 方案 B：OG 标签（小红书 SSR 会写进去）
+            // 方案 B：OG 标签
             const og = parseOgFromHtml(html, baseUrl);
             const finalHost = (() => { try { return new URL(baseUrl).hostname; } catch { return ''; } })();
             if (og.title && !isGenericPreviewText(og.title, finalHost)) {
