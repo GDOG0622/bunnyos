@@ -71,6 +71,11 @@
 | 头像框拆 user/char 双选 | 完成 | `13a7c38` | char-beauty 拆 frameCharId/frameUserId；注入 .bunny-qq-frame-{char,user}::after 两条 |
 | M5 气泡+背景应用 | 完成 | `da58d52` | 消息渲染加 .bunny-qq-bubble.bunny-qq-bubble-{user,char}；#chat-room 加 .bunny-qq-bg；applyCharBeauty 注入 bubble+bg CSS；面板下拉启用 |
 | M5 皮肤全局应用 | 完成 | `8e856e6` | `GET/PUT /api/qq/skin`（写 settings.json.currentSkinId）；QQ.js 启动注入；皮肤槽位"应用"按钮；"预览"走全屏临时套用 + 退出浮窗；body 挂 .bunny-qq-skin |
+| 数据迁移补字体/提示音 | 完成 | `4f7e304` | carrot 的 cip_global_fonts_v1 + cip_notif_sounds_v1 + 相关激活字段统一存到 settings.json.imported_carrot 备查（暂无 UI 暴露） |
+| 气泡编辑模式 UI 优化 | 完成 | `c0a69a8` | textarea 直接嵌进气泡（透明无边框继承字号），✓/× 圆按钮浮气泡右下；textarea 跟字数自适应高度 |
+| 聊天背景改 per-char 上传 | 完成 | `3b273fe` | 美化商城删 backgrounds tab；三个点面板用 full-width 上传块；char-beauty 加 customBackgroundUrl；存 data/qq/char-backgrounds/<cid>.<ext> 覆盖式；POST/DELETE 两端点 |
+| 聊天设置顶部 token 估算 | 完成 | `63a7894` | 新端点 /api/qq/chat-tokens/:cid 拼 system+history 估算（沿用酒馆 fallback 思路：CJK 1tk + 其余 4 字/tk） |
+| 图片历史回放 / 仅发最新 | 完成 | `f23fb27` | 后端存盘剥 image dataURL（chat 文件不爆），但保留 client_image_id；前端发图同步写 localStorage qq:img:<id>；prompt 端早已是"仅发最新一张" |
 | M7 教程 + 图床 + 全局背景 | 未开始 | — | 含 S40 需先确认 §7.3 |
 | M8 对话框管理 + 收尾 | 未开始 | — | 含 S47 需先确认 §7.2 |
 
