@@ -49,6 +49,7 @@ async function appendLinkPreviewMessage(data, fallbackUrl) {
     const cleanDesc = String(data?.description || '').trim().replace(/^预览受限：.*/, '');
     const limitedReason = String(data?.limitedReason || '').trim();
     const source = String(data?.source || '').trim();
+    const comments = Array.isArray(data?.comments) ? data.comments : [];
     const parts = [cleanTitle, cleanDesc].filter(Boolean).filter((p, i, a) => a.indexOf(p) === i);
     await appendChatMessage({
         role: 'user', type: 'link',
@@ -57,7 +58,9 @@ async function appendLinkPreviewMessage(data, fallbackUrl) {
         description: cleanDesc,
         fullDescription: cleanDesc,
         image: data?.image || '',
+        imageLocal: data?.imageLocal || '',
         siteName: data?.siteName || '',
+        comments,
         source,
         limitedReason,
         text: `[链接] ${parts.join('：') || data?.siteName || fallbackUrl}`,

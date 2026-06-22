@@ -1799,6 +1799,19 @@ html[data-app-layout="desktop"] .qq-contact-add {
     color: #c05a2b;
     overflow-wrap: anywhere;
 }
+.qq-link-comments {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(0, 0, 0, 0.08);
+    font-size: 11px;
+    line-height: 1.35;
+    opacity: 0.68;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow-wrap: anywhere;
+}
 .qq-link-site {
     margin-top: 6px;
     font-size: 11px;

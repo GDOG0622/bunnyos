@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const webpush = require('web-push');
 const { spawn } = require('child_process');
 
@@ -110,6 +111,7 @@ function defaultBeautiesData() {
 const USER_PERSONAS_DIR = path.join(DATA_DIR, 'userpersonas');
 const AVATARS_DIR = path.join(DATA_DIR, 'assets', 'avatars');
 const USER_PERSONA_AVATARS_DIR = path.join(AVATARS_DIR, 'userpersonas');
+const LINK_PREVIEWS_DIR = path.join(DATA_DIR, 'assets', 'link-previews');
 const VAPID_FILE = path.join(DATA_DIR, 'vapid.json');
 const PUSH_SUBSCRIPTIONS_FILE = path.join(DATA_DIR, 'push-subscriptions.json');
 
@@ -1917,6 +1919,72 @@ app.post('/api/qq/link-preview', async (req, res) => {
                 limitedReason: reason || ''
             };
         };
+        const imageExtFromType = (ctype, imageUrl = '') => {
+            const lower = String(ctype || '').toLowerCase();
+            if (lower.includes('png')) return '.png';
+            if (lower.includes('webp')) return '.webp';
+            if (lower.includes('gif')) return '.gif';
+            if (lower.includes('jpeg') || lower.includes('jpg')) return '.jpg';
+            try {
+                const ext = path.extname(new URL(imageUrl).pathname).toLowerCase();
+                if (/^\.(png|jpe?g|webp|gif)$/.test(ext)) return ext === '.jpeg' ? '.jpg' : ext;
+            } catch {}
+            return '.jpg';
+        };
+        const cachePreviewImage = async (imageUrl, refererUrl = '') => {
+            if (!imageUrl) return '';
+            let parsed;
+            try { parsed = new URL(imageUrl); } catch { return ''; }
+            if (!/^https?:$/.test(parsed.protocol) || isBlockedHost(parsed.hostname)) return '';
+            const candidates = [];
+            if (parsed.protocol === 'http:') {
+                const httpsUrl = new URL(parsed.toString());
+                httpsUrl.protocol = 'https:';
+                candidates.push(httpsUrl.toString());
+            }
+            candidates.push(parsed.toString());
+            const hash = crypto.createHash('sha1').update(parsed.toString()).digest('hex').slice(0, 20);
+            fs.mkdirSync(LINK_PREVIEWS_DIR, { recursive: true });
+            for (const candidate of candidates) {
+                try {
+                    const ctrl = new AbortController();
+                    const timer = setTimeout(() => ctrl.abort(), 12000);
+                    let imgResp;
+                    try {
+                        imgResp = await fetch(candidate, {
+                            signal: ctrl.signal,
+                            headers: {
+                                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+                                'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+                                ...(refererUrl ? { 'Referer': refererUrl } : {})
+                            }
+                        });
+                    } finally {
+                        clearTimeout(timer);
+                    }
+                    const ctype = imgResp.headers.get('content-type') || '';
+                    const len = Number(imgResp.headers.get('content-length') || 0);
+                    if (!imgResp.ok || !/^image\//i.test(ctype) || len > 8 * 1024 * 1024) continue;
+                    const bytes = Buffer.from(await imgResp.arrayBuffer());
+                    if (!bytes.length || bytes.length > 8 * 1024 * 1024) continue;
+                    const ext = imageExtFromType(ctype, candidate);
+                    const filename = `${hash}${ext}`;
+                    const filePath = path.join(LINK_PREVIEWS_DIR, filename);
+                    fs.writeFileSync(filePath, bytes);
+                    return `/data/assets/link-previews/${filename}`;
+                } catch (e) {
+                    console.warn('[link-preview image cache failed]', e?.message || e);
+                }
+            }
+            return '';
+        };
+        const sendPreview = async (preview, refererUrl = '') => {
+            const out = preview && typeof preview === 'object' ? { ...preview } : fallbackPreview();
+            if (out.image && !out.imageLocal) {
+                out.imageLocal = await cachePreviewImage(out.image, refererUrl || out.url || u.toString());
+            }
+            return res.json(out);
+        };
         const normalizePreviewPayload = (payload) => {
             const data = payload?.data || payload?.result || payload?.note || payload;
             if (!data || typeof data !== 'object') return null;
@@ -2030,7 +2098,7 @@ app.post('/api/qq/link-preview', async (req, res) => {
                 if (apiResp.ok) {
                     const parsed = await apiResp.json().catch(() => null);
                     const normalized = normalizePreviewPayload(parsed);
-                    if (normalized) return res.json(normalized);
+                    if (normalized) return await sendPreview(normalized, normalized.url || u.toString());
                 }
             } catch (e) {
                 console.warn('[link-preview third-party failed]', e?.message || e);
@@ -2133,12 +2201,59 @@ app.post('/api/qq/link-preview', async (req, res) => {
                 } catch {}
             }
         };
+        const normalizeXhsComments = (commentData) => {
+            const list = Array.isArray(commentData?.comments) ? commentData.comments : [];
+            const out = [];
+            const pushComment = (item, parentNickname = '') => {
+                if (!item || out.length >= 10) return;
+                const user = item.user || {};
+                const nickname = String(user.nickname || user.nickName || '').trim();
+                const content = String(item.content || '').trim()
+                    || (Array.isArray(item.pictures) && item.pictures.length ? '[图片评论]' : '');
+                const ipLocation = String(item.ipLocation || '').trim();
+                const likeCount = item.likeCount ?? item.likeViewCount ?? '';
+                const subCommentCount = item.subCommentCount ?? (Array.isArray(item.subComments) ? item.subComments.length : 0);
+                if (!content && !nickname) return;
+                out.push({
+                    nickname,
+                    content,
+                    ipLocation,
+                    likeCount,
+                    subCommentCount,
+                    parentNickname
+                });
+            };
+            for (const item of list) {
+                if (out.length >= 10) break;
+                const parentName = String(item?.user?.nickname || item?.user?.nickName || '').trim();
+                pushComment(item);
+                const subs = Array.isArray(item?.subComments) ? item.subComments : [];
+                for (const sub of subs) {
+                    if (out.length >= 10) break;
+                    pushComment(sub, parentName);
+                }
+            }
+            return out;
+        };
+        const extractXhsCommentsFromHtml = (html) => {
+            let from = 0;
+            const KEY = '"commentData":';
+            while (true) {
+                const k = html.indexOf(KEY, from);
+                if (k === -1) return [];
+                from = k + KEY.length;
+                const data = extractJsonObjectAfterKey(html.slice(k), KEY);
+                const comments = normalizeXhsComments(data);
+                if (comments.length) return comments;
+            }
+        };
 
         // ── 工具：小红书 __INITIAL_STATE__ / 内嵌 JSON 提取 ─────────────────────────
         const parseXhsFromHtml = (html, baseUrl) => {
             // 方案 A：括号配平抠 "noteData":{...}，遍历所有同名 key 找带 title/desc 的那个
             let from = 0;
             const KEY = '"noteData":';
+            const comments = extractXhsCommentsFromHtml(html);
             while (true) {
                 const k = html.indexOf(KEY, from);
                 if (k === -1) break;
@@ -2158,6 +2273,7 @@ app.post('/api/qq/link-preview', async (req, res) => {
                         title: title || cleanDesc || '小红书笔记',
                         description: cleanDesc,
                         image,
+                        comments,
                         siteName: '小红书',
                         source: 'xhs-state',
                         url: baseUrl
@@ -2168,7 +2284,7 @@ app.post('/api/qq/link-preview', async (req, res) => {
             const og = parseOgFromHtml(html, baseUrl);
             const finalHost = (() => { try { return new URL(baseUrl).hostname; } catch { return ''; } })();
             if (og.title && !isGenericPreviewText(og.title, finalHost)) {
-                return { ...og, source: 'xhs-og', url: baseUrl };
+                return { ...og, comments, source: 'xhs-og', url: baseUrl };
             }
             return null;
         };
@@ -2180,7 +2296,7 @@ app.post('/api/qq/link-preview', async (req, res) => {
         try { fetchResult = await fetchHtml(u.toString()); } catch (e) {
             // 网络完全失败 → 直接 Jina 兜底
             const jinaFb = await tryJinaReader(u.toString(), jinaToken);
-            return res.json(isUsefulPreview(jinaFb, host) ? jinaFb : fallbackPreview(u.toString(), '抓取超时'));
+            return await sendPreview(isUsefulPreview(jinaFb, host) ? jinaFb : fallbackPreview(u.toString(), '抓取超时'), u.toString());
         }
         let { finalUrl, html } = fetchResult;
 
@@ -2188,8 +2304,8 @@ app.post('/api/qq/link-preview', async (req, res) => {
         if (!html && !isXhsHost(host)) {
             // 非 XHS 短链，直接 Jina 兜底
             const jinaFb = await tryJinaReader(finalUrl, jinaToken);
-            return res.json(isUsefulPreview(jinaFb, new URL(finalUrl).hostname)
-                ? jinaFb : fallbackPreview(finalUrl, `远程返回 ${fetchResult.resp?.status}`));
+            return await sendPreview(isUsefulPreview(jinaFb, new URL(finalUrl).hostname)
+                ? jinaFb : fallbackPreview(finalUrl, `远程返回 ${fetchResult.resp?.status}`), finalUrl);
         }
         if (html) {
             const redirectTarget = extractHtmlRedirect(html);
@@ -2217,17 +2333,17 @@ app.post('/api/qq/link-preview', async (req, res) => {
 
             const xhsData = html ? parseXhsFromHtml(html, finalUrl) : null;
             if (xhsData && isUsefulPreview(xhsData, finalHost)) {
-                return res.json({ ...xhsData, url: xhsData.url || finalUrl });
+                return await sendPreview({ ...xhsData, url: xhsData.url || finalUrl }, finalUrl);
             }
             // XHS 直抓失败（多半被反爬）→ 试 Jina（用真正的 xiaohongshu.com URL，不再是短链）
             const jinaXhs = await tryJinaReader(finalUrl, jinaToken);
-            if (isUsefulPreview(jinaXhs, finalHost)) return res.json(jinaXhs);
+            if (isUsefulPreview(jinaXhs, finalHost)) return await sendPreview(jinaXhs, finalUrl);
             // 都失败：用分享文字兜底 + 诊断原因
             const sharedXhs = cleanSharedText(rawText);
             const reason = looksBlocked ? '小红书反爬拦截（服务器 IP 被限），建议配置 Jina Token'
                 : !hasState ? '小红书未返回内容（IP 被限或链接失效），建议配置 Jina Token'
                 : '小红书内容解析失败';
-            return res.json({
+            return await sendPreview({
                 url: finalUrl,
                 title: xhsData?.title || sharedXhs || '小红书笔记',
                 description: sharedXhs || '',
@@ -2235,7 +2351,7 @@ app.post('/api/qq/link-preview', async (req, res) => {
                 siteName: '小红书',
                 source: 'xhs-limited',
                 limitedReason: reason
-            });
+            }, finalUrl);
         }
 
         // Step 4: 通用 OG 解析
@@ -2244,26 +2360,26 @@ app.post('/api/qq/link-preview', async (req, res) => {
             const og = parseOgFromHtml(html, finalUrl);
             const hasUseful = Boolean(og.description || og.image || (og.title && !isGenericPreviewText(og.title, finalHost)));
             if (hasUseful) {
-                return res.json({
+                return await sendPreview({
                     url: finalUrl,
                     title: og.title,
                     description: og.description,
                     image: og.image,
                     siteName: og.siteName.slice(0, 80),
                     source: 'og'
-                });
+                }, finalUrl);
             }
         }
 
         // Step 5: OG 没内容 → Jina（用 finalUrl，比原始短链更准）
         const jinaFinal = await tryJinaReader(finalUrl, jinaToken);
-        if (isUsefulPreview(jinaFinal, finalHost)) return res.json(jinaFinal);
+        if (isUsefulPreview(jinaFinal, finalHost)) return await sendPreview(jinaFinal, finalUrl);
 
         // Step 6: 全失败 → 用 rawText 里的分享文字兜底
         if (sharedText) {
-            return res.json({ url: finalUrl, title: sharedText, description: '', image: '', siteName: inferSiteName(finalHost), source: 'shared-text' });
+            return await sendPreview({ url: finalUrl, title: sharedText, description: '', image: '', siteName: inferSiteName(finalHost), source: 'shared-text' }, finalUrl);
         }
-        return res.json(fallbackPreview(finalUrl, '无法解析'));
+        return await sendPreview(fallbackPreview(finalUrl, '无法解析'), finalUrl);
     } catch (e) {
         const msg = e?.name === 'AbortError' ? '抓取超时' : '抓取失败';
         res.status(502).json({ error: msg });
@@ -2965,9 +3081,19 @@ function qqMessageToText(msg) {
             const t = String(msg.title || '').trim();
             const d = String(msg.fullDescription || msg.description || '').trim();
             const s = String(msg.siteName || '').trim();
+            const comments = Array.isArray(msg.comments) ? msg.comments : [];
             const parts = [];
             if (t) parts.push(`标题：${t}`);
             if (d) parts.push(`描述：${d}`);
+            if (comments.length) {
+                parts.push(`评论前${comments.length}条：${comments.map((item, i) => {
+                    const name = item.nickname ? `${item.nickname}：` : '';
+                    const parent = item.parentNickname ? `回复${item.parentNickname} ` : '';
+                    const ip = item.ipLocation ? `（${item.ipLocation}）` : '';
+                    const likes = item.likeCount !== '' && item.likeCount !== undefined ? ` 赞${item.likeCount}` : '';
+                    return `${i + 1}. ${parent}${name}${item.content || ''}${ip}${likes}`;
+                }).join(' / ')}`);
+            }
             if (s) parts.push(`站点：${s}`);
             return `[链接卡片] ${parts.join('；')}`;
         }
@@ -2977,6 +3103,23 @@ function qqMessageToText(msg) {
         default:
             return String(msg.text || '').trim();
     }
+}
+
+function localStaticImageToDataUrl(staticPath) {
+    const value = String(staticPath || '').trim();
+    if (!value || !value.startsWith('/data/assets/link-previews/')) return '';
+    const abs = path.resolve(__dirname, value.replace(/^\/+/, ''));
+    const root = path.resolve(LINK_PREVIEWS_DIR);
+    if (!abs.startsWith(root + path.sep)) return '';
+    if (!fs.existsSync(abs)) return '';
+    const ext = path.extname(abs).toLowerCase();
+    const mime = ext === '.png' ? 'image/png'
+        : ext === '.webp' ? 'image/webp'
+            : ext === '.gif' ? 'image/gif'
+                : 'image/jpeg';
+    const buf = fs.readFileSync(abs);
+    if (!buf.length || buf.length > 8 * 1024 * 1024) return '';
+    return `data:${mime};base64,${buf.toString('base64')}`;
 }
 
 // 用角色卡拼出"你要扮演谁"的系统提示词
@@ -3066,18 +3209,19 @@ app.post('/api/qq/reply', async (req, res) => {
         const variables = buildPromptVariables({ characterId, userName: userPersona?.name || '', messages: list });
 
         // 把 QQ 聊天记录转成 OpenAI 的 messages 格式。
-        // 图片只允许本次请求里的最后一张真实 dataURL 进入多模态；其它历史图片只保留 [图片] 占位。
-        const latestImageIndex = (() => {
+        // 图片/链接封面只允许本次请求里最后一个视觉附件进入多模态；其它历史图片只保留文本占位。
+        const latestVisualIndex = (() => {
             for (let i = list.length - 1; i >= 0; i--) {
                 const m = list[i];
                 if (m?.role !== 'assistant' && m?.type === 'image' && /^data:image\//.test(m.image || '')) return i;
+                if (m?.role !== 'assistant' && m?.type === 'link' && m.imageLocal) return i;
             }
             return -1;
         })();
         const history = list
             .map((m, idx) => {
                 const role = m.role === 'assistant' ? 'assistant' : 'user';
-                if (role === 'user' && m.type === 'image' && idx === latestImageIndex) {
+                if (role === 'user' && m.type === 'image' && idx === latestVisualIndex) {
                     return {
                         role,
                         content: [
@@ -3085,6 +3229,18 @@ app.post('/api/qq/reply', async (req, res) => {
                             { type: 'image_url', image_url: { url: m.image } }
                         ]
                     };
+                }
+                if (role === 'user' && m.type === 'link' && idx === latestVisualIndex) {
+                    const dataUrl = localStaticImageToDataUrl(m.imageLocal);
+                    if (dataUrl) {
+                        return {
+                            role,
+                            content: [
+                                { type: 'text', text: `${qqMessageToText(m)}；封面图：已作为图片附件发送` },
+                                { type: 'image_url', image_url: { url: dataUrl } }
+                            ]
+                        };
+                    }
                 }
                 return { role, content: qqMessageToText(m) };
             })

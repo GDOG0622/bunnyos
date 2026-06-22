@@ -231,11 +231,19 @@ function messageContentHtml(msg, idx) {
         const d = msg.description ? `<div class="qq-link-desc">${escapeHtml(msg.description)}</div>` : '';
         const limited = msg.limitedReason ? `<div class="qq-link-limited">${escapeHtml(msg.limitedReason)}</div>` : '';
         const site = escapeHtml(msg.siteName || '');
-        const img = msg.image
-            ? `<img class="qq-link-thumb" src="${escapeAttr(msg.image)}" alt="" onerror="this.remove()">`
+        const imgSrc = msg.imageLocal || msg.image || '';
+        const img = imgSrc
+            ? `<img class="qq-link-thumb" src="${escapeAttr(imgSrc)}" alt="" onerror="this.remove()">`
+            : '';
+        const comments = Array.isArray(msg.comments) && msg.comments.length
+            ? `<div class="qq-link-comments">${msg.comments.slice(0, 3).map((item, i) => {
+                const name = item.nickname ? `${item.nickname}：` : '';
+                const parent = item.parentNickname ? `回复${item.parentNickname} ` : '';
+                return `<div>${i + 1}. ${escapeHtml(parent + name + (item.content || ''))}</div>`;
+            }).join('')}</div>`
             : '';
         const href = escapeAttr(msg.url || '');
-        return `<div class="qq-message qq-link-card">${reply}<a class="qq-link-card-inner" href="${href}" target="_blank" rel="noopener noreferrer">${img}<div class="qq-link-body"><div class="qq-link-title">${t}</div>${d}${limited}<div class="qq-link-site">${site}</div></div></a></div>`;
+        return `<div class="qq-message qq-link-card">${reply}<a class="qq-link-card-inner" href="${href}" target="_blank" rel="noopener noreferrer">${img}<div class="qq-link-body"><div class="qq-link-title">${t}</div>${d}${comments}${limited}<div class="qq-link-site">${site}</div></div></a></div>`;
     }
     const voice = parseVoiceText(activeMessageText(msg));
     if (voice) {
