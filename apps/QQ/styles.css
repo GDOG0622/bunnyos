@@ -2096,22 +2096,27 @@ emoji-picker {
 }
 .qq-custom-stickers {
     height: 100%;
+    width: 100%;
+    box-sizing: border-box;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
-    padding: 12px;
-    display: grid;
-    grid-template-columns: repeat(4, 1fr); /* 固定一排 4 个 */
-    gap: 10px;
+    padding: 8px;
+    display: grid !important;            /* 强制覆盖任何旧规则 */
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    gap: 6px;
     align-content: start;
 }
 .qq-custom-sticker {
     position: relative;
+    width: 100%;
+    min-width: 0;                         /* 关键：允许 grid 项收缩到 1/4 宽 */
     aspect-ratio: 1;
     border: none;
-    border-radius: 12px;
+    border-radius: 10px;
     background: rgba(0, 0, 0, 0.04);
-    padding: 6px;
+    padding: 4px;
     cursor: pointer;
+    box-sizing: border-box;
 }
 .qq-custom-sticker img {
     width: 100%;
@@ -2120,10 +2125,10 @@ emoji-picker {
 }
 /* 编辑模式：tab/sticker 抖动提示 + ✕ 角标 */
 .qq-sticker-strip.is-edit .qq-sticker-tab[data-pack]:not([data-pack="emoji"]) {
-    animation: qq-sticker-wiggle 0.4s infinite alternate ease-in-out;
+    animation: qq-sticker-wiggle 0.25s infinite alternate ease-in-out;
 }
 .qq-custom-stickers.is-edit .qq-custom-sticker {
-    animation: qq-sticker-wiggle 0.4s infinite alternate ease-in-out;
+    animation: qq-sticker-wiggle 0.25s infinite alternate ease-in-out;
 }
 @keyframes qq-sticker-wiggle {
     from { transform: rotate(-1.5deg); }

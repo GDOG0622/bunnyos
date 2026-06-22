@@ -81,10 +81,24 @@ function showStickerPack(packId) {
 
 function toggleStickerEditMode() {
     state.stickerEditMode = !state.stickerEditMode;
+    // strip 重渲（数量少，瞬时）
     renderStickerPacks();
-    // 当前若有打开的某 pack，重渲一次让 ✕ 出来
-    const activeTab = document.querySelector('.qq-sticker-tab.active');
-    if (activeTab && activeTab.dataset.pack !== 'emoji') showStickerPack(activeTab.dataset.pack);
+    // 当前已打开的某 pack：原地加 class + 给每个 sticker 立刻插 ✕（避免 innerHTML 整块重建造成的延迟）
+    const grid = document.querySelector('.qq-custom-stickers');
+    if (grid) {
+        grid.classList.toggle('is-edit', state.stickerEditMode);
+        grid.querySelectorAll('.qq-custom-sticker').forEach(btn => {
+            const existing = btn.querySelector('.qq-sticker-x');
+            if (state.stickerEditMode && !existing) {
+                const x = document.createElement('span');
+                x.className = 'qq-sticker-x';
+                x.innerHTML = '<i class="bi bi-x"></i>';
+                btn.insertBefore(x, btn.firstChild);
+            } else if (!state.stickerEditMode && existing) {
+                existing.remove();
+            }
+        });
+    }
     toast(state.stickerEditMode ? '管理模式：点合集删除（需确认），点贴纸 ✕ 删贴纸（不需确认）' : '已退出管理模式');
 }
 
