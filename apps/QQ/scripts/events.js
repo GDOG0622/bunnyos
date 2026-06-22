@@ -95,6 +95,7 @@
     $('#btn-emoji').addEventListener('click', toggleEmojiPanel);
     $('.qq-sticker-tab[data-pack="emoji"]').addEventListener('click', showEmojiPicker);
     $('#btn-add-sticker-pack').addEventListener('click', () => openPopModal('sticker-modal'));
+    $('#btn-edit-sticker-packs')?.addEventListener('click', toggleStickerEditMode);
     $('#sticker-pack-save').addEventListener('click', saveStickerPack);
     $('#btn-transfer').addEventListener('click', () => openPopModal('transfer-modal'));
     $('#btn-impersonate')?.addEventListener('click', () => requestImpersonateReply());

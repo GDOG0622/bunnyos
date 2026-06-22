@@ -33,6 +33,7 @@ function hideEmojiPanel() {
 function renderStickerPacks() {
     const strip = $('#sticker-strip');
     strip.querySelectorAll('.qq-sticker-tab[data-pack]:not([data-pack="emoji"])').forEach(el => el.remove());
+    strip.classList.toggle('is-edit', !!state.stickerEditMode);
     for (const pack of state.stickerPacks) {
         const first = pack.items?.[0];
         const btn = document.createElement('button');
@@ -41,7 +42,13 @@ function renderStickerPacks() {
         btn.dataset.pack = pack.id;
         btn.title = pack.name || '表情包';
         btn.innerHTML = first ? `<img src="${escapeAttr(first.url)}" alt="">` : '<i class="bi bi-image"></i>';
-        btn.addEventListener('click', () => showStickerPack(pack.id));
+        btn.addEventListener('click', () => {
+            if (state.stickerEditMode) {
+                deleteStickerPack(pack.id);
+            } else {
+                showStickerPack(pack.id);
+            }
+        });
         strip.insertBefore(btn, $('#btn-add-sticker-pack'));
     }
 }
@@ -50,17 +57,78 @@ function showStickerPack(packId) {
     const pack = state.stickerPacks.find(item => item.id === packId);
     const wrap = $('.qq-emoji-picker-wrap');
     if (!pack) return;
-    wrap.innerHTML = `<div class="qq-custom-stickers"></div>`;
+    wrap.innerHTML = `<div class="qq-custom-stickers${state.stickerEditMode ? ' is-edit' : ''}"></div>`;
     const grid = wrap.querySelector('.qq-custom-stickers');
-    for (const item of pack.items || []) {
+    (pack.items || []).forEach((item, idx) => {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'qq-custom-sticker';
-        btn.innerHTML = `<img src="${escapeAttr(item.url)}" alt="${escapeAttr(item.name)}">`;
-        btn.addEventListener('click', () => sendSticker(item));
+        const xMark = state.stickerEditMode
+            ? '<span class="qq-sticker-x" aria-label="删除"><i class="bi bi-x"></i></span>'
+            : '';
+        btn.innerHTML = `${xMark}<img src="${escapeAttr(item.url)}" alt="${escapeAttr(item.name)}">`;
+        btn.addEventListener('click', (e) => {
+            if (state.stickerEditMode) {
+                deleteSticker(packId, idx);
+            } else {
+                sendSticker(item);
+            }
+        });
         grid.appendChild(btn);
-    }
+    });
     $$('.qq-sticker-tab').forEach(tab => tab.classList.toggle('active', tab.dataset.pack === packId));
+}
+
+function toggleStickerEditMode() {
+    state.stickerEditMode = !state.stickerEditMode;
+    renderStickerPacks();
+    // 当前若有打开的某 pack，重渲一次让 ✕ 出来
+    const activeTab = document.querySelector('.qq-sticker-tab.active');
+    if (activeTab && activeTab.dataset.pack !== 'emoji') showStickerPack(activeTab.dataset.pack);
+    toast(state.stickerEditMode ? '管理模式：点合集删除（需确认），点贴纸 ✕ 删贴纸（不需确认）' : '已退出管理模式');
+}
+
+async function persistStickerPacks() {
+    const res = await fetch('/api/qq/sticker-packs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(state.stickerPacks),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+}
+
+async function deleteStickerPack(packId) {
+    const pack = state.stickerPacks.find(p => p.id === packId);
+    if (!pack) return;
+    if (!confirm(`删除合集「${pack.name}」？共 ${pack.items?.length || 0} 张贴纸，删除后无法恢复。`)) return;
+    state.stickerPacks = state.stickerPacks.filter(p => p.id !== packId);
+    try {
+        await persistStickerPacks();
+        toast(`已删除合集「${pack.name}」`);
+        renderStickerPacks();
+        // 若当前打开的就是它，切回 emoji
+        const activeTab = document.querySelector('.qq-sticker-tab.active');
+        if (!activeTab || activeTab.dataset.pack === packId) {
+            const wrap = $('.qq-emoji-picker-wrap');
+            if (wrap) wrap.innerHTML = '';
+            const emojiTab = document.querySelector('.qq-sticker-tab[data-pack="emoji"]');
+            if (emojiTab) emojiTab.classList.add('active');
+        }
+    } catch (err) {
+        toast('删除失败：' + err.message);
+    }
+}
+
+async function deleteSticker(packId, idx) {
+    const pack = state.stickerPacks.find(p => p.id === packId);
+    if (!pack || !pack.items || idx < 0 || idx >= pack.items.length) return;
+    pack.items.splice(idx, 1);
+    try {
+        await persistStickerPacks();
+        showStickerPack(packId);
+    } catch (err) {
+        toast('删除失败：' + err.message);
+    }
 }
 
 async function showEmojiPicker() {

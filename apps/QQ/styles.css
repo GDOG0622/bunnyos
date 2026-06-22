@@ -2076,6 +2076,7 @@ emoji-picker {
     gap: 12px;
 }
 .qq-custom-sticker {
+    position: relative;
     aspect-ratio: 1;
     border: none;
     border-radius: 12px;
@@ -2088,6 +2089,35 @@ emoji-picker {
     height: 100%;
     object-fit: contain;
 }
+/* 编辑模式：tab/sticker 抖动提示 + ✕ 角标 */
+.qq-sticker-strip.is-edit .qq-sticker-tab[data-pack]:not([data-pack="emoji"]) {
+    animation: qq-sticker-wiggle 0.4s infinite alternate ease-in-out;
+}
+.qq-custom-stickers.is-edit .qq-custom-sticker {
+    animation: qq-sticker-wiggle 0.4s infinite alternate ease-in-out;
+}
+@keyframes qq-sticker-wiggle {
+    from { transform: rotate(-1.5deg); }
+    to { transform: rotate(1.5deg); }
+}
+.qq-sticker-x {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--qq-danger, #e74c3c);
+    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    z-index: 2;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+.qq-sticker-x i { font-size: 12px; line-height: 1; }
+#btn-edit-sticker-packs i { font-size: 14px; }
 html[data-app-layout="desktop"] .qq-chat-shell {
     grid-template-columns: 260px 1fr;
 }
