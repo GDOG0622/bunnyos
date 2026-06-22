@@ -127,9 +127,8 @@ async function onChatImagePicked(e) {
     const image = await fileToDataUrl(file);
     const clientImageId = `img_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     state.imageAttachments[clientImageId] = { dataUrl: image, consumed: false, characterId: state.activeChatId };
-    // 持久化到 localStorage：重载后历史图片仍能正常显示（仅前端用，不进 prompt）
-    try { localStorage.setItem(`qq:img:${clientImageId}`, image); }
-    catch (err) { console.warn('[QQ] localStorage 写入图片失败（可能配额满）', err); }
+    // 持久化到 IndexedDB：重载后历史图片仍能正常显示（仅前端用，不进 prompt）
+    putImageBlob(clientImageId, image).catch(err => console.warn('[QQ] IDB 写入图片失败', err));
     await appendChatMessage({
         role: 'user',
         type: 'image',

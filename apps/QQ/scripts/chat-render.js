@@ -116,6 +116,8 @@ function renderActiveChat() {
     }
     box.scrollTop = box.scrollHeight;
     logChatLayoutDebug();
+    // 历史图片从 IndexedDB 拉到 state.imageAttachments，拉到再重渲一次（无图片时是 no-op）
+    if (typeof preloadImagesForActiveChat === 'function') preloadImagesForActiveChat();
 }
 
 function logChatLayoutDebug() {
@@ -170,15 +172,12 @@ function messageContentHtml(msg, idx) {
         </div>`;
     }
     if (msg.type === 'sticker' || msg.type === 'image') {
-        // 图片优先级：当次 in-memory dataURL > state.imageAttachments > localStorage（历史回放）
+        // 图片优先级：当次 in-memory dataURL > state.imageAttachments（renderActiveChat 末尾的 IDB 预加载会填充）
         let imageSrc = '';
         if (msg.type === 'image') {
             imageSrc = msg.image
                 || state.imageAttachments?.[msg.client_image_id]?.dataUrl
                 || '';
-            if (!imageSrc && msg.client_image_id) {
-                try { imageSrc = localStorage.getItem(`qq:img:${msg.client_image_id}`) || ''; } catch {}
-            }
         } else {
             imageSrc = msg.image || '';
         }

@@ -10,5 +10,7 @@
     loadPromptPresetSetting();
     loadData();
     loadGlobalSkin();
+    // 把老的 localStorage 图片缓存迁到 IDB（一次性，迁完 localStorage 释放）
+    if (typeof migrateLocalStorageImagesToIdb === 'function') migrateLocalStorageImagesToIdb();
     notifyNavState();
 });
