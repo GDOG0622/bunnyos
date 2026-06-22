@@ -50,8 +50,6 @@ function renderActiveChat() {
     if (!chat || !character) return;
 
     $('#chat-title').textContent = character.name || '未命名';
-    const headAvatar = $('#chat-head-avatar');
-    if (headAvatar) headAvatar.innerHTML = avatarHtml(character.avatar);
     // 套用该 char 的美化（M4：头像框；M5：气泡/背景）
     applyCharBeauty(character.id);
     const statusEl = $('#chat-status');
@@ -94,8 +92,14 @@ function renderActiveChat() {
         item.classList.toggle('delete-mode', state.deleteMode);
         item.classList.toggle('selected', state.selectedDeleteIndexes.has(i));
         item.dataset.idx = i;
-        // 一对一私聊不放气泡头像；时间/已读和气泡平行放在外侧。
-        item.innerHTML = `<div class="qq-msg-col">${messageContentHtml(msg, i)}${versionNavHtml(chat, i)}</div>${metaHtml(msg)}`
+        // 气泡侧头像：char 用角色卡 avatar（套头像框）；user 用当前人设 avatar（不套框）
+        const avatarUrl = isAssistant
+            ? (character.avatar || DEFAULT_AVATAR_URL)
+            : ((typeof currentPersona === 'function' ? currentPersona()?.avatar : state.currentPersona?.avatar) || DEFAULT_AVATAR_URL);
+        const avatarWrapClass = isAssistant ? 'qq-message-avatar bunny-qq-frame' : 'qq-message-avatar';
+        const avatarHtmlStr = `<span class="${avatarWrapClass}"><span class="qq-avatar">${avatarHtml(avatarUrl)}</span></span>`;
+        item.innerHTML = avatarHtmlStr
+            + `<div class="qq-msg-col">${messageContentHtml(msg, i)}${versionNavHtml(chat, i)}</div>${metaHtml(msg)}`
             + (isAssistant ? msgActionsHtml(chat, i) : '');
         box.appendChild(item);
     }

@@ -1382,9 +1382,19 @@ html[data-app-layout="desktop"] .qq-contact-add {
 .qq-message-row.delete-mode.selected .qq-message {
     outline: 2px solid rgba(229, 72, 77, 0.45);
 }
-/* Telegram 一对一私聊：气泡旁不显示头像（头像只在头栏） */
+/* QQ 风：每条消息侧边显示头像；char 头像外层带 .bunny-qq-frame 用作头像框 ::after 锚点 */
 .qq-message-avatar {
-    display: none;
+    flex: 0 0 36px;
+    width: 36px;
+    height: 36px;
+    margin-top: 2px;
+    align-self: flex-start;
+}
+.qq-message-avatar .qq-avatar {
+    width: 36px;
+    height: 36px;
+    flex-basis: 36px;
+    border-radius: 50%;
 }
 .qq-msg-col {
     display: flex;
