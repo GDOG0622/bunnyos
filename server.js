@@ -2030,105 +2030,183 @@ app.post('/api/qq/link-preview', async (req, res) => {
                 console.warn('[link-preview third-party failed]', e?.message || e);
             }
         }
-        const earlyJinaPreview = isXhsHost(host) ? await tryJinaReader(u.toString(), jinaToken) : null;
-        if (isUsefulPreview(earlyJinaPreview, host)) {
-            return res.json(earlyJinaPreview);
-        }
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 10000);
-        let resp;
-        try {
-            resp = await fetch(u.toString(), {
-                method: 'GET',
-                redirect: 'follow',
-                signal: controller.signal,
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-                    'Referer': `${u.protocol}//${u.hostname}/`
+        // ── 工具：抓 HTML（追 HTTP redirect；解析 JS/meta redirect 兜底）──────────────
+        const fetchHtml = async (targetUrl, timeout = 10000) => {
+            const hdrs = {
+                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            };
+            const ctrl = new AbortController();
+            const t = setTimeout(() => ctrl.abort(), timeout);
+            let resp;
+            try {
+                resp = await fetch(targetUrl, { redirect: 'follow', signal: ctrl.signal, headers: hdrs });
+            } finally { clearTimeout(t); }
+            const finalU = resp.url || targetUrl;
+            const ctype = resp.headers.get('content-type') || '';
+            if (!resp.ok || !/text\/html|application\/xhtml/i.test(ctype)) {
+                return { finalUrl: finalU, html: '', resp };
+            }
+            // 读最多 256KB
+            const reader = resp.body?.getReader?.();
+            let html = '', total = 0;
+            const dec = new TextDecoder('utf-8');
+            if (reader) {
+                for (;;) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    total += value.length;
+                    if (total > 256 * 1024) { try { await reader.cancel(); } catch {} break; }
+                    html += dec.decode(value, { stream: true });
                 }
-            });
-        } finally { clearTimeout(timer); }
-        const finalUrl = resp.url || u.toString();
-        try {
-            const finalParsed = new URL(finalUrl);
-            if (isBlockedHost(finalParsed.hostname)) return res.status(400).json({ error: '禁止访问内网地址' });
-        } catch {}
-        if (!resp.ok) {
-            const jinaPreview = await tryJinaReader(finalUrl, jinaToken);
-            return res.json(isUsefulPreview(jinaPreview, new URL(finalUrl).hostname)
-                ? jinaPreview
-                : fallbackPreview(finalUrl, `远程返回 ${resp.status}`));
-        }
-        const ctype = resp.headers.get('content-type') || '';
-        if (ctype && !/text\/html|application\/xhtml/i.test(ctype)) {
-            const jinaPreview = await tryJinaReader(finalUrl, jinaToken);
-            return res.json(isUsefulPreview(jinaPreview, new URL(finalUrl).hostname)
-                ? jinaPreview
-                : fallbackPreview(finalUrl, '非 HTML 内容'));
-        }
-        // 限制大小：256KB
-        const reader = resp.body?.getReader?.();
-        let html = '';
-        const decoder = new TextDecoder('utf-8');
-        let total = 0;
-        if (reader) {
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                total += value.length;
-                if (total > 256 * 1024) { try { await reader.cancel(); } catch {} break; }
-                html += decoder.decode(value, { stream: true });
+                html += dec.decode();
+            } else {
+                html = await resp.text();
+                if (html.length > 256 * 1024) html = html.slice(0, 256 * 1024);
             }
-            html += decoder.decode();
-        } else {
-            html = await resp.text();
-            if (html.length > 256 * 1024) html = html.slice(0, 256 * 1024);
+            return { finalUrl: finalU, html, resp };
+        };
+
+        // ── 工具：从 HTML 提取短链跳转目标（JS redirect / meta refresh）─────────────
+        const extractHtmlRedirect = (html) => {
+            const metaR = html.match(/<meta[^>]+http-equiv=["']refresh["'][^>]+content=["'][^;]*;\s*url=([^"'\s>]+)/i)
+                || html.match(/content=["'][^;]*;\s*url=([^"'\s>]+)[^>]+http-equiv=["']refresh["']/i);
+            if (metaR?.[1]) return metaR[1].trim();
+            const jsR = html.match(/(?:window\.location(?:\.href)?|location\.replace\()\s*[=\(]\s*["'](https?:\/\/[^"']+)["']/i);
+            if (jsR?.[1]) return jsR[1].trim();
+            return null;
+        };
+
+        // ── 工具：从 HTML 提取 OG / meta ──────────────────────────────────────────
+        const parseOgFromHtml = (html, baseUrl) => {
+            const pick = (re) => { const m = html.match(re); return m ? m[1].trim() : ''; };
+            const decEnt = (s) => s
+                .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+                .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n));
+            const metaC = (prop) => {
+                const r1 = new RegExp(`<meta[^>]+(?:property|name)\\s*=\\s*["']${prop}["'][^>]*content\\s*=\\s*["']([^"']+)["']`, 'i');
+                const r2 = new RegExp(`<meta[^>]+content\\s*=\\s*["']([^"']+)["'][^>]+(?:property|name)\\s*=\\s*["']${prop}["']`, 'i');
+                return decEnt(pick(r1) || pick(r2));
+            };
+            let finalHost = '';
+            try { finalHost = new URL(baseUrl).hostname; } catch {}
+            const title = metaC('og:title') || decEnt(pick(/<title[^>]*>([^<]+)<\/title>/i));
+            const description = metaC('og:description') || metaC('description');
+            const imageRaw = metaC('og:image') || metaC('twitter:image');
+            const image = imageRaw ? (() => { try { return new URL(imageRaw, baseUrl).toString(); } catch { return ''; } })() : '';
+            const siteName = metaC('og:site_name') || inferSiteName(finalHost);
+            return { title, description, image, siteName };
+        };
+
+        // ── 工具：小红书 __INITIAL_STATE__ / 内嵌 JSON 提取 ─────────────────────────
+        const parseXhsFromHtml = (html, baseUrl) => {
+            // 方案 A：window.__INITIAL_STATE__ 内嵌 JSON
+            const stateMatch = html.match(/window\.__INITIAL_STATE__\s*=\s*(\{[\s\S]*?\})\s*(?:<\/script>|;window)/i);
+            if (stateMatch) {
+                try {
+                    const state = JSON.parse(stateMatch[1].replace(/undefined/g, 'null'));
+                    // 路径因版本不同，遍历常见位置
+                    const note = state?.noteDetailMap && Object.values(state.noteDetailMap)[0]?.note
+                        || state?.homeFeed?.feedsForYou?.[0]
+                        || state?.note?.noteDetail;
+                    if (note) {
+                        const title = String(note.title || note.desc || '').trim().slice(0, 200);
+                        const desc = String(note.desc || '').trim().slice(0, 1200);
+                        const images = Array.isArray(note.imageList) ? note.imageList : [];
+                        const image = note.cover?.urlDefault || images[0]?.urlDefault || images[0]?.url || '';
+                        if (title || desc || image) {
+                            return { title: title || desc.slice(0, 60), description: desc, image, siteName: '小红书', url: baseUrl };
+                        }
+                    }
+                } catch {}
+            }
+            // 方案 B：OG 标签（小红书 SSR 会写进去）
+            const og = parseOgFromHtml(html, baseUrl);
+            const finalHost = (() => { try { return new URL(baseUrl).hostname; } catch { return ''; } })();
+            if (og.title && !isGenericPreviewText(og.title, finalHost)) {
+                return { ...og, url: baseUrl };
+            }
+            return null;
+        };
+
+        // ── 主流程 ─────────────────────────────────────────────────────────────────
+
+        // Step 1: 如果有 Jina token，优先用 Jina（对绝大多数网站效果最好）
+        if (jinaToken) {
+            const jinaFirst = await tryJinaReader(u.toString(), jinaToken);
+            if (isUsefulPreview(jinaFirst, host)) return res.json(jinaFirst);
         }
-        const pick = (re) => {
-            const m = html.match(re);
-            return m ? m[1].trim() : '';
-        };
-        const decodeEntities = (s) => s
-            .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-            .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n));
-        const metaContent = (prop) => {
-            const re = new RegExp(`<meta[^>]+(?:property|name)\\s*=\\s*["']${prop}["'][^>]*content\\s*=\\s*["']([^"']+)["']`, 'i');
-            const re2 = new RegExp(`<meta[^>]+content\\s*=\\s*["']([^"']+)["'][^>]+(?:property|name)\\s*=\\s*["']${prop}["']`, 'i');
-            return decodeEntities(pick(re) || pick(re2));
-        };
-        const title = metaContent('og:title') || decodeEntities(pick(/<title[^>]*>([^<]+)<\/title>/i));
-        const description = metaContent('og:description') || metaContent('description');
-        const imageRaw = metaContent('og:image') || metaContent('twitter:image');
-        const image = imageRaw ? new URL(imageRaw, finalUrl).toString() : '';
-        const siteName = metaContent('og:site_name') || inferSiteName(new URL(finalUrl).hostname);
-        const finalHost = new URL(finalUrl).hostname;
+
+        // Step 2: 抓原始 URL，拿到 finalUrl（追 HTTP redirect）
+        let fetchResult;
+        try { fetchResult = await fetchHtml(u.toString()); } catch (e) {
+            // 网络完全失败 → 直接 Jina 兜底
+            const jinaFb = await tryJinaReader(u.toString(), jinaToken);
+            return res.json(isUsefulPreview(jinaFb, host) ? jinaFb : fallbackPreview(u.toString(), '抓取超时'));
+        }
+        let { finalUrl, html } = fetchResult;
+
+        // Step 3: 如果 HTML 里有 JS/meta redirect（常见于短链跳转页），追一跳
+        if (!html && !isXhsHost(host)) {
+            // 非 XHS 短链，直接 Jina 兜底
+            const jinaFb = await tryJinaReader(finalUrl, jinaToken);
+            return res.json(isUsefulPreview(jinaFb, new URL(finalUrl).hostname)
+                ? jinaFb : fallbackPreview(finalUrl, `远程返回 ${fetchResult.resp?.status}`));
+        }
+        if (html) {
+            const redirectTarget = extractHtmlRedirect(html);
+            if (redirectTarget && redirectTarget !== finalUrl) {
+                try {
+                    const newParsed = new URL(redirectTarget);
+                    if (!isBlockedHost(newParsed.hostname)) {
+                        const r2 = await fetchHtml(redirectTarget, 8000);
+                        if (r2.html) { finalUrl = r2.finalUrl; html = r2.html; }
+                    }
+                } catch {}
+            }
+        }
+
+        const finalHost = (() => { try { return new URL(finalUrl).hostname; } catch { return host; } })();
+        try { if (isBlockedHost(finalHost)) return res.status(400).json({ error: '禁止访问内网地址' }); } catch {}
+
+        // Step 4: 针对小红书特化解析（OG + __INITIAL_STATE__）
+        if (isXhsHost(finalHost) && html) {
+            const xhsData = parseXhsFromHtml(html, finalUrl);
+            if (xhsData) {
+                return res.json({ ...xhsData, url: xhsData.url || finalUrl });
+            }
+            // XHS 解析失败 → 试 Jina（用真正的 xiaohongshu.com URL，不再是短链）
+            const jinaXhs = await tryJinaReader(finalUrl, jinaToken);
+            if (isUsefulPreview(jinaXhs, finalHost)) return res.json(jinaXhs);
+            return res.json(fallbackPreview(finalUrl, '小红书'));
+        }
+
+        // Step 5: 通用 OG 解析
         const sharedText = cleanSharedText(rawText);
-        const hasUsefulPreview = Boolean(description || image || (title && !isGenericPreviewText(title, finalHost)));
-        if (!hasUsefulPreview) {
-            const jinaPreview = await tryJinaReader(finalUrl, jinaToken);
-            if (isUsefulPreview(jinaPreview, finalHost)) {
-                return res.json(jinaPreview);
-            }
-            if (sharedText) {
+        if (html) {
+            const og = parseOgFromHtml(html, finalUrl);
+            const hasUseful = Boolean(og.description || og.image || (og.title && !isGenericPreviewText(og.title, finalHost)));
+            if (hasUseful) {
                 return res.json({
                     url: finalUrl,
-                    title: sharedText.slice(0, 200),
-                    description: sharedText.slice(0, 1200),
-                    image: image || jinaPreview?.image || '',
-                    siteName: inferSiteName(finalHost)
+                    title: og.title.slice(0, 200),
+                    description: og.description.slice(0, 1200),
+                    image: og.image,
+                    siteName: og.siteName.slice(0, 80)
                 });
             }
-            return res.json(fallbackPreview(finalUrl, '该页面未提供可解析摘要'));
         }
-        res.json({
-            url: finalUrl,
-            title: (title || '').slice(0, 200),
-            description: (description || '').slice(0, 1200),
-            image: image || '',
-            siteName: (siteName || '').slice(0, 80)
-        });
+
+        // Step 6: OG 没内容 → Jina（用 finalUrl，比原始短链更准）
+        const jinaFinal = await tryJinaReader(finalUrl, jinaToken);
+        if (isUsefulPreview(jinaFinal, finalHost)) return res.json(jinaFinal);
+
+        // Step 7: 全失败 → 用 rawText 里的分享文字兜底
+        if (sharedText) {
+            return res.json({ url: finalUrl, title: sharedText.slice(0, 200), description: '', image: '', siteName: inferSiteName(finalHost) });
+        }
+        return res.json(fallbackPreview(finalUrl, '无法解析'));
     } catch (e) {
         const msg = e?.name === 'AbortError' ? '抓取超时' : '抓取失败';
         res.status(502).json({ error: msg });
