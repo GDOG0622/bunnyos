@@ -108,10 +108,22 @@ async function loadBeautyPanel(type) {
     try {
         const res = await fetch(`/api/qq/beauties/${type}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const list = await res.json();
+        let list = await res.json();
+        list = Array.isArray(list) ? list : [];
+        // 背景图就一个槽位：恰好保证 1 个非 default 项存在（价格 0，不扣钱）
+        if (type === 'backgrounds' && !list.some(x => x.id !== 'default')) {
+            try {
+                const made = await fetch('/api/qq/beauties/backgrounds', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: '背景' })
+                });
+                if (made.ok) list.push(await made.json());
+            } catch {}
+        }
         state.beautyListCache = state.beautyListCache || {};
-        state.beautyListCache[type] = Array.isArray(list) ? list : [];
-        renderBeautyPanel(panel, def, state.beautyListCache[type]);
+        state.beautyListCache[type] = list;
+        renderBeautyPanel(panel, def, list);
     } catch (err) {
         panel.innerHTML = `<div class="qq-beauty-empty">加载失败：${err.message || '未知错误'}</div>`;
     }
@@ -120,11 +132,36 @@ async function loadBeautyPanel(type) {
 function renderBeautyPanel(panel, def, list) {
     const isFrame = def.type === 'frames';
     const isBackground = def.type === 'backgrounds';
-    // 背景图：不显示 mockup 预览；皮肤：全屏预览按钮（M5 落地）；其他：标准 mockup
-    let mockup = '';
+
+    // 背景图：就一个 full-width 块用来上传（用户决策 2026-06-22）
     if (isBackground) {
-        mockup = '';
-    } else if (def.type === 'skins') {
+        const bgItem = list.find(x => x.id !== 'default');
+        if (!bgItem) {
+            panel.innerHTML = `<div class="qq-beauty-empty">初始化失败，请重新进入</div>`;
+            return;
+        }
+        const url = bgItem.url || '';
+        const bgStyle = url ? `style="background-image:url('${url.replace(/'/g, "\\'")}')"` : '';
+        panel.innerHTML = `
+            <button type="button" class="qq-beauty-bg-single${url ? ' has-image' : ''}"
+                    id="beauty-bg-single" ${bgStyle}>
+                ${url ? '' : `<div class="qq-beauty-bg-single-hint">
+                    <i class="bi bi-plus-lg"></i>
+                    <div>点击上传聊天背景</div>
+                </div>`}
+            </button>
+            <input type="file" id="beauty-bg-single-file" accept="image/*" style="display:none">
+        `;
+        const btn = panel.querySelector('#beauty-bg-single');
+        const fileInput = panel.querySelector('#beauty-bg-single-file');
+        btn.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', e => uploadBeautyBackgroundSingle(bgItem.id, e.target));
+        return;
+    }
+
+    // 皮肤：全屏预览按钮（M5 落地）；其他：标准 mockup
+    let mockup = '';
+    if (def.type === 'skins') {
         mockup = `<div class="qq-beauty-mockup-wrap qq-beauty-mockup-skin">
               <button class="qq-beauty-fullscreen-preview" disabled>全屏预览 (M5)</button>
            </div>`;
@@ -137,17 +174,12 @@ function renderBeautyPanel(panel, def, list) {
     }
 
     const slots = list.map(it => renderSlotCard(def, it)).join('');
-    // 背景图的 + tile 也是裸方块；其他类目带名字 + 价格
     const addTile = state.beautySelectMode
         ? ''
-        : (isBackground
-            ? `<button class="qq-beauty-bg-tile qq-beauty-bg-add" data-beauty-add="${def.type}" aria-label="新建背景">
-                  <i class="bi bi-plus-lg"></i>
-               </button>`
-            : `<button class="qq-beauty-slot qq-beauty-slot-add" data-beauty-add="${def.type}">
-                  <i class="bi bi-plus-lg"></i>
-                  <div class="qq-beauty-slot-name">新建 (${def.price}cc)</div>
-               </button>`);
+        : `<button class="qq-beauty-slot qq-beauty-slot-add" data-beauty-add="${def.type}">
+              <i class="bi bi-plus-lg"></i>
+              <div class="qq-beauty-slot-name">新建 (${def.price}cc)</div>
+           </button>`;
 
     const deleteBar = state.beautySelectMode
         ? `<div class="qq-beauty-delete-bar">
@@ -155,15 +187,12 @@ function renderBeautyPanel(panel, def, list) {
            </div>`
         : '';
 
-    // 背景图 tab 不显示标题行，更干净
-    const sectionTitle = isBackground
-        ? ''
-        : `<div class="qq-beauty-section-title">${def.label} · ${list.length} 项${isFrame ? '' : '（M3 仅头像框完整可用，其他模块在 M5 落地）'}</div>`;
+    const sectionTitle = `<div class="qq-beauty-section-title">${def.label} · ${list.length} 项${isFrame ? '' : '（M3 仅头像框完整可用，其他模块在 M5 落地）'}</div>`;
 
     panel.innerHTML = `
         ${mockup}
         ${sectionTitle}
-        <div class="qq-beauty-grid${isBackground ? ' qq-beauty-grid-bare' : ''}">
+        <div class="qq-beauty-grid">
             ${slots}
             ${addTile}
         </div>
@@ -189,33 +218,6 @@ function renderBeautyPanel(panel, def, list) {
 
 function renderSlotCard(def, it) {
     const isDefault = it.id === 'default';
-    const isBackground = def.type === 'backgrounds';
-
-    // 背景图：裸方块（无 card chrome、无名字、无按钮）；点击整块直接打开编辑器
-    if (isBackground) {
-        // 默认项是空槽位，不展示
-        if (isDefault) return '';
-        const url = it.url || it.preview || '';
-        const bg = url ? `style="background-image:url('${url.replace(/'/g, "\\'")}')"` : '';
-        const checkbox = state.beautySelectMode
-            ? `<input type="checkbox" class="qq-beauty-slot-check" data-beauty-check="${it.id}"
-                      ${state.beautySelected.has(it.id) ? 'checked' : ''}>`
-            : '';
-        const action = state.beautySelectMode
-            ? ''
-            : `data-beauty-edit="${it.id}"`;
-        // 整块作为可点击 button：点击 → 打开编辑器（即重新上传/更换）
-        return `
-            <button type="button"
-                    class="qq-beauty-bg-tile${url ? ' has-image' : ''}${state.beautySelected.has(it.id) ? ' selected' : ''}"
-                    ${action} ${bg} data-id="${it.id}">
-                ${checkbox}
-                ${url ? '' : '<i class="bi bi-image"></i>'}
-            </button>
-        `;
-    }
-
-    // 其他类目：常规卡片
     const previewSrc = it.preview;
     const previewBg = previewSrc
         ? `style="background-image:url('${previewSrc.replace(/'/g, "\\'")}')"`
@@ -479,6 +481,35 @@ async function flushBeautyAutoSave() {
     } catch (err) {
         toast('保存失败：' + (err.message || '未知错误'));
     }
+}
+
+// 单块上传（背景图 tab 的 full-width 块用）
+function uploadBeautyBackgroundSingle(id, fileInput) {
+    const file = fileInput?.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+        try {
+            const res = await fetch(`/api/qq/beauties/backgrounds/${id}/image`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ dataUrl: reader.result })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) { toast(data.error || '上传失败'); return; }
+            const list = state.beautyListCache?.backgrounds || [];
+            const idx = list.findIndex(x => x.id === id);
+            if (idx >= 0) list[idx] = data;
+            const def = BEAUTY_TAB_DEFS.find(t => t.type === 'backgrounds');
+            const panel = $('#beauty-panel');
+            if (panel && def) renderBeautyPanel(panel, def, list);
+            toast('已上传（旧文件已覆盖）');
+        } catch (err) {
+            toast('上传失败：' + (err.message || '未知错误'));
+        }
+    };
+    reader.onerror = () => toast('读取文件失败');
+    reader.readAsDataURL(file);
 }
 
 // ========== 背景图上传（覆盖式） ==========

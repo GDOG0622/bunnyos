@@ -53,33 +53,14 @@ function bindComposeResize() {
 function bindMessageMenuEvents() {
     const box = $('#chat-messages');
     if (!box) return;
-    let longPressTimer = null;
-
-    function clearLongPress() {
-        clearTimeout(longPressTimer);
-        longPressTimer = null;
-    }
-
+    // 改为「点击气泡」触发菜单，替代长按（用户决策 2026-06-22）
+    // 桌面右键 contextmenu 保留作为兜底
     box.addEventListener('contextmenu', (event) => {
         const row = event.target.closest('.qq-message-row');
         if (!row) return;
         if (state.deleteMode) return;
         event.preventDefault();
         openMessageMenu(event, Number(row.dataset.idx));
-    });
-
-    box.addEventListener('pointerdown', (event) => {
-        const row = event.target.closest('.qq-message-row');
-        if (state.deleteMode) return;
-        if (!row || event.target.closest('.qq-msg-actions')) return;
-        clearLongPress();
-        longPressTimer = setTimeout(() => {
-            openMessageMenu(event, Number(row.dataset.idx));
-        }, 520);
-    });
-
-    ['pointerup', 'pointercancel', 'pointerleave', 'scroll'].forEach(type => {
-        box.addEventListener(type, clearLongPress, { passive: true });
     });
 }
 
@@ -123,11 +104,29 @@ function openMessageMenu(event, idx) {
     menu.classList.add('icon-menu');
     state.messageMenuOpenedAt = Date.now();
     const rect = menu.getBoundingClientRect();
-    const rowRect = event.target.closest?.('.qq-message-row')?.getBoundingClientRect?.();
-    const anchorX = rowRect ? rowRect.left + rowRect.width / 2 : (event.clientX || window.innerWidth / 2);
-    const anchorY = rowRect ? rowRect.top : (event.clientY || window.innerHeight / 2);
-    const x = clamp(anchorX - rect.width / 2, 8, window.innerWidth - rect.width - 8);
-    const y = clamp(anchorY - rect.height - 8, 8, window.innerHeight - rect.height - 8);
+    // 单击模式：菜单贴气泡侧边（char→右；self→左），垂直居中对齐气泡
+    const row = event.target?.closest?.('.qq-message-row');
+    const bubble = event.target?.closest?.('.qq-message') || row;
+    const bubbleRect = bubble?.getBoundingClientRect?.();
+    const margin = 6;
+    let x, y;
+    if (bubbleRect) {
+        y = bubbleRect.top + (bubbleRect.height - rect.height) / 2;
+        const isSelf = row?.classList.contains('user');
+        if (isSelf) {
+            // 气泡在右 → 菜单放气泡左侧
+            x = bubbleRect.left - rect.width - margin;
+            if (x < 8) x = bubbleRect.right + margin; // 没空间则翻到右边
+        } else {
+            x = bubbleRect.right + margin;
+            if (x + rect.width > window.innerWidth - 8) x = bubbleRect.left - rect.width - margin;
+        }
+    } else {
+        x = event.clientX || window.innerWidth / 2;
+        y = event.clientY || window.innerHeight / 2;
+    }
+    x = clamp(x, 8, window.innerWidth - rect.width - 8);
+    y = clamp(y, 8, window.innerHeight - rect.height - 8);
     menu.style.left = `${x}px`;
     menu.style.top = `${y}px`;
 }

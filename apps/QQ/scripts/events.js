@@ -179,14 +179,23 @@
             return;
         }
         const btn = e.target.closest('.qq-msg-actions button');
-        if (!btn) return;
-        const row = btn.closest('.qq-message-row');
-        const idx = Number(row?.dataset.idx);
-        if (Number.isNaN(idx)) return;
-        if (btn.dataset.act === 'regen') regenerateReplyAt(idx);
-        else if (btn.dataset.act === 'edit') editMessage(idx);
-        else if (btn.dataset.act === 'fav') toggleFavorite(idx);
-        else if (btn.dataset.act === 'version') generateMessageVersion(idx);
+        if (btn) {
+            const row = btn.closest('.qq-message-row');
+            const idx = Number(row?.dataset.idx);
+            if (Number.isNaN(idx)) return;
+            if (btn.dataset.act === 'regen') regenerateReplyAt(idx);
+            else if (btn.dataset.act === 'edit') editMessage(idx);
+            else if (btn.dataset.act === 'fav') toggleFavorite(idx);
+            else if (btn.dataset.act === 'version') generateMessageVersion(idx);
+            return;
+        }
+        // 点击气泡（且不是其他互动元素）→ 弹出操作菜单（替代长按）
+        const bubble = e.target.closest('.qq-message');
+        const row = bubble?.closest('.qq-message-row');
+        if (bubble && row && !e.target.closest('a, button, input, textarea, select, [data-edit-input]')) {
+            const idx = Number(row.dataset.idx);
+            if (!Number.isNaN(idx)) openMessageMenu(e, idx);
+        }
     });
     bindMessageMenuEvents();
     // + 号展开/收起输入栏工具
