@@ -65,7 +65,7 @@
 | M6 转账闭环 · S36+S37 领取闭环 | 完成 | `ceca8f1` | 后端 receive 端点 + 前端点击领取 |
 | M2 美化库后端+商城骨架 | 完成 | `7af2b5c` | S5-S10：beauties/char-beauty 端点 + #me-beauty 入口 + 5 tab 骨架 |
 | M3 头像框跑通（样板模块） | 完成 | `0e406ca` | S11-S17：mockup + 槽位网格 + 新建/编辑/预览/选择删除全套；预览注入逻辑顺手接好 bubble/bg 字段供 M5 复用 |
-| M4 套到 char + 三个点菜单 | 完成 | _待填_ | S18-S23：#chat-more + #chat-settings-modal；applyCharBeauty 注入 4 个 style 节点；M4 只通头像框，气泡/背景在 M5 |
+| M4 套到 char + 三个点菜单 | 完成 | `bc9b80f` | S18-S23：#chat-more + #chat-settings-modal；applyCharBeauty 注入 4 个 style 节点；M4 只通头像框，气泡/背景在 M5 |
 | M5 复制到其他 3 个模块 | 未开始 | — | 皮肤/气泡/背景图；头像已剔除（§7.1 已决） |
 | M7 教程 + 图床 + 全局背景 | 未开始 | — | 含 S40 需先确认 §7.3 |
 | M8 对话框管理 + 收尾 | 未开始 | — | 含 S47 需先确认 §7.2 |
