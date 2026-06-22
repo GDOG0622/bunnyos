@@ -269,6 +269,49 @@ function escapeAttr(s) {
     }[ch]));
 }
 
+// 通用：给某个 URL 输入框加"上传图床"按钮（catbox / 自定义 endpoint 后端代理）
+function bindImageHostUpload(buttonEl, targetInputEl) {
+    if (!buttonEl || !targetInputEl) return;
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'image/*';
+    fileInput.style.display = 'none';
+    buttonEl.parentElement?.appendChild(fileInput);
+    buttonEl.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => {
+        const file = fileInput.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = async () => {
+            const orig = buttonEl.textContent;
+            buttonEl.disabled = true;
+            buttonEl.textContent = '上传中...';
+            try {
+                const res = await fetch('/api/upload/image-host', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ dataUrl: reader.result })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    toast(`图床上传失败：${data.error || res.status}`);
+                    return;
+                }
+                targetInputEl.value = data.url;
+                targetInputEl.dispatchEvent(new Event('input', { bubbles: true }));
+                toast(`已上传到 ${data.host}`);
+            } catch (err) {
+                toast('上传失败：' + (err.message || '未知错误'));
+            } finally {
+                buttonEl.disabled = false;
+                buttonEl.textContent = orig;
+                fileInput.value = '';
+            }
+        };
+        reader.readAsDataURL(file);
+    });
+}
+
 function escapeHtmlText(s) {
     return String(s).replace(/[&<>"']/g, ch => ({
         '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -423,19 +466,40 @@ function openBeautyEditor(type, id) {
         // 头像框 = 透明 PNG 直链（用户决策 2026-06-21）
         cssArea.innerHTML = `
             <label class="qq-beauty-editor-label">头像框图片直链（透明 PNG，叠在头像上一层）</label>
-            <input id="beauty-editor-url" type="text" placeholder="https://...">
+            <div class="qq-beauty-url-row">
+                <input id="beauty-editor-url" type="text" placeholder="https://...">
+                <button type="button" class="qq-beauty-host-btn" id="beauty-editor-url-host">上传图床</button>
+            </div>
         `;
         editor.querySelector('#beauty-editor-url').value = item.url || '';
+        bindImageHostUpload(
+            editor.querySelector('#beauty-editor-url-host'),
+            editor.querySelector('#beauty-editor-url')
+        );
     } else if (type === 'avatars') {
         // 头像 = 成对（charUrl + userUrl），公共库共享
         cssArea.innerHTML = `
             <label class="qq-beauty-editor-label">char 头像直链</label>
-            <input id="beauty-editor-charUrl" type="text" placeholder="https://...">
+            <div class="qq-beauty-url-row">
+                <input id="beauty-editor-charUrl" type="text" placeholder="https://...">
+                <button type="button" class="qq-beauty-host-btn" id="beauty-editor-charUrl-host">上传图床</button>
+            </div>
             <label class="qq-beauty-editor-label">user 头像直链</label>
-            <input id="beauty-editor-userUrl" type="text" placeholder="https://...">
+            <div class="qq-beauty-url-row">
+                <input id="beauty-editor-userUrl" type="text" placeholder="https://...">
+                <button type="button" class="qq-beauty-host-btn" id="beauty-editor-userUrl-host">上传图床</button>
+            </div>
         `;
         editor.querySelector('#beauty-editor-charUrl').value = item.charUrl || '';
         editor.querySelector('#beauty-editor-userUrl').value = item.userUrl || '';
+        bindImageHostUpload(
+            editor.querySelector('#beauty-editor-charUrl-host'),
+            editor.querySelector('#beauty-editor-charUrl')
+        );
+        bindImageHostUpload(
+            editor.querySelector('#beauty-editor-userUrl-host'),
+            editor.querySelector('#beauty-editor-userUrl')
+        );
     } else if (isSkin) {
         cssArea.innerHTML = `
             <label class="qq-beauty-editor-label">CSS</label>

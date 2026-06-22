@@ -51,7 +51,7 @@ let settings = {};
 
             pageHistory.push(pageId);
             notifyNavigationState();
-            if (pageId === 'page-storage') refreshImageCacheStats();
+            if (pageId === 'page-storage') { refreshImageCacheStats(); loadImageHostConfig(); }
         }
 
         function navBack() {
@@ -441,6 +441,56 @@ let settings = {};
                 await saveData();
             } catch (error) {
                 alert(`图标上传失败：${error.message}`);
+            }
+        }
+
+        // ===== 图床配置 =====
+        async function loadImageHostConfig() {
+            try {
+                const res = await fetch('/api/settings');
+                if (!res.ok) return;
+                const all = await res.json();
+                const host = all.imageHost || {};
+                const sel = document.getElementById('imageHost_primary');
+                if (sel) sel.value = host.primary || 'catbox';
+                const c = host.custom || {};
+                const e = document.getElementById('imageHost_custom_endpoint');
+                const k = document.getElementById('imageHost_custom_key');
+                const ff = document.getElementById('imageHost_custom_fileField');
+                const uf = document.getElementById('imageHost_custom_urlField');
+                if (e) e.value = c.endpoint || '';
+                if (k) k.value = c.key || '';
+                if (ff) ff.value = c.fileField || '';
+                if (uf) uf.value = c.urlField || '';
+            } catch {}
+        }
+
+        async function saveImageHostConfig() {
+            const sel = document.getElementById('imageHost_primary');
+            const e = document.getElementById('imageHost_custom_endpoint');
+            const k = document.getElementById('imageHost_custom_key');
+            const ff = document.getElementById('imageHost_custom_fileField');
+            const uf = document.getElementById('imageHost_custom_urlField');
+            const imageHost = {
+                primary: sel?.value || 'catbox',
+                custom: {
+                    endpoint: e?.value?.trim() || '',
+                    key: k?.value?.trim() || '',
+                    fileField: ff?.value?.trim() || '',
+                    urlField: uf?.value?.trim() || '',
+                }
+            };
+            try {
+                // 读现有 settings 合并写回（保留 lastWorking 等字段）
+                const cur = await fetch('/api/settings').then(r => r.ok ? r.json() : {});
+                const merged = { ...cur, imageHost: { ...(cur.imageHost || {}), ...imageHost } };
+                await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(merged)
+                });
+            } catch (err) {
+                console.warn('saveImageHostConfig failed', err);
             }
         }
 
@@ -1082,6 +1132,8 @@ let settings = {};
             clearChatImageCache,
             clearSiteCache,
             refreshImageCacheStats,
+            loadImageHostConfig,
+            saveImageHostConfig,
             saveBeautyPreset,
             applyBeautyPreset,
             renameBeautyPreset,

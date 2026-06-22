@@ -1365,6 +1365,83 @@ app.put('/api/qq/skin', (req, res) => {
     }
 });
 
+// ========== 图床代理（绕开浏览器 CORS） ==========
+// 详见 QQ美化系统计划.md §1.8。默认走 catbox，可在设置里配自定义端点兜底。
+async function uploadToCatbox(parsed) {
+    const ext = extensionFromMime(parsed.mime);
+    const form = new FormData();
+    form.append('reqtype', 'fileupload');
+    form.append('fileToUpload', new Blob([parsed.buffer], { type: parsed.mime }), `upload.${ext}`);
+    const r = await fetch('https://catbox.moe/user/api.php', { method: 'POST', body: form });
+    if (!r.ok) throw new Error(`catbox HTTP ${r.status}`);
+    const text = (await r.text()).trim();
+    if (!/^https?:\/\//.test(text)) throw new Error('catbox 未返回 URL：' + text.slice(0, 200));
+    return text;
+}
+
+async function uploadToCustomHost(parsed, custom) {
+    if (!custom?.endpoint) throw new Error('自定义图床未配置 endpoint');
+    const ext = extensionFromMime(parsed.mime);
+    const form = new FormData();
+    const fileField = custom.fileField || 'file';
+    form.append(fileField, new Blob([parsed.buffer], { type: parsed.mime }), `upload.${ext}`);
+    const headers = {};
+    if (custom.key && custom.headerField) headers[custom.headerField] = custom.key;
+    else if (custom.key) headers['Authorization'] = `Bearer ${custom.key}`;
+    const r = await fetch(custom.endpoint, { method: 'POST', body: form, headers });
+    if (!r.ok) throw new Error(`custom HTTP ${r.status}`);
+    const text = await r.text();
+    // 试 JSON
+    try {
+        const data = JSON.parse(text);
+        const url = custom.urlField
+            ? custom.urlField.split('.').reduce((o, k) => o?.[k], data)
+            : (data.url || data?.data?.url);
+        if (url && /^https?:\/\//.test(url)) return url;
+    } catch {}
+    // 试纯文本 URL
+    const t = text.trim();
+    if (/^https?:\/\//.test(t)) return t;
+    throw new Error('custom 响应里找不到 url');
+}
+
+app.post('/api/upload/image-host', async (req, res) => {
+    try {
+        const parsed = parseDataUrl(req.body?.dataUrl);
+        if (!parsed || !parsed.mime.startsWith('image/')) {
+            return res.status(400).json({ error: '只支持图片 Data URL' });
+        }
+        const settings = readJsonFile(SETTINGS_FILE, {});
+        const host = settings.imageHost || {};
+        const primary = host.primary || 'catbox';
+        // 顺序：上次成功的优先，然后 primary，然后 catbox fallback
+        const tryOrder = [];
+        const push = (t) => { if (t && !tryOrder.includes(t)) tryOrder.push(t); };
+        push(host.lastWorking);
+        push(primary);
+        push('catbox');
+        const errors = [];
+        for (const target of tryOrder) {
+            try {
+                let url = '';
+                if (target === 'catbox') url = await uploadToCatbox(parsed);
+                else if (target === 'custom') url = await uploadToCustomHost(parsed, host.custom);
+                if (url) {
+                    settings.imageHost = { ...host, lastWorking: target };
+                    writeJsonFile(SETTINGS_FILE, settings);
+                    return res.json({ url, host: target });
+                }
+            } catch (err) {
+                errors.push(`${target}: ${err.message}`);
+            }
+        }
+        res.status(502).json({ error: '所有图床均失败', detail: errors });
+    } catch (e) {
+        console.error('[IMAGE-HOST]', e);
+        res.status(500).json({ error: '图床代理失败：' + e.message });
+    }
+});
+
 // ========== 数据迁移：导入 carrot 插件配置 ==========
 // 详见 QQ美化系统计划.md。表情包 / 头像框 / 头像配对导入；不扣 cc。
 // 头像框按 charFrame/userFrame 拆成两条独立项，每条带 ·char/·user 后缀。

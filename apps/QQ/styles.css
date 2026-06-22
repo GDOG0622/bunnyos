@@ -914,6 +914,26 @@ html[data-app-layout="desktop"] .qq-topbar {
     color: var(--qq-text-fade, #aaa);
     transition: color 0.2s;
 }
+/* 编辑页 URL 输入 + 上传图床按钮 */
+.qq-beauty-url-row {
+    display: flex;
+    gap: 6px;
+    align-items: stretch;
+}
+.qq-beauty-url-row input { flex: 1; min-width: 0; }
+.qq-beauty-host-btn {
+    flex-shrink: 0;
+    padding: 0 12px;
+    border: 1px solid var(--qq-border, #eaeaea);
+    background: var(--qq-bg-soft, #f5f5f5);
+    color: var(--qq-text, #333);
+    border-radius: 8px;
+    cursor: pointer;
+    font: inherit;
+    font-size: 13px;
+}
+.qq-beauty-host-btn:hover:not(:disabled) { background: var(--qq-surface-2, #eaeaea); }
+.qq-beauty-host-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .qq-beauty-save-indicator.saved { color: #22a06b; }
 .qq-modal-action {
     border: none;

@@ -602,6 +602,38 @@
             <span class="breadcrumb-title">设置 / 存储配置</span>
         </div>
         <div class="section">
+            <div class="section-title">图床配置</div>
+            <div class="list">
+                <div class="item vertical">
+                    <label>主用图床</label>
+                    <div style="color: var(--text-sub); font-size: 13px; margin: 4px 0 8px;">
+                        所有"上传图床"按钮（美化编辑页里的头像 / 头像框）走这里。catbox 是免登录公网图床。<br>
+                        失败时会按"上次成功 → 主用 → catbox"顺序自动 fallback。
+                    </div>
+                    <select id="imageHost_primary" onchange="saveImageHostConfig()">
+                        <option value="catbox">catbox（公网，免登录）</option>
+                        <option value="custom">自定义 endpoint</option>
+                    </select>
+                </div>
+                <div class="item vertical" id="imageHost_custom_section">
+                    <label>自定义图床（仅当主用选"自定义"时生效）</label>
+                    <input id="imageHost_custom_endpoint" type="text" placeholder="POST 端点 URL"
+                           oninput="saveImageHostConfig()"
+                           style="width: 100%; padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 6px; margin-top: 4px;">
+                    <input id="imageHost_custom_key" type="text" placeholder="API key（可选）"
+                           oninput="saveImageHostConfig()"
+                           style="width: 100%; padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 6px; margin-top: 4px;">
+                    <input id="imageHost_custom_fileField" type="text" placeholder="file 字段名（默认 file）"
+                           oninput="saveImageHostConfig()"
+                           style="width: 100%; padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 6px; margin-top: 4px;">
+                    <input id="imageHost_custom_urlField" type="text" placeholder="响应里 URL 的 JSON 路径（默认 url，支持 data.url）"
+                           oninput="saveImageHostConfig()"
+                           style="width: 100%; padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 6px; margin-top: 4px;">
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
             <div class="section-title">数据迁移</div>
             <div class="list">
                 <div class="item vertical">
