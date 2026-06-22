@@ -76,6 +76,11 @@
 | 聊天背景改 per-char 上传 | 完成 | `3b273fe` | 美化商城删 backgrounds tab；三个点面板用 full-width 上传块；char-beauty 加 customBackgroundUrl；存 data/qq/char-backgrounds/<cid>.<ext> 覆盖式；POST/DELETE 两端点 |
 | 聊天设置顶部 token 估算 | 完成 | `63a7894` | 新端点 /api/qq/chat-tokens/:cid 拼 system+history 估算（沿用酒馆 fallback 思路：CJK 1tk + 其余 4 字/tk） |
 | 图片历史回放 / 仅发最新 | 完成 | `f23fb27` | 后端存盘剥 image dataURL（chat 文件不爆），但保留 client_image_id；前端发图同步写 localStorage qq:img:<id>；prompt 端早已是"仅发最新一张" |
+| 图片缓存升级 IndexedDB | 完成 | `8f74977` | 新 image-cache.js 封装 IDB put/get/delete/clear/stats；media.js 改写 IDB；chat-render 渲染后异步预加载；启动时迁移老 localStorage qq:img:* |
+| 存储配置加缓存管理 | 完成 | `59d88e0` | 聊天图片缓存（IDB 统计 + 清空）+ 浏览器站点缓存（caches API 清空）；推荐定期清前者 |
+| carrot 导入去重报告 | 完成 | `bf3e0e4` | stickerSkipped/frameSkipped/avatarSkipped 计数；去重逻辑（按 URL 或 char+user pair）一直在做，只是报告里没显示 |
+| 表情包管理 UI | 完成 | `bff7294` | +号旁加铅笔进编辑模式；点合集弹 confirm 删整组；打开合集后每张贴纸右上角 ✕ 直接删；编辑模式抖动提示 |
+| M7 图床代理 | 完成 | `62cb42a` | POST /api/upload/image-host（catbox + 自定义 endpoint 代理 fallback，三段顺序：lastWorking → primary → catbox）；设置 App 加图床配置；美化编辑页头像/头像框 URL 字段旁加"上传图床"按钮 |
 | M7 教程 + 图床 + 全局背景 | 未开始 | — | 含 S40 需先确认 §7.3 |
 | M8 对话框管理 + 收尾 | 未开始 | — | 含 S47 需先确认 §7.2 |
 
@@ -605,11 +610,11 @@ postimages 的免登录 API 不如 catbox 稳；是否要换成别的（如 0x0.
 
 - [ ] **S38** 提取现有 styles.css 的相关规则写入 `beauty-defaults.js`（5 个常量）
 - [ ] **S39** 每个模块 panel 加"美化教程"折叠卡 + 两个一键复制按钮
-- [ ] **S40** `server.js` 加 `POST /api/upload/image-host`（先只接 catbox）
-- [ ] **S41** 设置 App 加图床配置 section（顺序 + 自定义 endpoint，写入 settings.json.imageHost）
-- [ ] **S42** 编辑页加"上传图床"按钮（背景图、头像、所有预览图字段）
-- [ ] **S43** 设置 App 美化页加"QQ 聊天全局背景"选择器 → settings.json 的 `globalBackgroundId`
-- [ ] **S44** CSS 注入器加优先级：char 设置 > 全局 > 无
+- [x] **S40** `server.js` 加 `POST /api/upload/image-host`：catbox 主选 + 自定义 endpoint fallback；`uploadToCatbox` 用 Node 18 native FormData + Blob，自定义支持 fileField/urlField/key
+- [x] **S41** 设置 App 加图床配置 section（写入 settings.json.imageHost）：主用下拉 + 自定义 endpoint/key/fileField/urlField 四栏
+- [x] **S42** 编辑页加"上传图床"按钮（头像 charUrl / userUrl、头像框 url；背景已是 per-char 直接上传，不需要图床）
+- [ ] ~~**S43** 全局背景选择器~~ → 已废弃：背景改 per-char 上传，没有"全局背景"概念
+- [ ] ~~**S44** CSS 注入器优先级~~ → 已废弃：同上
 
 ### 里程碑 8 · 对话框管理 + 收尾
 
