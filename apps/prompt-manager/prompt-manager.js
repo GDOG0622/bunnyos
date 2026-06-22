@@ -1192,35 +1192,52 @@ function renderWorldbookEntries() {
         list.innerHTML = '<div class="pm-card"><div class="pm-card-title">这本世界书还是空的</div><div class="pm-card-sub">点击右上角 + 新建条目。</div></div>';
         return;
     }
-    for (const entry of entries) {
-        const card = document.createElement('div');
-        card.className = 'pm-card';
+    entries.forEach((entry, index) => {
+        const row = document.createElement('div');
+        row.className = 'prompt-row worldbook-row';
+        row.draggable = true;
+        row.dataset.index = index;
         if (entry.enabled === undefined) entry.enabled = true;
-        card.classList.toggle('disabled', entry.enabled === false);
-        card.innerHTML = `
-            <div class="pm-card-head">
-                <div class="pm-card-title">${escapeHtml(entry.name || '未命名')}</div>
-                <label class="pm-entry-switch" title="启用条目">
-                    <input type="checkbox" ${entry.enabled !== false ? 'checked' : ''}>
-                    <span></span>
-                </label>
+        row.classList.toggle('disabled', entry.enabled === false);
+        row.innerHTML = `
+            <button class="drag-handle" type="button" title="拖动排序"><i class="bi bi-grip-vertical"></i></button>
+            <label class="prompt-toggle" title="启用/关闭">
+                <input type="checkbox" ${entry.enabled !== false ? 'checked' : ''}>
+                <span></span>
+            </label>
+            <div class="prompt-main">
+                <div class="prompt-name">${escapeHtml(entry.name || '未命名')}</div>
+                <div class="prompt-meta-line">
+                    <span class="badge">worldbook</span>
+                    <span class="prompt-sub">${escapeHtml((entry.content || '').replace(/\s+/g, ' ').slice(0, 120))}</span>
+                </div>
             </div>
-            <div class="pm-card-sub">${escapeHtml((entry.content || '').replace(/\s+/g, ' ').slice(0, 90))}</div>
+            <div class="prompt-actions">
+                <button class="pm-icon-btn" type="button" data-action="edit" title="编辑"><i class="bi bi-pencil"></i></button>
+                <button class="pm-icon-btn" type="button" data-action="copy" title="复制条目"><i class="bi bi-files"></i></button>
+                <button class="pm-icon-btn danger" type="button" data-action="delete" title="删除"><i class="bi bi-trash"></i></button>
+            </div>
         `;
-        card.querySelector('.pm-entry-switch')?.addEventListener('click', event => {
-            event.stopPropagation();
-        });
-        card.querySelector('.pm-entry-switch input')?.addEventListener('change', event => {
+        row.querySelector('.prompt-toggle input')?.addEventListener('change', event => {
             entry.enabled = event.target.checked;
             book.updated_at = Date.now();
             saveWorldbooks();
             renderWorldbookMeta();
             state.markerPreviewCache = null;
-            card.classList.toggle('disabled', entry.enabled === false);
+            row.classList.toggle('disabled', entry.enabled === false);
         });
-        card.addEventListener('click', () => openWorldbookEditor(entry.id));
-        list.appendChild(card);
-    }
+        row.querySelector('.prompt-main')?.addEventListener('click', () => openWorldbookEditor(entry.id));
+        row.querySelector('[data-action="edit"]')?.addEventListener('click', () => openWorldbookEditor(entry.id));
+        row.querySelector('[data-action="copy"]')?.addEventListener('click', () => copyWorldbookEntry(entry.id));
+        row.querySelector('[data-action="delete"]')?.addEventListener('click', () => deleteWorldbook(entry.id));
+        row.addEventListener('dragstart', handleWorldbookDragStart);
+        row.addEventListener('dragover', handleWorldbookDragOver);
+        row.addEventListener('drop', handleWorldbookDrop);
+        row.addEventListener('dragend', handleWorldbookDragEnd);
+        const handle = row.querySelector('.drag-handle');
+        if (handle) handle.addEventListener('touchstart', handleWorldbookTouchStart, { passive: false });
+        list.appendChild(row);
+    });
 }
 
 function openWorldbookEditor(entryId = '') {
@@ -1276,6 +1293,25 @@ async function saveWorldbooks() {
     });
 }
 
+function copyWorldbookEntry(entryId) {
+    const book = getCurrentBook();
+    if (!book) return;
+    book.entries = Array.isArray(book.entries) ? book.entries : [];
+    const idx = book.entries.findIndex(item => item.id === entryId);
+    if (idx < 0) return;
+    const copy = JSON.parse(JSON.stringify(book.entries[idx]));
+    copy.id = newId();
+    copy.name = `${copy.name || '未命名'} 副本`;
+    copy.enabled = true;
+    book.entries.splice(idx + 1, 0, copy);
+    book.updated_at = Date.now();
+    saveWorldbooks();
+    renderWorldbookEntries();
+    renderWorldbookMeta();
+    state.markerPreviewCache = null;
+    toast('已复制条目');
+}
+
 async function deleteWorldbook(entryId) {
     const book = getCurrentBook();
     if (!book) return;
@@ -1291,6 +1327,77 @@ async function deleteWorldbook(entryId) {
     renderWorldbookMeta();
     state.markerPreviewCache = null;
     notifyNavState();
+}
+
+let worldbookDragIndex = null;
+function handleWorldbookDragStart(event) {
+    worldbookDragIndex = Number(event.currentTarget.dataset.index);
+    event.currentTarget.classList.add('dragging');
+    event.dataTransfer.effectAllowed = 'move';
+}
+
+function handleWorldbookDragOver(event) {
+    event.preventDefault();
+}
+
+function handleWorldbookDrop(event) {
+    event.preventDefault();
+    moveWorldbookEntry(worldbookDragIndex, Number(event.currentTarget.dataset.index));
+}
+
+function handleWorldbookDragEnd(event) {
+    event.currentTarget.classList.remove('dragging');
+    document.querySelectorAll('.worldbook-row.drag-target').forEach(row => row.classList.remove('drag-target'));
+    worldbookDragIndex = null;
+}
+
+function moveWorldbookEntry(from, to) {
+    const book = getCurrentBook();
+    const entries = Array.isArray(book?.entries) ? book.entries : [];
+    if (!Number.isInteger(from) || !Number.isInteger(to) || from === to || !entries[from] || !entries[to]) return;
+    const [moved] = entries.splice(from, 1);
+    entries.splice(to, 0, moved);
+    book.updated_at = Date.now();
+    saveWorldbooks();
+    renderWorldbookEntries();
+    state.markerPreviewCache = null;
+}
+
+let worldbookTouchDragState = null;
+function handleWorldbookTouchStart(event) {
+    if (event.touches.length !== 1) return;
+    const row = event.currentTarget.closest('.worldbook-row');
+    if (!row) return;
+    event.preventDefault();
+    worldbookTouchDragState = { row, sourceIndex: Number(row.dataset.index), targetIndex: Number(row.dataset.index) };
+    row.classList.add('dragging');
+    document.addEventListener('touchmove', handleWorldbookTouchMove, { passive: false });
+    document.addEventListener('touchend', handleWorldbookTouchEnd);
+    document.addEventListener('touchcancel', handleWorldbookTouchEnd);
+}
+
+function handleWorldbookTouchMove(event) {
+    if (!worldbookTouchDragState || event.touches.length !== 1) return;
+    event.preventDefault();
+    const touch = event.touches[0];
+    const el = document.elementFromPoint(touch.clientX, touch.clientY);
+    document.querySelectorAll('.worldbook-row.drag-target').forEach(row => row.classList.remove('drag-target'));
+    const targetRow = el?.closest?.('.worldbook-row');
+    if (targetRow) {
+        worldbookTouchDragState.targetIndex = Number(targetRow.dataset.index);
+        if (worldbookTouchDragState.targetIndex !== worldbookTouchDragState.sourceIndex) targetRow.classList.add('drag-target');
+    }
+}
+
+function handleWorldbookTouchEnd() {
+    if (!worldbookTouchDragState) return;
+    moveWorldbookEntry(worldbookTouchDragState.sourceIndex, worldbookTouchDragState.targetIndex);
+    document.querySelectorAll('.worldbook-row.drag-target').forEach(row => row.classList.remove('drag-target'));
+    document.querySelectorAll('.worldbook-row.dragging').forEach(row => row.classList.remove('dragging'));
+    worldbookTouchDragState = null;
+    document.removeEventListener('touchmove', handleWorldbookTouchMove);
+    document.removeEventListener('touchend', handleWorldbookTouchEnd);
+    document.removeEventListener('touchcancel', handleWorldbookTouchEnd);
 }
 
 async function createNewBook() {
