@@ -294,7 +294,9 @@ function bindImageHostUpload(buttonEl, targetInputEl) {
                 });
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) {
-                    toast(`图床上传失败：${data.error || res.status}`);
+                    const detail = Array.isArray(data.detail) ? '\n' + data.detail.join('\n') : '';
+                    console.error('[图床上传失败]', data);
+                    alert(`图床上传失败 (${res.status})：${data.error || ''}${detail}\n\n如果是 catbox 网络不通（中国大陆访问受限），到 设置→存储配置→图床配置 改用"自定义"并填一个能用的端点。`);
                     return;
                 }
                 targetInputEl.value = data.url;

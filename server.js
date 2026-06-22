@@ -1432,10 +1432,12 @@ app.post('/api/upload/image-host', async (req, res) => {
                     return res.json({ url, host: target });
                 }
             } catch (err) {
+                console.error(`[IMAGE-HOST ${target}]`, err.message);
                 errors.push(`${target}: ${err.message}`);
             }
         }
-        res.status(502).json({ error: '所有图床均失败', detail: errors });
+        console.error('[IMAGE-HOST] all failed', errors);
+        res.status(502).json({ error: '所有图床均失败', detail: errors, hint: 'catbox 在中国大陆通常不通；请在 设置→存储配置→图床配置 改主用为"自定义"并填一个能用的端点（例如自建图床、smms、imgbb 等）' });
     } catch (e) {
         console.error('[IMAGE-HOST]', e);
         res.status(500).json({ error: '图床代理失败：' + e.message });

@@ -2060,15 +2060,22 @@ emoji-picker {
 .qq-sticker-strip {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 7px 10px;
+    gap: 8px;
+    padding: 6px 8px;
     background: rgba(245, 245, 247, 0.96);
     border-top: 0.5px solid var(--qq-divider);
+    overflow-x: auto;
+    overflow-y: hidden;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none; /* Firefox */
 }
+.qq-sticker-strip::-webkit-scrollbar { display: none; } /* Chrome/Safari */
 .qq-sticker-tab,
 .qq-sticker-add {
-    width: 42px;
-    height: 42px;
+    flex-shrink: 0;            /* 关键：不被 overflow 容器压缩，溢出靠水平滚动 */
+    width: 38px;
+    height: 38px;
     border: none;
     border-radius: 10px;
     background: transparent;
@@ -2076,7 +2083,7 @@ emoji-picker {
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    font-size: 22px;
+    font-size: 20px;
     overflow: hidden;
 }
 .qq-sticker-tab.active {
@@ -2090,10 +2097,12 @@ emoji-picker {
 .qq-custom-stickers {
     height: 100%;
     overflow-y: auto;
-    padding: 14px;
+    -webkit-overflow-scrolling: touch;
+    padding: 12px;
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
-    gap: 12px;
+    grid-template-columns: repeat(4, 1fr); /* 固定一排 4 个 */
+    gap: 10px;
+    align-content: start;
 }
 .qq-custom-sticker {
     position: relative;
