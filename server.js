@@ -818,14 +818,17 @@ function buildPromptVariables({ characterId = '', userName = '', messages = [] }
     const resolvedCharName = character?.name || '角色';
     const list = Array.isArray(messages) ? messages : [];
     const chatHistory = list
-        .map(msg => {
+        .map((msg, idx) => {
             const speaker = msg?.role === 'assistant' ? resolvedCharName : resolvedUserName;
-            return `${speaker}: ${qqMessageToText(msg)}`;
+            return `${speaker}: ${qqMessageToPromptText(list, idx)}`;
         })
         .filter(line => line.trim())
         .join('\n');
-    const lastUserMessage = [...list].reverse().find(msg => msg?.role !== 'assistant');
-    const lastUserText = lastUserMessage ? qqMessageToText(lastUserMessage) : '';
+    let lastUserIndex = -1;
+    for (let i = list.length - 1; i >= 0; i--) {
+        if (list[i]?.role !== 'assistant') { lastUserIndex = i; break; }
+    }
+    const lastUserText = lastUserIndex >= 0 ? qqMessageToPromptText(list, lastUserIndex) : '';
     const lastmes = `<user_input>\n${lastUserText}\n</user_input>`;
 
     return {
@@ -1316,7 +1319,7 @@ app.get('/api/qq/chat-tokens/:characterId', (req, res) => {
         const userPersona = getCurrentUserPersona();
         const variables = buildPromptVariables({ characterId, userName: userPersona?.name || '', messages: list });
         const history = list
-            .map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: qqMessageToText(m) }))
+            .map((m, idx) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: qqMessageToPromptText(list, idx) }))
             .filter(m => m.content);
         const enriched = injectCharRulesAtDepth(history, character, variables);
         const presetPrompt = buildQqPresetPrompt(character, variables, userPersona, enriched, 'private');
@@ -3059,7 +3062,51 @@ app.get('/app-icon', (req, res) => {
 // 文字 → "content"   表情包 → "[name]"   红包 → [🧧¥10|备注|状态]
 // 状态段：user→char pending=未领 / returned=已自动退回；char→user pending=未领 / received=已领
 // 图片不走文字 wrap，单独走 multimodal image_url（在 /api/qq/reply 里处理）
-function qqMessageToText(msg) {
+function isXhsLinkMessage(msg) {
+    if (!msg || msg.type !== 'link') return false;
+    const site = String(msg.siteName || '').toLowerCase();
+    const source = String(msg.source || '').toLowerCase();
+    const url = String(msg.url || '').toLowerCase();
+    return site.includes('小红书') || site.includes('xiaohongshu') || source.includes('xhs') || /(^|\/\/|\.)(xhslink|xiaohongshu)\.com/.test(url);
+}
+
+function compactXhsLinkText(msg) {
+    const title = String(msg.title || '小红书笔记').replace(/\s+/g, ' ').trim();
+    const desc = String(msg.fullDescription || msg.description || '').replace(/\s+/g, ' ').trim();
+    const head = Array.from(desc).slice(0, 15).join('');
+    return `[${title}${head ? `-${head}` : ''}.xhs]`;
+}
+
+function completedUserAssistantGroupsSince(messages, index) {
+    const list = Array.isArray(messages) ? messages : [];
+    const base = list[index];
+    let pendingUser = base && base.role !== 'assistant';
+    let groups = 0;
+    for (let i = index + 1; i < list.length; i++) {
+        const msg = list[i];
+        if (!msg) continue;
+        if (msg.role === 'assistant') {
+            if (pendingUser) {
+                groups++;
+                pendingUser = false;
+            }
+        } else {
+            pendingUser = true;
+        }
+    }
+    return groups;
+}
+
+function shouldCompactXhsMessage(messages, index) {
+    return isXhsLinkMessage(messages?.[index]) && completedUserAssistantGroupsSince(messages, index) >= 6;
+}
+
+function qqMessageToPromptText(messages, index) {
+    const list = Array.isArray(messages) ? messages : [];
+    return qqMessageToText(list[index], { compactXhs: shouldCompactXhsMessage(list, index) });
+}
+
+function qqMessageToText(msg, options = {}) {
     if (!msg) return '';
     switch (msg.type) {
         case 'sticker':
@@ -3078,6 +3125,7 @@ function qqMessageToText(msg) {
         case 'voice':
             return String(msg.text || '');
         case 'link': {
+            if (options.compactXhs && isXhsLinkMessage(msg)) return compactXhsLinkText(msg);
             const t = String(msg.title || '').trim();
             const d = String(msg.fullDescription || msg.description || '').trim();
             const s = String(msg.siteName || '').trim();
@@ -3095,7 +3143,9 @@ function qqMessageToText(msg) {
                 }).join(' / ')}`);
             }
             if (s) parts.push(`站点：${s}`);
-            return `[链接卡片] ${parts.join('；')}`;
+            const text = parts.join('；');
+            if (isXhsLinkMessage(msg)) return `<xhs>\n${text}\n</xhs>`;
+            return `[链接卡片] ${text}`;
         }
         case 'system':
             // BUNNY 元交流：user 与系统层，char 不可见
@@ -3214,7 +3264,7 @@ app.post('/api/qq/reply', async (req, res) => {
             for (let i = list.length - 1; i >= 0; i--) {
                 const m = list[i];
                 if (m?.role !== 'assistant' && m?.type === 'image' && /^data:image\//.test(m.image || '')) return i;
-                if (m?.role !== 'assistant' && m?.type === 'link' && m.imageLocal) return i;
+                if (m?.role !== 'assistant' && m?.type === 'link' && m.imageLocal && !shouldCompactXhsMessage(list, i)) return i;
             }
             return -1;
         })();
@@ -3236,13 +3286,13 @@ app.post('/api/qq/reply', async (req, res) => {
                         return {
                             role,
                             content: [
-                                { type: 'text', text: `${qqMessageToText(m)}；封面图：已作为图片附件发送` },
+                                { type: 'text', text: `${qqMessageToPromptText(list, idx)}；封面图：已作为图片附件发送` },
                                 { type: 'image_url', image_url: { url: dataUrl } }
                             ]
                         };
                     }
                 }
-                return { role, content: qqMessageToText(m) };
+                return { role, content: qqMessageToPromptText(list, idx) };
             })
             .filter(m => Array.isArray(m.content) ? m.content.length : m.content);
 
@@ -3429,7 +3479,7 @@ app.post('/api/qq/impersonate', async (req, res) => {
         const userPersona = getCurrentUserPersona();
         const variables = buildPromptVariables({ characterId, userName: userPersona?.name || '', messages: list });
         const history = list
-            .map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: qqMessageToText(m) }))
+            .map((m, idx) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: qqMessageToPromptText(list, idx) }))
             .filter(m => m.content);
         const enrichedHistory = injectCharRulesAtDepth(history, character, variables);
         const presetPrompt = buildQqPresetPrompt(character, variables, userPersona, enrichedHistory, resolvedChatType);
