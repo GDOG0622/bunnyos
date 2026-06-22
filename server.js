@@ -1237,6 +1237,38 @@ app.get('/api/qq/char-beauty-usage/:type/:id', (req, res) => {
     }
 });
 
+// 全局皮肤（写 settings.json.currentSkinId，QQ App 启动时拉一次）
+app.get('/api/qq/skin', (req, res) => {
+    try {
+        const qqSettings = readJsonFile(QQ_SETTINGS_FILE, {});
+        const id = qqSettings.currentSkinId || 'default';
+        const beauties = readBeauties();
+        const skin = (beauties.skins || []).find(x => x.id === id);
+        res.set('Cache-Control', 'no-store').json({
+            currentSkinId: id,
+            css: (skin && id !== 'default') ? (skin.css || '') : '',
+        });
+    } catch {
+        res.status(500).json({ error: '读取全局皮肤失败' });
+    }
+});
+
+app.put('/api/qq/skin', (req, res) => {
+    try {
+        const id = String(req.body?.skinId || 'default');
+        const qqSettings = readJsonFile(QQ_SETTINGS_FILE, {});
+        writeJsonFile(QQ_SETTINGS_FILE, { ...qqSettings, currentSkinId: id });
+        const beauties = readBeauties();
+        const skin = (beauties.skins || []).find(x => x.id === id);
+        res.json({
+            currentSkinId: id,
+            css: (skin && id !== 'default') ? (skin.css || '') : '',
+        });
+    } catch {
+        res.status(500).json({ error: '写入全局皮肤失败' });
+    }
+});
+
 // ========== 数据迁移：导入 carrot 插件配置 ==========
 // 详见 QQ美化系统计划.md。表情包 / 头像框 / 头像配对导入；不扣 cc。
 // 头像框按 charFrame/userFrame 拆成两条独立项，每条带 ·char/·user 后缀。

@@ -596,6 +596,34 @@ html[data-app-layout="desktop"] .qq-topbar {
 /* 聊天页标题头像加框：包一层 .bunny-qq-frame 用作 ::after 锚点 */
 .qq-chat-head-frame { display: inline-flex; }
 
+/* 皮肤全屏预览退出栏 */
+.qq-skin-preview-exit {
+    position: fixed;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 9999;
+    background: rgba(0, 0, 0, 0.78);
+    color: #fff;
+    padding: 8px 14px;
+    border-radius: 999px;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+.qq-skin-preview-exit button {
+    border: none;
+    background: var(--qq-accent, #ff6b6b);
+    color: #fff;
+    padding: 4px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+    font: inherit;
+}
+
 /* 头像槽位：左 char、右 user 两张小圆并排 */
 .qq-beauty-avatar-pair {
     display: flex;

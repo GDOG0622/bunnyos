@@ -161,12 +161,10 @@ function renderBeautyPanel(panel, def, list) {
         return;
     }
 
-    // 皮肤：全屏预览按钮（M5 落地）；其他：标准 mockup
+    // 皮肤：无 mockup（皮肤要套到全 App 才能看清效果，通过"预览"按钮跑临时全屏预览）
     let mockup = '';
     if (def.type === 'skins') {
-        mockup = `<div class="qq-beauty-mockup-wrap qq-beauty-mockup-skin">
-              <button class="qq-beauty-fullscreen-preview" disabled>全屏预览 (M5)</button>
-           </div>`;
+        mockup = `<div class="qq-beauty-section-title">提示：点皮肤槽位的"预览"按钮即时套到 QQ 看效果；"应用"则永久写入全局皮肤设置。</div>`;
     } else {
         mockup = `<div class="qq-beauty-mockup-wrap">
               <div class="qq-beauty-mockup-title">预览</div>
@@ -208,6 +206,9 @@ function renderBeautyPanel(panel, def, list) {
     panel.querySelectorAll('[data-beauty-preview]').forEach(btn => {
         btn.addEventListener('click', () => previewSlot(def.type, btn.dataset.beautyPreview));
     });
+    panel.querySelectorAll('[data-beauty-apply]').forEach(btn => {
+        btn.addEventListener('click', () => applySkin(btn.dataset.beautyApply));
+    });
     panel.querySelectorAll('[data-beauty-edit]').forEach(btn => {
         btn.addEventListener('click', () => openBeautyEditor(def.type, btn.dataset.beautyEdit));
     });
@@ -244,9 +245,11 @@ function renderSlotCard(def, it) {
         ? `<input type="checkbox" class="qq-beauty-slot-check" data-beauty-check="${it.id}"
                   ${state.beautySelected.has(it.id) ? 'checked' : ''}>`
         : '';
+    const isSkin = def.type === 'skins';
     const actionsHtml = state.beautySelectMode
         ? ''
         : `<div class="qq-beauty-slot-actions">
+              ${isSkin ? `<button type="button" data-beauty-apply="${it.id}">应用</button>` : ''}
               <button type="button" data-beauty-preview="${it.id}">预览</button>
               ${isDefault ? '' : `<button type="button" data-beauty-edit="${it.id}">编辑</button>`}
            </div>`;
@@ -328,6 +331,11 @@ function previewSlot(type, id) {
     const list = (state.beautyListCache || {})[type] || [];
     const item = list.find(x => x.id === id);
     if (!item) return;
+    // 皮肤特殊：套到全 App + 显示"退出预览"浮窗
+    if (type === 'skins') {
+        startSkinFullScreenPreview(item);
+        return;
+    }
     const styleEl = $('#beauty-mockup-style');
     if (!styleEl) return;
     // frames: 透明 PNG 直链覆盖在头像上（::after 实现）
@@ -626,4 +634,74 @@ async function deleteSelectedBeauties(type) {
     state.beautySelected = new Set();
     updateSelectToggleLabel();
     loadBeautyPanel(type);
+}
+
+// ========== 皮肤全局应用 ==========
+async function applySkin(skinId) {
+    try {
+        const res = await fetch('/api/qq/skin', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ skinId })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) { toast(data.error || '应用失败'); return; }
+        // 注入到全局皮肤 style 节点
+        if (typeof ensureBeautyStyleNodes === 'function') ensureBeautyStyleNodes();
+        const node = document.getElementById('bunny-style-skin');
+        if (node) node.textContent = data.css || '';
+        toast(skinId === 'default' ? '已恢复默认皮肤' : '已应用皮肤');
+    } catch (err) {
+        toast('应用失败：' + (err.message || '未知错误'));
+    }
+}
+
+// QQ App 启动时拉一次全局皮肤
+async function loadGlobalSkin() {
+    try {
+        const res = await fetch('/api/qq/skin');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (typeof ensureBeautyStyleNodes === 'function') ensureBeautyStyleNodes();
+        const node = document.getElementById('bunny-style-skin');
+        if (node) node.textContent = data.css || '';
+    } catch {}
+}
+
+// ========== 皮肤全屏预览 ==========
+function startSkinFullScreenPreview(item) {
+    if (typeof ensureBeautyStyleNodes === 'function') ensureBeautyStyleNodes();
+    const node = document.getElementById('bunny-style-skin');
+    if (!node) return;
+    // 存当前值，便于恢复
+    state.skinPreviewBackup = node.textContent;
+    node.textContent = item.css || '';
+    // 关闭商城弹窗以便看到全 App 效果
+    closeBeautyModal();
+    showSkinPreviewExitBar(item.name);
+}
+
+function showSkinPreviewExitBar(name) {
+    let bar = document.getElementById('skin-preview-exit');
+    if (!bar) {
+        bar = document.createElement('div');
+        bar.id = 'skin-preview-exit';
+        bar.className = 'qq-skin-preview-exit';
+        document.body.appendChild(bar);
+    }
+    bar.innerHTML = `
+        <span>正在预览皮肤：${escapeHtmlText(name || '')}</span>
+        <button type="button" id="skin-preview-exit-btn">退出预览</button>
+    `;
+    bar.querySelector('#skin-preview-exit-btn').addEventListener('click', endSkinFullScreenPreview);
+}
+
+function endSkinFullScreenPreview() {
+    const node = document.getElementById('bunny-style-skin');
+    if (node && state.skinPreviewBackup !== undefined) {
+        node.textContent = state.skinPreviewBackup;
+    }
+    state.skinPreviewBackup = undefined;
+    const bar = document.getElementById('skin-preview-exit');
+    if (bar) bar.remove();
 }
