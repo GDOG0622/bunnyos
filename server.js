@@ -1229,6 +1229,119 @@ app.get('/api/qq/char-beauty-usage/:type/:id', (req, res) => {
     }
 });
 
+// ========== 数据迁移：导入 carrot 插件配置 ==========
+// 详见 QQ美化系统计划.md。表情包 / 头像框 / 头像配对导入；不扣 cc。
+// 头像框按 charFrame/userFrame 拆成两条独立项，每条带 ·char/·user 后缀。
+// 主题（cip_theme_data_v1）跳过：carrot 用 --cip-* 变量空间，BunnyOS 不兼容。
+app.post('/api/qq/import-carrot', (req, res) => {
+    try {
+        const raw = req.body?.data;
+        if (!raw) return res.status(400).json({ error: '缺少 data 字段' });
+        const obj = (typeof raw === 'string') ? JSON.parse(raw) : raw;
+
+        const parseField = (key) => {
+            const v = obj[key];
+            if (!v) return null;
+            if (typeof v === 'string') {
+                try { return JSON.parse(v); } catch { return null; }
+            }
+            return v;
+        };
+
+        const report = { stickerPacks: 0, stickerItems: 0, frames: 0, avatars: 0, skipped: [] };
+
+        // 1) 表情包：cip_sticker_data → {packName: [{desc, url}]}
+        const stickerData = parseField('cip_sticker_data');
+        if (stickerData && typeof stickerData === 'object') {
+            const packs = readJsonFile(QQ_STICKER_PACKS_FILE, []);
+            const packsList = Array.isArray(packs) ? packs : [];
+            Object.keys(stickerData).forEach(packName => {
+                const carrotItems = Array.isArray(stickerData[packName]) ? stickerData[packName] : [];
+                if (!carrotItems.length) return;
+                // 同名 pack 合并去重（按 url），否则新建
+                let pack = packsList.find(p => p && p.name === packName);
+                if (!pack) {
+                    pack = { id: shortId(), name: packName, items: [] };
+                    packsList.push(pack);
+                    report.stickerPacks += 1;
+                }
+                const urlSet = new Set((pack.items || []).map(it => it.url));
+                carrotItems.forEach(it => {
+                    if (!it || !it.url || urlSet.has(it.url)) return;
+                    pack.items = pack.items || [];
+                    pack.items.push({ name: it.desc || '', url: it.url });
+                    urlSet.add(it.url);
+                    report.stickerItems += 1;
+                });
+            });
+            writeJsonFile(QQ_STICKER_PACKS_FILE, packsList);
+        }
+
+        // 2) 头像框：每对 charFrame/userFrame 拆 2 条
+        const frameProfiles = parseField('cip_frame_profiles_v1');
+        // 同时扫 avatar profiles 里附带的 charFrame/userFrame
+        const avatarProfiles = parseField('cip_avatar_profiles_v1');
+        const beauties = readBeauties();
+        beauties.frames = Array.isArray(beauties.frames) ? beauties.frames : [defaultBeautyItem('frames')];
+        beauties.avatars = Array.isArray(beauties.avatars) ? beauties.avatars : [defaultBeautyItem('avatars')];
+
+        const pushFrame = (name, url) => {
+            if (!url) return;
+            // 去重：相同 url 不再加
+            if (beauties.frames.some(f => f && f.url === url)) return;
+            beauties.frames.push({ id: shortId(), name, preview: url, url });
+            report.frames += 1;
+        };
+
+        if (frameProfiles && typeof frameProfiles === 'object') {
+            Object.entries(frameProfiles).forEach(([name, prof]) => {
+                if (!prof) return;
+                if (prof.charFrame) pushFrame(`${name} · char`, prof.charFrame);
+                if (prof.userFrame) pushFrame(`${name} · user`, prof.userFrame);
+            });
+        }
+        if (avatarProfiles && typeof avatarProfiles === 'object') {
+            Object.entries(avatarProfiles).forEach(([name, prof]) => {
+                if (!prof) return;
+                if (prof.charFrame) pushFrame(`${name} · char`, prof.charFrame);
+                if (prof.userFrame) pushFrame(`${name} · user`, prof.userFrame);
+            });
+        }
+
+        // 3) 头像配对：cip_avatar_profiles_v1 → {name: {char, user}}
+        if (avatarProfiles && typeof avatarProfiles === 'object') {
+            Object.entries(avatarProfiles).forEach(([name, prof]) => {
+                if (!prof) return;
+                const charUrl = prof.char || '';
+                const userUrl = prof.user || '';
+                if (!charUrl && !userUrl) return;
+                // 去重：char + user 都相同视为同一对
+                if (beauties.avatars.some(a => a && a.charUrl === charUrl && a.userUrl === userUrl)) return;
+                beauties.avatars.push({
+                    id: shortId(),
+                    name,
+                    preview: charUrl || userUrl,
+                    charUrl,
+                    userUrl,
+                });
+                report.avatars += 1;
+            });
+        }
+
+        writeJsonFile(QQ_BEAUTIES_FILE, beauties);
+
+        // 跳过的字段
+        ['cip_theme_data_v1', 'cip_global_fonts_v1', 'cip_bubble_presets_v1', 'cip_notif_sounds_v1', 'cip_float_icon_v1']
+            .forEach(k => { if (obj[k]) report.skipped.push(k); });
+
+        console.log('[IMPORT carrot]', report);
+        res.json({ success: true, report });
+    } catch (e) {
+        console.error('[IMPORT carrot]', e);
+        res.status(400).json({ error: 'JSON 解析或导入失败：' + e.message });
+    }
+});
+
 // GitHub webhook / manual deploy endpoint.
 // Enable only on VPS by setting BUNNYOS_UPDATE_TOKEN in PM2 env.
 app.post('/api/admin/update-from-github', (req, res) => {

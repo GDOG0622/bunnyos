@@ -443,6 +443,41 @@ let settings = {};
             }
         }
 
+        async function handleCarrotImport(input) {
+            const file = input.files?.[0];
+            const resultEl = document.getElementById('carrot-import-result');
+            if (!file) return;
+            try {
+                if (resultEl) resultEl.textContent = '正在解析并导入...';
+                const text = await file.text();
+                const res = await fetch('/api/qq/import-carrot', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ data: text })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    if (resultEl) resultEl.textContent = '导入失败：' + (data.error || res.status);
+                    return;
+                }
+                const r = data.report || {};
+                const lines = [
+                    '✓ 导入完成（未扣 cc）',
+                    `· 表情包：新增 ${r.stickerPacks} 组，新增贴纸 ${r.stickerItems} 张`,
+                    `· 头像框：新增 ${r.frames} 条（已按 char/user 拆分）`,
+                    `· 头像对：新增 ${r.avatars} 对`,
+                ];
+                if (Array.isArray(r.skipped) && r.skipped.length) {
+                    lines.push(`· 跳过的字段：${r.skipped.join('、')}`);
+                }
+                if (resultEl) resultEl.textContent = lines.join('\n');
+            } catch (err) {
+                if (resultEl) resultEl.textContent = '导入失败：' + (err.message || '未知错误');
+            } finally {
+                input.value = '';
+            }
+        }
+
         function loadApiConfigToEditor() {
             const selectedName = document.getElementById('apiConfig_select')?.value || "";
             const config = getApiConfigs()[selectedName];
@@ -951,6 +986,7 @@ let settings = {};
             savePreset,
             handleWallpaperUpload,
             handleAppIconUpload,
+            handleCarrotImport,
             saveBeautyPreset,
             applyBeautyPreset,
             renameBeautyPreset,

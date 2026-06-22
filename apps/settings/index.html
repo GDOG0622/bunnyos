@@ -601,7 +601,24 @@
             <div class="back-btn" onclick="navBack()"><i class="bi bi-chevron-left"></i>返回</div>
             <span class="breadcrumb-title">设置 / 存储配置</span>
         </div>
-        <div class="section" style="text-align: center; color: var(--text-sub); margin-top: 50px;">
+        <div class="section">
+            <div class="section-title">数据迁移</div>
+            <div class="list">
+                <div class="item vertical">
+                    <label>从胡萝卜（carrot）插件配置导入</label>
+                    <div style="color: var(--text-sub); font-size: 13px; margin: 4px 0 10px;">
+                        上传 carrot 导出的 JSON：表情包、头像、头像框会全部导入到 BunnyOS 的美化库 / 表情包库。<br>
+                        头像作为成对（charUrl + userUrl）入库；头像框按 char / user 拆成两条。<br>
+                        主题（cip_theme_data_v1）与字体跳过（命名空间不兼容）。<strong>本次导入不扣 cc。</strong>
+                    </div>
+                    <input type="file" id="carrot-import-file" accept=".json,application/json" style="display:none" onchange="handleCarrotImport(this)">
+                    <button type="button" class="pill-btn" onclick="document.getElementById('carrot-import-file').click()">选择 carrot JSON 文件</button>
+                    <div id="carrot-import-result" style="margin-top: 12px; color: var(--text-sub); font-size: 13px; white-space: pre-wrap;"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section" style="text-align: center; color: var(--text-sub); margin-top: 30px;">
             <i class="bi bi-cloud-check" style="font-size: 48px;"></i>
             <p>GitHub 同步与存储策略施工中...</p>
         </div>
