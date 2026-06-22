@@ -2099,36 +2099,67 @@ app.post('/api/qq/link-preview', async (req, res) => {
             return { title, description, image, siteName };
         };
 
+        // ── 工具：从 HTML 里按 key 括号配平抠出一个 JSON 对象（不依赖整体 parse）──────
+        // 实测：__INITIAL_STATE__ 是超大 blob，整体 JSON.parse 易因某处非法值整体失败；
+        // 直接定位 "noteData":{ 然后括号配平取该对象，远比解析整个 state 稳。
+        const extractJsonObjectAfterKey = (html, key) => {
+            let from = 0;
+            while (true) {
+                const k = html.indexOf(key, from);
+                if (k === -1) return null;
+                const start = k + key.length;
+                from = start;
+                if (html[start] !== '{') continue;
+                let depth = 0, inStr = false, esc = false, end = -1;
+                for (let j = start; j < html.length; j++) {
+                    const c = html[j];
+                    if (esc) { esc = false; continue; }
+                    if (c === '\\') { esc = true; continue; }
+                    if (c === '"') { inStr = !inStr; continue; }
+                    if (inStr) continue;
+                    if (c === '{') depth++;
+                    else if (c === '}') { depth--; if (depth === 0) { end = j + 1; break; } }
+                }
+                if (end === -1) continue;
+                try {
+                    const obj = JSON.parse(html.slice(start, end));
+                    if (obj && typeof obj === 'object') return obj;
+                } catch {}
+            }
+        };
+
         // ── 工具：小红书 __INITIAL_STATE__ / 内嵌 JSON 提取 ─────────────────────────
         const parseXhsFromHtml = (html, baseUrl) => {
-            // 方案 A：window.__INITIAL_STATE__ 内嵌 JSON
-            // 实测路径：state.noteData.data.noteData（2025-06 版本）
-            const stateMatch = html.match(/window\.__INITIAL_STATE__\s*=\s*(\{[\s\S]*?)(?=\s*<\/script>|\s*;?\s*window\.__)/ );
-            if (stateMatch) {
-                try {
-                    const state = JSON.parse(stateMatch[1].replace(/\bundefined\b/g, 'null'));
-                    // 尝试多个已知路径，兼容版本差异
-                    const note = state?.noteData?.data?.noteData
-                        || (state?.noteDetailMap && Object.values(state.noteDetailMap)[0]?.note)
-                        || state?.note?.noteDetail;
-                    if (note) {
-                        const title = String(note.title || '').trim();
-                        const desc = String(note.desc || '').trim();
-                        const images = Array.isArray(note.imageList) ? note.imageList : [];
-                        const image = note.cover?.urlDefault || images[0]?.url || images[0]?.urlDefault || '';
-                        if (title || desc || image) {
-                            // 去掉描述里的 #话题# 标签
-                            const cleanDesc = desc.replace(/#[^#\[]+(?:\[话题\])?#?/g, '').replace(/\s+/g, ' ').trim();
-                            return {
-                                title: title || cleanDesc.slice(0, 60),
-                                description: cleanDesc,
-                                image,
-                                siteName: '小红书',
-                                url: baseUrl
-                            };
-                        }
-                    }
-                } catch {}
+            // 方案 A：括号配平抠 "noteData":{...}，遍历所有同名 key 找带 title/desc 的那个
+            let from = 0;
+            const KEY = '"noteData":';
+            while (true) {
+                const k = html.indexOf(KEY, from);
+                if (k === -1) break;
+                from = k + KEY.length;
+                const note = extractJsonObjectAfterKey(html.slice(k), KEY);
+                if (note && (note.title || note.desc)) {
+                    const title = String(note.title || '').trim();
+                    const desc = String(note.desc || '').trim();
+                    const images = Array.isArray(note.imageList) ? note.imageList : [];
+                    const image = note.cover?.urlDefault
+                        || images[0]?.url
+                        || images[0]?.infoList?.find(i => /WB_DFT|H5_DTL|DFT/i.test(i.imageScene))?.url
+                        || images[0]?.infoList?.[0]?.url
+                        || '';
+                    // 去掉描述里的 #话题# / #话题[话题]# 标签
+                    const cleanDesc = desc
+                        .replace(/#[^#\n]{1,30}(?:\[话题\])?#/g, '')
+                        .replace(/[ \t]+/g, ' ')
+                        .trim();
+                    return {
+                        title: title || cleanDesc.slice(0, 60) || '小红书笔记',
+                        description: cleanDesc,
+                        image,
+                        siteName: '小红书',
+                        url: baseUrl
+                    };
+                }
             }
             // 方案 B：OG 标签
             const og = parseOgFromHtml(html, baseUrl);
@@ -2180,15 +2211,33 @@ app.post('/api/qq/link-preview', async (req, res) => {
         try { if (isBlockedHost(finalHost)) return res.status(400).json({ error: '禁止访问内网地址' }); } catch {}
 
         // Step 4: 针对小红书特化解析（OG + __INITIAL_STATE__）
-        if (isXhsHost(finalHost) && html) {
-            const xhsData = parseXhsFromHtml(html, finalUrl);
-            if (xhsData) {
+        if (isXhsHost(finalHost)) {
+            // 诊断：VPS 机房 IP 常被小红书反爬，返回的页面里没有 __INITIAL_STATE__/noteData
+            const hasState = html.includes('__INITIAL_STATE__');
+            const hasNote = html.includes('"noteData":');
+            const looksBlocked = /验证|滑动|captcha|访问异常|网络不给力|当前页面无法访问/i.test(html);
+            console.log(`[link-preview xhs] finalUrl=${finalUrl} htmlLen=${html.length} hasState=${hasState} hasNote=${hasNote} blocked=${looksBlocked}`);
+
+            const xhsData = html ? parseXhsFromHtml(html, finalUrl) : null;
+            if (xhsData && isUsefulPreview(xhsData, finalHost)) {
                 return res.json({ ...xhsData, url: xhsData.url || finalUrl });
             }
-            // XHS 解析失败 → 试 Jina（用真正的 xiaohongshu.com URL，不再是短链）
+            // XHS 直抓失败（多半被反爬）→ 试 Jina（用真正的 xiaohongshu.com URL，不再是短链）
             const jinaXhs = await tryJinaReader(finalUrl, jinaToken);
             if (isUsefulPreview(jinaXhs, finalHost)) return res.json(jinaXhs);
-            return res.json(fallbackPreview(finalUrl, '小红书'));
+            // 都失败：用分享文字兜底 + 诊断原因
+            const sharedXhs = cleanSharedText(rawText);
+            const reason = looksBlocked ? '小红书反爬拦截（服务器 IP 被限），建议配置 Jina Token'
+                : !hasState ? '小红书未返回内容（IP 被限或链接失效），建议配置 Jina Token'
+                : '小红书内容解析失败';
+            return res.json({
+                url: finalUrl,
+                title: (xhsData?.title || sharedXhs || '小红书笔记').slice(0, 200),
+                description: (sharedXhs || '').slice(0, 1200),
+                image: xhsData?.image || '',
+                siteName: '小红书',
+                limitedReason: reason
+            });
         }
 
         // Step 5: 通用 OG 解析
