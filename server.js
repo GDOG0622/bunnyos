@@ -571,6 +571,7 @@ function buildWorldbooksContent(bookIds, wrapTag) {
         const book = map.get(id);
         if (!book) continue;
         const text = (Array.isArray(book.entries) ? book.entries : [])
+            .filter(entry => entry?.enabled !== false)
             .map(entry => String(entry?.content || '').trim())
             .filter(Boolean)
             .join('\n');
@@ -589,7 +590,8 @@ function importStWorldbookData(stData, fallbackName) {
         list.push({
             id: `e_${shortId()}`,
             name: String(name),
-            content: String(e.content || '')
+            content: String(e.content || ''),
+            enabled: e.enabled !== false
         });
     };
     if (Array.isArray(entriesSrc)) entriesSrc.forEach(collect);
@@ -1898,8 +1900,10 @@ app.post('/api/qq/link-preview', async (req, res) => {
             return res.status(400).json({ error: '禁止访问内网地址' });
         }
         const isXhsHost = (hostname) => /(^|\.)xhslink\.com$|(^|\.)xiaohongshu\.com$|(^|\.)xhscdn\.com$/i.test(hostname || '');
+        const isDouyinHost = (hostname) => /(^|\.)douyin\.com$|(^|\.)iesdouyin\.com$|(^|\.)douyinpic\.com$|(^|\.)amemv\.com$/i.test(hostname || '');
         const inferSiteName = (hostname) => {
             if (isXhsHost(hostname)) return '小红书';
+            if (isDouyinHost(hostname)) return '抖音';
             return hostname || '链接';
         };
         const isGenericPreviewText = (text, hostname = host) => {
@@ -2188,6 +2192,37 @@ app.post('/api/qq/link-preview', async (req, res) => {
             const siteName = metaC('og:site_name') || inferSiteName(finalHost);
             return { title, description, image, siteName };
         };
+        const parseDouyinFromHtml = (html, baseUrl) => {
+            const decEnt = (s) => String(s || '')
+                .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+                .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n));
+            const metaC = (prop) => {
+                const r1 = new RegExp(`<meta[^>]+(?:property|name)\\s*=\\s*["']${prop}["'][^>]*content\\s*=\\s*["']([^"']+)["']`, 'i');
+                const r2 = new RegExp(`<meta[^>]+content\\s*=\\s*["']([^"']+)["'][^>]+(?:property|name)\\s*=\\s*["']${prop}["']`, 'i');
+                return decEnt(html.match(r1)?.[1] || html.match(r2)?.[1] || '');
+            };
+            const rawDescription = metaC('description') || metaC('og:description');
+            const titleText = decEnt(html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] || '');
+            const canonical = decEnt(html.match(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i)?.[1] || '');
+            const imgRaw = metaC('og:image')
+                || decEnt(html.match(/<img[^>]+src=["']([^"']+)["']/i)?.[1] || '');
+            let image = '';
+            try { image = imgRaw ? new URL(imgRaw, baseUrl).toString() : ''; } catch {}
+            const cleanedDescription = rawDescription
+                .replace(/-\s*[^-，。]{1,40}于\d{8}发布在抖音，?/g, '')
+                .replace(/来抖音，记录美好生活！?$/g, '')
+                .trim();
+            const descTitle = rawDescription.split(/\s+-\s+[^-，。]{1,40}于\d{8}发布在抖音/)[0]?.trim() || '';
+            const sharedTitle = cleanSharedText(rawText);
+            return {
+                url: canonical || baseUrl,
+                title: descTitle || titleText.replace(/-抖音$/, '').trim() || sharedTitle || '抖音视频',
+                description: cleanedDescription || rawDescription || sharedTitle,
+                image,
+                siteName: '抖音',
+                source: 'douyin-html'
+            };
+        };
 
         // ── 工具：从 HTML 里按 key 括号配平抠出一个 JSON 对象（不依赖整体 parse）──────
         // 实测：__INITIAL_STATE__ 是超大 blob，整体 JSON.parse 易因某处非法值整体失败；
@@ -2368,6 +2403,19 @@ app.post('/api/qq/link-preview', async (req, res) => {
                 source: 'xhs-limited',
                 limitedReason: reason
             }, finalUrl);
+        }
+
+        if (isDouyinHost(finalHost)) {
+            const douyinData = html ? parseDouyinFromHtml(html, finalUrl) : null;
+            if (douyinData && isUsefulPreview(douyinData, finalHost)) {
+                return await sendPreview(douyinData, finalUrl);
+            }
+            const jinaDouyin = await tryJinaReader(finalUrl, jinaToken);
+            if (isUsefulPreview(jinaDouyin, finalHost)) return await sendPreview({ ...jinaDouyin, siteName: '抖音' }, finalUrl);
+            const sharedDouyin = cleanSharedText(rawText);
+            if (sharedDouyin) {
+                return await sendPreview({ url: finalUrl, title: sharedDouyin, description: sharedDouyin, image: '', siteName: '抖音', source: 'douyin-shared-text' }, finalUrl);
+            }
         }
 
         // Step 4: 通用 OG 解析

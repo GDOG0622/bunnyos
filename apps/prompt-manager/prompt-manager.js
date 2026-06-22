@@ -1195,7 +1195,29 @@ function renderWorldbookEntries() {
     for (const entry of entries) {
         const card = document.createElement('div');
         card.className = 'pm-card';
-        card.innerHTML = `<div class="pm-card-title">${escapeHtml(entry.name || '未命名')}</div><div class="pm-card-sub">${escapeHtml((entry.content || '').replace(/\s+/g, ' ').slice(0, 90))}</div>`;
+        if (entry.enabled === undefined) entry.enabled = true;
+        card.classList.toggle('disabled', entry.enabled === false);
+        card.innerHTML = `
+            <div class="pm-card-head">
+                <div class="pm-card-title">${escapeHtml(entry.name || '未命名')}</div>
+                <label class="pm-entry-switch" title="启用条目">
+                    <input type="checkbox" ${entry.enabled !== false ? 'checked' : ''}>
+                    <span></span>
+                </label>
+            </div>
+            <div class="pm-card-sub">${escapeHtml((entry.content || '').replace(/\s+/g, ' ').slice(0, 90))}</div>
+        `;
+        card.querySelector('.pm-entry-switch')?.addEventListener('click', event => {
+            event.stopPropagation();
+        });
+        card.querySelector('.pm-entry-switch input')?.addEventListener('change', event => {
+            entry.enabled = event.target.checked;
+            book.updated_at = Date.now();
+            saveWorldbooks();
+            renderWorldbookMeta();
+            state.markerPreviewCache = null;
+            card.classList.toggle('disabled', entry.enabled === false);
+        });
         card.addEventListener('click', () => openWorldbookEditor(entry.id));
         list.appendChild(card);
     }
@@ -1211,7 +1233,7 @@ function openWorldbookEditor(entryId = '') {
     state.editingId = entryId || newId();
     let entry = (book.entries || []).find(item => item.id === state.editingId);
     if (!entry) {
-        entry = { id: state.editingId, name: '', content: '' };
+        entry = { id: state.editingId, name: '', content: '', enabled: true };
         book.entries = Array.isArray(book.entries) ? book.entries : [];
         book.entries.unshift(entry);
     }
@@ -1222,7 +1244,7 @@ function openWorldbookEditor(entryId = '') {
     $('#editor-identifier').value = entry.id || '';
     $('#editor-role').value = 'system';
     $('#editor-content').value = entry.content || '';
-    $('#editor-enabled').checked = true;
+    $('#editor-enabled').checked = entry.enabled !== false;
     $('#editor-marker').checked = false;
     $('#editor-system-prompt').checked = false;
     state.snapshot = JSON.stringify(editorDraft());
@@ -1238,6 +1260,7 @@ function saveWorldbookDraft(draft) {
     if (!entry) return;
     entry.name = draft.name || '未命名';
     entry.content = draft.content;
+    entry.enabled = draft.enabled !== false;
     book.updated_at = Date.now();
     saveWorldbooks();
     renderWorldbookEntries();

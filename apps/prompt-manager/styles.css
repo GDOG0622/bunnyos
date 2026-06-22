@@ -499,6 +499,50 @@ body:has(.pm-root) {
     max-height: 42vh;
     resize: vertical;
 }
+.pm-card.disabled {
+    opacity: 0.52;
+}
+.pm-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+.pm-entry-switch {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    cursor: pointer;
+}
+.pm-entry-switch input {
+    display: none;
+}
+.pm-entry-switch span {
+    width: 34px;
+    height: 20px;
+    border-radius: 999px;
+    background: #d1d5db;
+    position: relative;
+    transition: background 0.16s ease;
+}
+.pm-entry-switch span::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.24);
+    transition: transform 0.16s ease;
+}
+.pm-entry-switch input:checked + span {
+    background: var(--pm-accent);
+}
+.pm-entry-switch input:checked + span::after {
+    transform: translateX(14px);
+}
 details {
     border: 0.5px solid var(--pm-line);
     border-radius: 8px;

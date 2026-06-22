@@ -151,7 +151,7 @@ async function renderChatSettings() {
             <div class="qq-chat-settings-divider"></div>
             <div class="qq-chat-settings-actions">
                 <button type="button" class="qq-chat-settings-action" id="chat-settings-clear">清空聊天记录</button>
-                <button type="button" class="qq-chat-settings-action" id="chat-settings-hide">隐藏此聊天</button>
+                <button type="button" class="qq-chat-settings-action" id="chat-settings-hide">${state.chats.find(c => c.characterId === charId)?.hidden ? '取消隐藏' : '隐藏此聊天'}</button>
                 <button type="button" class="qq-chat-settings-action danger" id="chat-settings-delete">删除聊天</button>
             </div>
         `;
@@ -178,7 +178,7 @@ async function renderChatSettings() {
         if (bgClearBtn) bgClearBtn.addEventListener('click', clearCharBackground);
         // M8 三个按钮
         body.querySelector('#chat-settings-clear')?.addEventListener('click', () => clearChatMessages(charId));
-        body.querySelector('#chat-settings-hide')?.addEventListener('click', () => hideChat(charId));
+        body.querySelector('#chat-settings-hide')?.addEventListener('click', () => toggleChatHidden(charId));
         body.querySelector('#chat-settings-delete')?.addEventListener('click', () => deleteChat(charId));
         body.querySelector('#chat-settings-tokens')?.addEventListener('click', () => openPromptPreview(charId));
         // 拉 prompt token 数显示在顶部（粗估，没用 gpt-tokenizer，沿用酒馆 fallback 思路）
@@ -209,28 +209,27 @@ async function clearChatMessages(charId) {
     }
 }
 
-async function hideChat(charId) {
+async function toggleChatHidden(charId) {
     try {
+        const chat = state.chats.find(c => c.characterId === charId);
+        const nextHidden = !chat?.hidden;
         const res = await fetch(`/api/qq/chats/${encodeURIComponent(charId)}/hidden`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ hidden: true })
+            body: JSON.stringify({ hidden: nextHidden })
         });
         if (!res.ok) {
             const d = await res.json().catch(() => ({}));
-            toast(d.error || '隐藏失败');
+            toast(d.error || '更新失败');
             return;
         }
-        const chat = state.chats.find(c => c.characterId === charId);
-        if (chat) chat.hidden = true;
-        // 当前打开的就是它 → 关掉聊天页
-        if (state.activeChatId === charId) state.activeChatId = '';
+        if (chat) chat.hidden = nextHidden;
         renderChats();
         renderActiveChat();
-        closeChatSettings();
-        toast('已隐藏。开关"显示隐藏聊天"可以找回');
+        await renderChatSettings();
+        toast(nextHidden ? '已隐藏' : '已取消隐藏');
     } catch (err) {
-        toast('隐藏失败：' + (err.message || '未知错误'));
+        toast('更新失败：' + (err.message || '未知错误'));
     }
 }
 
