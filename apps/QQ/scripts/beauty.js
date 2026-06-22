@@ -186,10 +186,11 @@ function renderBeautyPanel(panel, def, list) {
            </div>`
         : '';
 
-    const sectionTitle = `<div class="qq-beauty-section-title">${def.label} · ${list.length} 项${isFrame ? '' : '（M3 仅头像框完整可用，其他模块在 M5 落地）'}</div>`;
+    const sectionTitle = `<div class="qq-beauty-section-title">${def.label} · ${list.length} 项</div>`;
 
     panel.innerHTML = `
         ${mockup}
+        ${buildTutorialCard(def.type)}
         ${sectionTitle}
         <div class="qq-beauty-grid">
             ${slots}
@@ -197,6 +198,21 @@ function renderBeautyPanel(panel, def, list) {
         </div>
         ${deleteBar}
     `;
+
+    // 绑教程复制按钮
+    panel.querySelectorAll('.qq-beauty-tutorial-copy').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const text = btn.dataset.copyText;
+            if (!text) return;
+            navigator.clipboard.writeText(text).then(() => {
+                const orig = btn.textContent;
+                btn.textContent = '已复制！';
+                setTimeout(() => { btn.textContent = orig; }, 1500);
+            }).catch(() => {
+                prompt('请手动复制：', text);
+            });
+        });
+    });
 
     // 绑事件
     panel.querySelectorAll('[data-beauty-add]').forEach(btn => {
@@ -216,6 +232,51 @@ function renderBeautyPanel(panel, def, list) {
     });
     const delBtn = $('#beauty-delete-selected');
     if (delBtn) delBtn.addEventListener('click', () => deleteSelectedBeauties(def.type));
+}
+
+function buildTutorialCard(type) {
+    let cssText = '';
+    let promptText = '';
+    let hint = '';
+
+    if (type === 'skins') {
+        cssText = DEFAULT_SKIN_CSS;
+        promptText = DEFAULT_SKIN_PROMPT;
+    } else if (type === 'frames') {
+        cssText = DEFAULT_FRAME_CSS;
+        promptText = DEFAULT_FRAME_PROMPT;
+    } else if (type === 'bubbles') {
+        cssText = DEFAULT_BUBBLE_USER_CSS + '\n\n' + DEFAULT_BUBBLE_CHAR_CSS;
+        promptText = DEFAULT_BUBBLE_PROMPT;
+    } else if (type === 'avatars') {
+        hint = DEFAULT_AVATAR_HINT;
+    } else {
+        return '';
+    }
+
+    const escapeAttrVal = s => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+
+    if (hint) {
+        return `<details class="qq-beauty-tutorial">
+            <summary>美化教程 <i class="bi bi-chevron-down qq-beauty-tutorial-chevron"></i></summary>
+            <div class="qq-beauty-tutorial-body">
+                <p class="qq-beauty-tutorial-desc">${hint}</p>
+            </div>
+        </details>`;
+    }
+
+    return `<details class="qq-beauty-tutorial">
+        <summary>美化教程 <i class="bi bi-chevron-down qq-beauty-tutorial-chevron"></i></summary>
+        <div class="qq-beauty-tutorial-body">
+            <p class="qq-beauty-tutorial-desc">把以下内容扔给 AI，让它帮你改出专属样式，再粘回编辑页</p>
+            <div class="qq-beauty-tutorial-btns">
+                <button type="button" class="qq-beauty-tutorial-copy"
+                        data-copy-text="${escapeAttrVal(cssText)}">复制默认 CSS</button>
+                <button type="button" class="qq-beauty-tutorial-copy"
+                        data-copy-text="${escapeAttrVal(promptText)}">复制推荐提示词</button>
+            </div>
+        </div>
+    </details>`;
 }
 
 function renderSlotCard(def, it) {

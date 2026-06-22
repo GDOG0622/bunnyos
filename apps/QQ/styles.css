@@ -517,6 +517,60 @@ html[data-app-layout="desktop"] .qq-topbar {
     color: var(--qq-text-fade, #888);
     margin-bottom: 10px;
 }
+
+/* 美化教程折叠卡 */
+.qq-beauty-tutorial {
+    border: 1px solid var(--qq-divider, rgba(0,0,0,0.08));
+    border-radius: 10px;
+    margin-bottom: 12px;
+    overflow: hidden;
+}
+.qq-beauty-tutorial summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 9px 12px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--qq-text-sub, #707579);
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+}
+.qq-beauty-tutorial summary::-webkit-details-marker { display: none; }
+.qq-beauty-tutorial[open] summary { border-bottom: 1px solid var(--qq-divider, rgba(0,0,0,0.08)); }
+.qq-beauty-tutorial[open] .qq-beauty-tutorial-chevron { transform: rotate(180deg); }
+.qq-beauty-tutorial-chevron { transition: transform 0.2s; font-size: 11px; }
+.qq-beauty-tutorial-body {
+    padding: 10px 12px 12px;
+}
+.qq-beauty-tutorial-desc {
+    font-size: 13px;
+    color: var(--qq-text-sub, #707579);
+    margin: 0 0 10px;
+    line-height: 1.5;
+}
+.qq-beauty-tutorial-btns {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.qq-beauty-tutorial-copy {
+    flex: 1 1 auto;
+    padding: 6px 12px;
+    border: 1px solid var(--qq-accent, #3390ec);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--qq-accent, #3390ec);
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s, color 0.15s;
+}
+.qq-beauty-tutorial-copy:hover {
+    background: var(--qq-accent, #3390ec);
+    color: #fff;
+}
 .qq-beauty-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));

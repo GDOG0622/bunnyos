@@ -602,19 +602,17 @@ postimages 的免登录 API 不如 catbox 稳；是否要换成别的（如 0x0.
 
 ### 里程碑 6 · 转账闭环
 
-- [ ] **S32** 改 `qqMessageToText`（server.js）：transfer 渲染加 status 后缀
-- [ ] **S33** 给 transfer 消息加 `status / settled_at` 字段；老数据兜底当 received 处理
-- [ ] **S34** 改 `media.js:sendTransfer`：先 POST /api/wallet/adjust 扣钱，失败中断
-- [ ] **S35** 服务端 messages 写入端点里加结算扫描：每次写入后扫所有 pending user→char transfer，按"1 轮"定义算够 10 轮就标 returned + +回 user
-  - 验证：发 10cc 红包给某 char，再 user/char 互相聊 10 轮，余额自动 +10
-- [ ] **S36** 新端点 `POST /api/qq/chats/:characterId/transfer/:messageId/receive`
-- [ ] **S37** chat-render.js 改 transfer 渲染：char→user 且 pending 显示"领取"按钮 → click 调 S36
-  - 验证：char 发红包 → 点领取 → 余额 +、消息状态变"已领"
+- [x] **S32** 改 `qqMessageToText`（server.js）：transfer 渲染加 status 后缀（见 §0.3 commit `51db1ea`）
+- [x] **S33** 给 transfer 消息加 `status / settled_at` 字段；老数据兜底当 received 处理（见 §0.3 commit `dccb4d5`）
+- [x] **S34** 改 `media.js:sendTransfer`：先 POST /api/wallet/adjust 扣钱，失败中断（见 §0.3 commit `dccb4d5`）
+- [x] **S35** 服务端 messages 写入端点里加结算扫描：每次写入后扫所有 pending user→char transfer，按"1 轮"定义算够 10 轮就标 returned + +回 user（见 §0.3 commit `dccb4d5`）
+- [x] **S36** 新端点 `POST /api/qq/chats/:characterId/transfer/:messageId/receive`（见 §0.3 commit `ceca8f1`）
+- [x] **S37** chat-render.js 改 transfer 渲染：char→user 且 pending 显示"领取"按钮 → click 调 S36（见 §0.3 commit `ceca8f1`）
 
 ### 里程碑 7 · 教程 + 图床 + 全局背景
 
-- [ ] **S38** 提取现有 styles.css 的相关规则写入 `beauty-defaults.js`（5 个常量）
-- [ ] **S39** 每个模块 panel 加"美化教程"折叠卡 + 两个一键复制按钮
+- [x] **S38** 提取现有 styles.css 的相关规则写入 `beauty-defaults.js`（5 个常量）
+- [x] **S39** 每个模块 panel 加"美化教程"折叠卡 + 两个一键复制按钮
 - [x] **S40** `server.js` 加 `POST /api/upload/image-host`：catbox 主选 + 自定义 endpoint fallback；`uploadToCatbox` 用 Node 18 native FormData + Blob，自定义支持 fileField/urlField/key
 - [x] **S41** 设置 App 加图床配置 section（写入 settings.json.imageHost）：主用下拉 + 自定义 endpoint/key/fileField/urlField 四栏
 - [x] **S42** 编辑页加"上传图床"按钮（头像 charUrl / userUrl、头像框 url；背景已是 per-char 直接上传，不需要图床）
