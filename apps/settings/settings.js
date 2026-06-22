@@ -51,6 +51,7 @@ let settings = {};
 
             pageHistory.push(pageId);
             notifyNavigationState();
+            if (pageId === 'page-storage') refreshImageCacheStats();
         }
 
         function navBack() {
@@ -440,6 +441,95 @@ let settings = {};
                 await saveData();
             } catch (error) {
                 alert(`图标上传失败：${error.message}`);
+            }
+        }
+
+        // ===== 缓存管理 =====
+        // IndexedDB 数据库由 QQ App (image-cache.js) 创建；这里只读取统计、清空
+        function openQqImgDbReadonly() {
+            return new Promise((resolve) => {
+                const req = indexedDB.open('bunnyos-qq', 1);
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => resolve(null);
+                req.onupgradeneeded = () => {
+                    // 如果 DB 不存在，避免在这里创建 schema 污染
+                    try { req.transaction.abort(); } catch {}
+                    resolve(null);
+                };
+            });
+        }
+
+        async function refreshImageCacheStats() {
+            const el = document.getElementById('cache_image_stats');
+            if (!el) return;
+            try {
+                const db = await openQqImgDbReadonly();
+                if (!db || !db.objectStoreNames.contains('images')) {
+                    el.textContent = '当前：0 张（缓存为空）';
+                    return;
+                }
+                const count = await new Promise((resolve) => {
+                    const tx = db.transaction('images', 'readonly');
+                    const req = tx.objectStore('images').count();
+                    req.onsuccess = () => resolve(req.result || 0);
+                    req.onerror = () => resolve(0);
+                });
+                // 采样估算大小
+                let totalBytes = 0, sampled = 0;
+                await new Promise((resolve) => {
+                    const tx = db.transaction('images', 'readonly');
+                    const req = tx.objectStore('images').openCursor();
+                    req.onsuccess = (ev) => {
+                        const cur = ev.target.result;
+                        if (!cur || sampled >= 50) { resolve(); return; }
+                        totalBytes += (cur.value || '').length;
+                        sampled++;
+                        cur.continue();
+                    };
+                    req.onerror = () => resolve();
+                });
+                db.close();
+                const avg = sampled ? totalBytes / sampled : 0;
+                const est = Math.round(avg * count);
+                const mb = (est / (1024 * 1024)).toFixed(1);
+                el.textContent = `当前：${count} 张 · 估算 ${mb} MB`;
+            } catch {
+                el.textContent = '统计失败';
+            }
+        }
+
+        async function clearChatImageCache() {
+            if (!confirm('清空聊天图片缓存？\n旧消息里的图片缩略会变成 [图片] 占位，但聊天本身、新发图不受影响。')) return;
+            try {
+                const db = await openQqImgDbReadonly();
+                if (!db || !db.objectStoreNames.contains('images')) {
+                    alert('缓存已经是空的');
+                    return;
+                }
+                await new Promise((resolve, reject) => {
+                    const tx = db.transaction('images', 'readwrite');
+                    tx.objectStore('images').clear();
+                    tx.oncomplete = () => resolve();
+                    tx.onerror = () => reject(tx.error);
+                });
+                db.close();
+                alert('已清空聊天图片缓存');
+                refreshImageCacheStats();
+            } catch (err) {
+                alert('清空失败：' + (err.message || '未知错误'));
+            }
+        }
+
+        async function clearSiteCache() {
+            if (!confirm('清空浏览器站点缓存？\n下次加载页面会重新从服务器拉资源（HTML/CSS/JS/字体），首次加载会慢一点。\n聊天数据、设置不受影响。')) return;
+            try {
+                if ('caches' in window) {
+                    const keys = await caches.keys();
+                    await Promise.all(keys.map(k => caches.delete(k)));
+                }
+                alert('已清空站点缓存，刷新页面后生效');
+            } catch (err) {
+                alert('清空失败：' + (err.message || '未知错误'));
             }
         }
 
@@ -989,6 +1079,9 @@ let settings = {};
             handleWallpaperUpload,
             handleAppIconUpload,
             handleCarrotImport,
+            clearChatImageCache,
+            clearSiteCache,
+            refreshImageCacheStats,
             saveBeautyPreset,
             applyBeautyPreset,
             renameBeautyPreset,

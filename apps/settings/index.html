@@ -618,9 +618,27 @@
             </div>
         </div>
 
-        <div class="section" style="text-align: center; color: var(--text-sub); margin-top: 30px;">
-            <i class="bi bi-cloud-check" style="font-size: 48px;"></i>
-            <p>GitHub 同步与存储策略施工中...</p>
+        <div class="section">
+            <div class="section-title">缓存管理</div>
+            <div class="list">
+                <div class="item vertical">
+                    <label>聊天图片缓存（推荐定期清）</label>
+                    <div style="color: var(--text-sub); font-size: 13px; margin: 4px 0 8px;">
+                        每张你发过的图片都缓存在浏览器 IndexedDB 里，用来在历史消息里还能看到缩略。<br>
+                        清空只会影响"重新打开聊天时旧图片是否能显示"——发送的图、AI 看到的图、聊天本身都不受影响。
+                    </div>
+                    <div style="color: var(--text-main); font-size: 13px; margin-bottom: 8px;" id="cache_image_stats">检查中...</div>
+                    <button type="button" class="pill-btn" onclick="clearChatImageCache()">清空聊天图片缓存</button>
+                </div>
+                <div class="item vertical">
+                    <label>浏览器站点缓存（万不得已再用）</label>
+                    <div style="color: var(--text-sub); font-size: 13px; margin: 4px 0 8px;">
+                        清空 Service Worker / Cache Storage 里的 BunnyOS 资源缓存（HTML/CSS/JS/字体等）。<br>
+                        下次加载会重新从服务器拉一遍，会慢一点。除非 BunnyOS 升级后页面行为异常，否则不需要清。
+                    </div>
+                    <button type="button" class="pill-btn" onclick="clearSiteCache()">清空站点缓存</button>
+                </div>
+            </div>
         </div>
     </div>
 
