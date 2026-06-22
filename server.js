@@ -1930,9 +1930,11 @@ app.post('/api/qq/link-preview', async (req, res) => {
         }
         const isXhsHost = (hostname) => /(^|\.)xhslink\.com$|(^|\.)xiaohongshu\.com$|(^|\.)xhscdn\.com$/i.test(hostname || '');
         const isDouyinHost = (hostname) => /(^|\.)douyin\.com$|(^|\.)iesdouyin\.com$|(^|\.)douyinpic\.com$|(^|\.)amemv\.com$/i.test(hostname || '');
+        const isWechatHost = (hostname) => /(^|\.)mp\.weixin\.qq\.com$|(^|\.)weixin\.qq\.com$/i.test(hostname || '');
         const inferSiteName = (hostname) => {
             if (isXhsHost(hostname)) return '小红书';
             if (isDouyinHost(hostname)) return '抖音';
+            if (isWechatHost(hostname)) return '微信公众号';
             return hostname || '链接';
         };
         const isGenericPreviewText = (text, hostname = host) => {
@@ -2178,7 +2180,8 @@ app.post('/api/qq/link-preview', async (req, res) => {
             if (!resp.ok || !/text\/html|application\/xhtml/i.test(ctype)) {
                 return { finalUrl: finalU, html: '', resp };
             }
-            // 读最多 2MB，避免 __INITIAL_STATE__ 靠后时截断解析数据。
+            // 读最多 4MB：XHS state 和微信公众号正文都可能靠后，仍限制体积避免异常页面拖垮服务。
+            const maxHtmlBytes = 4 * 1024 * 1024;
             const reader = resp.body?.getReader?.();
             let html = '', total = 0;
             const dec = new TextDecoder('utf-8');
@@ -2187,13 +2190,13 @@ app.post('/api/qq/link-preview', async (req, res) => {
                     const { done, value } = await reader.read();
                     if (done) break;
                     total += value.length;
-                    if (total > 2 * 1024 * 1024) { try { await reader.cancel(); } catch {} break; }
+                    if (total > maxHtmlBytes) { try { await reader.cancel(); } catch {} break; }
                     html += dec.decode(value, { stream: true });
                 }
                 html += dec.decode();
             } else {
                 html = await resp.text();
-                if (html.length > 2 * 1024 * 1024) html = html.slice(0, 2 * 1024 * 1024);
+                if (html.length > maxHtmlBytes) html = html.slice(0, maxHtmlBytes);
             }
             return { finalUrl: finalU, html, resp };
         };
@@ -2257,6 +2260,77 @@ app.post('/api/qq/link-preview', async (req, res) => {
                 image,
                 siteName: '抖音',
                 source: 'douyin-html'
+            };
+        };
+        const htmlDecode = (s) => String(s || '')
+            .replace(/&nbsp;/g, ' ')
+            .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+            .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+            .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCharCode(parseInt(n, 16)))
+            .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n));
+        const htmlToPlainText = (fragment) => htmlDecode(String(fragment || '')
+            .replace(/<script[\s\S]*?<\/script>/gi, '')
+            .replace(/<style[\s\S]*?<\/style>/gi, '')
+            .replace(/<svg[\s\S]*?<\/svg>/gi, '')
+            .replace(/<(?:br|hr)\b[^>]*>/gi, '\n')
+            .replace(/<\/(?:p|section|div|h[1-6]|li|blockquote|article)>/gi, '\n')
+            .replace(/<[^>]+>/g, '')
+            .replace(/\u00a0/g, ' '))
+            .split(/\r?\n/)
+            .map(line => line.replace(/[ \t]+/g, ' ').trim())
+            .filter(Boolean)
+            .filter((line, idx, arr) => arr.indexOf(line) === idx)
+            .join('\n')
+            .trim();
+        const findMetaContent = (html, prop) => {
+            const r1 = new RegExp(`<meta[^>]+(?:property|name)\\s*=\\s*["']${prop}["'][^>]*content\\s*=\\s*["']([^"']*)["']`, 'i');
+            const r2 = new RegExp(`<meta[^>]+content\\s*=\\s*["']([^"']*)["'][^>]+(?:property|name)\\s*=\\s*["']${prop}["']`, 'i');
+            return htmlDecode(html.match(r1)?.[1] || html.match(r2)?.[1] || '').trim();
+        };
+        const findWechatVar = (html, name) => {
+            const re = new RegExp(`var\\s+${name}\\s*=\\s*(["'])([\\s\\S]*?)\\1`, 'i');
+            const rawValue = html.match(re)?.[2] || '';
+            return htmlDecode(rawValue.replace(/\\(['"\\])/g, '$1')).trim();
+        };
+        const parseWechatFromHtml = (html, baseUrl) => {
+            const og = parseOgFromHtml(html, baseUrl);
+            const author = findMetaContent(html, 'author') || findWechatVar(html, 'nickname') || findWechatVar(html, 'profile_nickname');
+            const jsContentId = html.search(/\bid=["']js_content["']/i);
+            let contentHtml = '';
+            if (jsContentId >= 0) {
+                const start = html.lastIndexOf('<div', jsContentId);
+                const endMarkers = [
+                    'id="js_pc_qr_code"',
+                    "id='js_pc_qr_code'",
+                    'id="js_article_bottom_bar"',
+                    "id='js_article_bottom_bar'",
+                    '<script'
+                ];
+                const ends = endMarkers
+                    .map(marker => html.indexOf(marker, jsContentId))
+                    .filter(pos => pos > start);
+                const end = ends.length ? Math.min(...ends) : Math.min(html.length, start + 600000);
+                if (start >= 0 && end > start) contentHtml = html.slice(start, end);
+            }
+            const articleText = htmlToPlainText(contentHtml)
+                .replace(/^微信扫一扫\s*关注该公众号\s*/i, '')
+                .trim();
+            const contentImage = contentHtml.match(/\b(?:data-src|src)=["'](https?:\/\/mmbiz\.qpic\.cn\/[^"']+)["']/i)?.[1] || '';
+            const varImage = findWechatVar(html, 'msg_cdn_url');
+            const imageRaw = og.image || varImage || contentImage;
+            let image = '';
+            try { image = imageRaw ? new URL(imageRaw, baseUrl).toString() : ''; } catch {}
+            const title = (og.title || findWechatVar(html, 'msg_title') || '').replace(/\.html\(false\)$/i, '').trim();
+            const summary = og.description || findWechatVar(html, 'msg_desc');
+            const description = articleText || summary;
+            if (!title && !description && !image) return null;
+            return {
+                url: baseUrl,
+                title: title || summary || '微信公众号文章',
+                description,
+                image,
+                siteName: author ? `微信公众号 · ${author}` : '微信公众号',
+                source: articleText ? 'wechat-html' : 'wechat-og'
             };
         };
 
@@ -2451,6 +2525,17 @@ app.post('/api/qq/link-preview', async (req, res) => {
             const sharedDouyin = cleanSharedText(rawText);
             if (sharedDouyin) {
                 return await sendPreview({ url: finalUrl, title: sharedDouyin, description: sharedDouyin, image: '', siteName: '抖音', source: 'douyin-shared-text' }, finalUrl);
+            }
+        }
+
+        if (isWechatHost(finalHost)) {
+            const wechatData = html ? parseWechatFromHtml(html, finalUrl) : null;
+            if (wechatData && isUsefulPreview(wechatData, finalHost)) {
+                return await sendPreview(wechatData, finalUrl);
+            }
+            const jinaWechat = await tryJinaReader(finalUrl, jinaToken);
+            if (isUsefulPreview(jinaWechat, finalHost)) {
+                return await sendPreview({ ...jinaWechat, siteName: '微信公众号' }, finalUrl);
             }
         }
 
