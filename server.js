@@ -1027,13 +1027,14 @@ function readCharBeauty() {
     }
     return data;
 }
-function beautySlotKey(type) {
-    if (type === 'skins') return 'skinId';
-    if (type === 'avatars') return 'avatarId';
-    if (type === 'frames') return 'frameId';
-    if (type === 'bubbles') return 'bubbleId';
-    if (type === 'backgrounds') return 'backgroundId';
-    return null;
+// 返回该类美化对应的 char-beauty 字段名（数组：frames 拆 char/user，其他单字段）
+function beautySlotKeys(type) {
+    if (type === 'skins') return ['skinId'];
+    if (type === 'avatars') return ['avatarId'];
+    if (type === 'frames') return ['frameCharId', 'frameUserId'];
+    if (type === 'bubbles') return ['bubbleId'];
+    if (type === 'backgrounds') return ['backgroundId'];
+    return [];
 }
 
 app.get('/api/qq/beauties', (req, res) => {
@@ -1119,16 +1120,18 @@ app.delete('/api/qq/beauties/:type/:id', (req, res) => {
                 .filter(f => f === id || f.startsWith(`${id}.`))
                 .forEach(f => fs.rmSync(path.join(QQ_BEAUTY_BG_DIR, f), { force: true }));
         }
-        // 解绑 char-beauty
-        const slot = beautySlotKey(type);
-        if (slot) {
+        // 解绑 char-beauty（frames 同时检查 char/user 两个槽位）
+        const slots = beautySlotKeys(type);
+        if (slots.length) {
             const cb = readCharBeauty();
             let changed = false;
             Object.keys(cb).forEach(charId => {
-                if (cb[charId] && cb[charId][slot] === id) {
-                    cb[charId][slot] = 'default';
-                    changed = true;
-                }
+                slots.forEach(slot => {
+                    if (cb[charId] && cb[charId][slot] === id) {
+                        cb[charId][slot] = 'default';
+                        changed = true;
+                    }
+                });
             });
             if (changed) writeJsonFile(QQ_CHAR_BEAUTY_FILE, cb);
         }
@@ -1143,11 +1146,14 @@ app.get('/api/qq/char-beauty/:characterId', (req, res) => {
     try {
         const cb = readCharBeauty();
         const cur = cb[req.params.characterId] || {};
+        // 头像框拆 user/char（2026-06-22 决策）：旧字段 frameId 兼容回填给两侧
+        const legacyFrame = cur.frameId;
         res.set('Cache-Control', 'no-store').json({
-            avatarId:     cur.avatarId     || 'default',
-            frameId:      cur.frameId      || 'default',
-            bubbleId:     cur.bubbleId     || 'default',
-            backgroundId: cur.backgroundId || 'default',
+            avatarId:      cur.avatarId      || 'default',
+            frameCharId:   cur.frameCharId   || legacyFrame || 'default',
+            frameUserId:   cur.frameUserId   || legacyFrame || 'default',
+            bubbleId:      cur.bubbleId      || 'default',
+            backgroundId:  cur.backgroundId  || 'default',
         });
     } catch { res.status(500).json({ error: '读取 char 美化绑定失败' }); }
 });
@@ -1158,9 +1164,11 @@ app.put('/api/qq/char-beauty/:characterId', (req, res) => {
         const cb = readCharBeauty();
         const cur = cb[cid] || {};
         const body = req.body || {};
-        ['avatarId', 'frameId', 'bubbleId', 'backgroundId'].forEach(k => {
+        ['avatarId', 'frameCharId', 'frameUserId', 'bubbleId', 'backgroundId'].forEach(k => {
             if (k in body && typeof body[k] === 'string') cur[k] = body[k];
         });
+        // 写入时清掉老的 frameId（如有）
+        delete cur.frameId;
         cb[cid] = cur;
         writeJsonFile(QQ_CHAR_BEAUTY_FILE, cb);
         res.json(cur);
@@ -1208,11 +1216,11 @@ app.post('/api/qq/beauties/backgrounds/:id/image', (req, res) => {
 // 哪些 char 在用某个美化项（删除前确认用）
 app.get('/api/qq/char-beauty-usage/:type/:id', (req, res) => {
     const { type, id } = req.params;
-    const slot = beautySlotKey(type);
-    if (!slot) return res.status(404).json({ error: '未知类目' });
+    const slots = beautySlotKeys(type);
+    if (!slots.length) return res.status(404).json({ error: '未知类目' });
     try {
         const cb = readCharBeauty();
-        const charIds = Object.keys(cb).filter(c => cb[c] && cb[c][slot] === id);
+        const charIds = Object.keys(cb).filter(c => cb[c] && slots.some(s => cb[c][s] === id));
         const names = [];
         charIds.forEach(cid => {
             const f = path.join(CHARACTERS_DIR, `${cid}.json`);

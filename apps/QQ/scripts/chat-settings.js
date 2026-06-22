@@ -36,13 +36,18 @@ async function applyCharBeauty(characterId) {
         const beauties = await beautyRes.json();
         state.charBeautyCurrent = { characterId, ...cb };
 
-        // 头像框：::after background-image
-        const frame = (beauties.frames || []).find(x => x.id === cb.frameId);
-        if (frameStyle) {
-            frameStyle.textContent = (frame && frame.url)
-                ? `.bunny-qq-frame::after { background-image: url('${frame.url.replace(/'/g, "\\'")}'); }`
-                : '';
+        // 头像框（拆 char/user 两侧）：分别命中 .bunny-qq-frame-char/-user::after
+        const frames = beauties.frames || [];
+        const fChar = frames.find(x => x.id === cb.frameCharId);
+        const fUser = frames.find(x => x.id === cb.frameUserId);
+        const rules = [];
+        if (fChar && fChar.url) {
+            rules.push(`.bunny-qq-frame-char::after { background-image: url('${fChar.url.replace(/'/g, "\\'")}'); }`);
         }
+        if (fUser && fUser.url) {
+            rules.push(`.bunny-qq-frame-user::after { background-image: url('${fUser.url.replace(/'/g, "\\'")}'); }`);
+        }
+        if (frameStyle) frameStyle.textContent = rules.join('\n');
         // 头像对：char/user 两张图（公共库共享）。default 走原 char/persona avatar
         const avatar = (beauties.avatars || []).find(x => x.id === cb.avatarId);
         state.charBeautyAvatars = (avatar && avatar.id !== 'default')
@@ -108,8 +113,12 @@ async function renderChatSettings() {
                 <select id="chat-settings-avatar">${opt(avatars, cb.avatarId)}</select>
             </div>
             <div class="qq-chat-settings-row">
-                <label>头像框</label>
-                <select id="chat-settings-frame">${opt(frames, cb.frameId)}</select>
+                <label>char 头像框</label>
+                <select id="chat-settings-frame-char">${opt(frames, cb.frameCharId)}</select>
+            </div>
+            <div class="qq-chat-settings-row">
+                <label>user 头像框</label>
+                <select id="chat-settings-frame-user">${opt(frames, cb.frameUserId)}</select>
             </div>
             <div class="qq-chat-settings-row qq-chat-settings-disabled">
                 <label>气泡组</label>
@@ -126,11 +135,14 @@ async function renderChatSettings() {
                 <button type="button" class="qq-chat-settings-action danger" disabled>删除聊天 (M8)</button>
             </div>
         `;
-        body.querySelector('#chat-settings-frame').addEventListener('change', e =>
-            onChatSettingsBeautyChange('frameId', e.target.value)
-        );
         body.querySelector('#chat-settings-avatar').addEventListener('change', e =>
             onChatSettingsBeautyChange('avatarId', e.target.value)
+        );
+        body.querySelector('#chat-settings-frame-char').addEventListener('change', e =>
+            onChatSettingsBeautyChange('frameCharId', e.target.value)
+        );
+        body.querySelector('#chat-settings-frame-user').addEventListener('change', e =>
+            onChatSettingsBeautyChange('frameUserId', e.target.value)
         );
     } catch (err) {
         body.innerHTML = `<div class="qq-beauty-empty">加载失败：${err.message}</div>`;

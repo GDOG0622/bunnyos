@@ -100,7 +100,10 @@ function renderActiveChat() {
         const avatarUrl = isAssistant
             ? (pair?.charUrl || fallbackChar)
             : (pair?.userUrl || fallbackUser);
-        const avatarWrapClass = isAssistant ? 'qq-message-avatar bunny-qq-frame' : 'qq-message-avatar';
+        // char/user 各带专属修饰类，让头像框可分别设置（2026-06-22）
+        const avatarWrapClass = isAssistant
+            ? 'qq-message-avatar bunny-qq-frame bunny-qq-frame-char'
+            : 'qq-message-avatar bunny-qq-frame bunny-qq-frame-user';
         const avatarHtmlStr = `<span class="${avatarWrapClass}"><span class="qq-avatar">${avatarHtml(avatarUrl)}</span></span>`;
         item.innerHTML = avatarHtmlStr
             + `<div class="qq-msg-col">${messageContentHtml(msg, i)}${versionNavHtml(chat, i)}</div>${metaHtml(msg)}`
