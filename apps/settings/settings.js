@@ -466,6 +466,8 @@ let settings = {};
                     `· 表情包：新增 ${r.stickerPacks} 组，新增贴纸 ${r.stickerItems} 张`,
                     `· 头像框：新增 ${r.frames} 条（已按 char/user 拆分）`,
                     `· 头像对：新增 ${r.avatars} 对`,
+                    `· 字体定义：${r.fonts || 0} 条（存到 settings.json.imported_carrot，待字体模块上线）`,
+                    `· 提示音：${r.notifSounds || 0} 条（同上）`,
                 ];
                 if (Array.isArray(r.skipped) && r.skipped.length) {
                     lines.push(`· 跳过的字段：${r.skipped.join('、')}`);

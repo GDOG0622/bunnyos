@@ -1288,7 +1288,7 @@ app.post('/api/qq/import-carrot', (req, res) => {
             return v;
         };
 
-        const report = { stickerPacks: 0, stickerItems: 0, frames: 0, avatars: 0, skipped: [] };
+        const report = { stickerPacks: 0, stickerItems: 0, frames: 0, avatars: 0, fonts: 0, notifSounds: 0, skipped: [] };
 
         // 1) 表情包：cip_sticker_data → {packName: [{desc, url}]}
         const stickerData = parseField('cip_sticker_data');
@@ -1370,8 +1370,30 @@ app.post('/api/qq/import-carrot', (req, res) => {
 
         writeJsonFile(QQ_BEAUTIES_FILE, beauties);
 
-        // 跳过的字段
-        ['cip_theme_data_v1', 'cip_global_fonts_v1', 'cip_bubble_presets_v1', 'cip_notif_sounds_v1', 'cip_float_icon_v1']
+        // 4) 字体 + 提示音：暂无对应 UI，存到 settings.json.imported_carrot 备查
+        const allSettings = readJsonFile(SETTINGS_FILE, {});
+        allSettings.imported_carrot = allSettings.imported_carrot || {};
+        const fonts = parseField('cip_global_fonts_v1');
+        if (fonts && typeof fonts === 'object') {
+            allSettings.imported_carrot.fonts = fonts;
+            allSettings.imported_carrot.activeFont = obj.cip_active_global_font_v1 || '';
+            report.fonts = Object.keys(fonts).length;
+        }
+        const sounds = parseField('cip_notif_sounds_v1');
+        if (sounds && typeof sounds === 'object') {
+            allSettings.imported_carrot.notifSounds = sounds;
+            allSettings.imported_carrot.notifSuccess = obj.cip_notif_success_v1 || '';
+            allSettings.imported_carrot.notifFail = obj.cip_notif_fail_v1 || '';
+            allSettings.imported_carrot.notifSuccessTitle = obj.cip_notif_success_title_v1 || '';
+            allSettings.imported_carrot.notifSuccessBody = obj.cip_notif_success_body_v1 || '';
+            allSettings.imported_carrot.notifFailTitle = obj.cip_notif_fail_title_v1 || '';
+            allSettings.imported_carrot.notifFailBody = obj.cip_notif_fail_body_v1 || '';
+            report.notifSounds = Object.keys(sounds).length;
+        }
+        writeJsonFile(SETTINGS_FILE, allSettings);
+
+        // 真正跳过的字段（命名空间冲突或暂无对应 UI）
+        ['cip_theme_data_v1', 'cip_bubble_presets_v1', 'cip_float_icon_v1']
             .forEach(k => { if (obj[k]) report.skipped.push(k); });
 
         console.log('[IMPORT carrot]', report);
