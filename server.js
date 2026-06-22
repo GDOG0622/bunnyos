@@ -2962,16 +2962,12 @@ function qqMessageToText(msg) {
         case 'voice':
             return String(msg.text || '');
         case 'link': {
-            const url = String(msg.url || '').trim();
             const t = String(msg.title || '').trim();
             const d = String(msg.fullDescription || msg.description || '').trim();
-            const image = String(msg.image || '').trim();
             const s = String(msg.siteName || '').trim();
             const parts = [];
-            if (url) parts.push(`URL：${url}`);
             if (t) parts.push(`标题：${t}`);
             if (d) parts.push(`描述：${d}`);
-            if (image) parts.push(`封面图：${image}`);
             if (s) parts.push(`站点：${s}`);
             return `[链接卡片] ${parts.join('；')}`;
         }
