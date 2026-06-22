@@ -269,9 +269,24 @@ async function editMessage(idx) {
     requestAnimationFrame(() => {
         const input = $(`.qq-message-row[data-idx="${idx}"] [data-edit-input]`);
         if (!input) return;
+        const supportsFieldSizing = CSS?.supports?.('field-sizing', 'content');
         const autoGrow = () => {
+            // 高度跟内容（所有浏览器）
             input.style.height = 'auto';
             input.style.height = input.scrollHeight + 'px';
+            // 宽度跟内容（非 field-sizing 浏览器手动测）
+            if (!supportsFieldSizing) {
+                const mirror = document.createElement('span');
+                const cs = getComputedStyle(input);
+                mirror.style.cssText = 'visibility:hidden;position:absolute;white-space:pre;';
+                mirror.style.font = cs.font;
+                mirror.style.letterSpacing = cs.letterSpacing;
+                mirror.textContent = input.value || ' ';
+                document.body.appendChild(mirror);
+                const w = Math.min(mirror.offsetWidth + 8, input.parentElement?.parentElement?.clientWidth || 540);
+                input.style.width = Math.max(w, 40) + 'px';
+                mirror.remove();
+            }
         };
         autoGrow();
         input.addEventListener('input', autoGrow);

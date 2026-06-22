@@ -92,6 +92,17 @@ BunnyOS/
 | POST | `/api/notify/subscribe` `/unsubscribe` | 订阅 / 取消订阅本设备的推送 |
 | GET | `/api/notify/subscriptions` | 查询订阅数量 |
 | POST | `/api/notify/test` | 测试推送（向所有订阅设备发一条）|
+| GET / POST | `/api/wallet` `/wallet/adjust` | 钱包余额（萝卜币 cc）/ 加减（含余额下限 0） |
+| POST | `/api/qq/chats/:characterId/transfer/:idx/receive` | user 领取 char→user 红包 |
+| GET / POST / PUT / DELETE | `/api/qq/beauties[/:type[/:id]]` | 美化库 CRUD：皮肤 / 头像（成对） / 头像框 / 气泡（user+char 双 CSS） |
+| POST | `/api/qq/beauties/backgrounds/:id/image` | 美化库背景覆盖式上传（用 1 个槽位作为全局背景） |
+| GET | `/api/qq/char-beauty-usage/:type/:id` | 删除前查多少 char 在用某项 |
+| GET / PUT | `/api/qq/char-beauty/:characterId` | char 美化绑定（avatarId / frameCharId / frameUserId / bubbleId / customBackgroundUrl） |
+| POST / DELETE | `/api/qq/char-beauty/:characterId/background` | char 专属聊天背景上传 / 清除（覆盖到 `data/qq/char-backgrounds/<cid>.<ext>`） |
+| GET / PUT | `/api/qq/skin` | 全局皮肤 CSS（写 `qq/settings.json.currentSkinId`，QQ App 启动注入到 `<body class="bunny-qq-skin">`） |
+| GET | `/api/qq/chat-tokens/:characterId` | 当前 prompt token 估算（CJK 1tk + 其余 4 字/tk，沿用酒馆 fallback 思路） |
+| POST | `/api/upload/image-host` | 图床代理：catbox + 自定义 endpoint fallback（顺序：lastWorking → primary → catbox） |
+| POST | `/api/qq/import-carrot` | 导入 carrot 插件 JSON：表情包 / 头像对 / 头像框 / 字体 / 提示音，去重按 URL 或 pair |
 
 **静态路径必须放在 `:id` 之前**：`/api/st-presets/current` `/new` `/import-default` 都要先注册。
 
@@ -178,10 +189,20 @@ BunnyOS/
 - AI 代回（impersonate）
 - 模板宏：`{{//}} / {{random}} / {{roll}}`
 - USER 语音转文字（STT）：QQ 麦克风按钮 → `MediaRecorder` 录 opus → **前端直传** Groq 或硅基流动的 OpenAI 兼容转写端点 → 回填 `=MM:SS|content=`。Key 存在 `settings.json` 的 `asr_groqKey` / `asr_siliconflowKey`，调度顺序按 `asr_lastWorking` 优先。后端零参与
+- **QQ 美化系统**（详见 `QQ美化系统计划.md`）：5 个模块（皮肤 / 头像 / 头像框 / 气泡 / 背景）；公共库 + char-beauty 个性化；头像框 char/user 双侧独立；全局皮肤启动注入；per-char 聊天背景直接上传到 `data/qq/char-backgrounds/<cid>.<ext>`；气泡点击侧弹菜单替代长按；每条消息 QQ 风头像 + frame 叠层；编辑模式 textarea 嵌进气泡（`field-sizing: content`）
+- **钱包（萝卜币 cc）+ 转账闭环**：启动初始化 `data/wallet.json` 20000cc；美化创建按价扣费（皮肤 20 / 其他 5 / 背景 0）；红包 user→char 发送即扣，10 轮 user-char 交互后未领自动退回；char→user 用户点击领取入账；AI 看到三段后缀 `[🧧¥10\|备注\|未领/已领/已自动退回]` 但看不到余额
+- **图床代理**：`POST /api/upload/image-host`（catbox 默认 + 自定义 imgbb/smms endpoint），调用方在美化编辑页头像 / 头像框的 URL 输入旁
+- **carrot 数据迁移**：`POST /api/qq/import-carrot` 把酒馆 carrot 插件导出的 JSON 一键导入到 BunnyOS——表情包按 url 去重 / 头像框按 char-user 拆 / 头像对成对入库 / 字体合并到 `beautyPresets.font` / 提示音合并到 `notify_savedSounds`
+- **图片缓存升级 IndexedDB**：发过的图片 dataURL 写到 IDB `bunnyos-qq/images`（旧 `localStorage qq:img:*` 启动时自动迁移）；后端 chat 文件不存 dataURL 但保留 `client_image_id`；AI prompt 只发最近一张
+- **存储管理**：设置 → 存储配置 → 缓存管理（IDB 图片库统计 + 清空 / 浏览器站点 caches 清空）；图床配置在同一页
 
 ### 下一步
 
+**P0 M8 对话框管理**：聊天页三个点面板里"清空聊天记录 / 隐藏此聊天 / 删除聊天"目前是 disabled 占位。需要：后端 `DELETE /api/qq/chats/:cid/messages` 和 chat 加 `hidden` 字段；前端联系人列表过滤 `hidden`，顶栏加"显示隐藏聊天"toggle；删除会清掉对应的 char-beauty/char-background。
+
 **P0 总结模块**：自动给长对话生成摘要，写进角色绑定世界书的某本（"总结世界书"）。触发条件：消息数超阈值或 token 接近上下文上限。新增端点 `POST /api/qq/summarize`，由副 API 跑。
+
+**P1 美化教程一键复制**（§8 S38/S39）：每个美化模块 panel 加默认 CSS 一键复制 + 推荐提示词模板复制，让用户把模板扔给 AI 帮改。
 
 **P1 群聊接入 AI**：`chatType=group` 路由已就位，需要：群聊 chat 界面、群聊聊天记录结构 `{groupId, members:[characterId], messages:[{senderId,...}]}`、`/api/qq/reply` 增加 `groupId` 支持、群成员轮替逻辑。
 

@@ -81,6 +81,10 @@
 | carrot 导入去重报告 | 完成 | `bf3e0e4` | stickerSkipped/frameSkipped/avatarSkipped 计数；去重逻辑（按 URL 或 char+user pair）一直在做，只是报告里没显示 |
 | 表情包管理 UI | 完成 | `bff7294` | +号旁加铅笔进编辑模式；点合集弹 confirm 删整组；打开合集后每张贴纸右上角 ✕ 直接删；编辑模式抖动提示 |
 | M7 图床代理 | 完成 | `62cb42a` | POST /api/upload/image-host（catbox + 自定义 endpoint 代理 fallback，三段顺序：lastWorking → primary → catbox）；设置 App 加图床配置；美化编辑页头像/头像框 URL 字段旁加"上传图床"按钮 |
+| 图床错误透传 + 表情包布局 v1 | 完成 | `aa938de` | 502 弹完整 detail+hint；strip 横向滚动；贴纸网格 4 列 |
+| 图床 / Jina 教程升级模态 | 完成 | `51e28d1` | 复用 #asr-help-modal；图床 section 加感叹号弹 catbox+imgbb+smms 三家配置；Jina alert 改 modal |
+| 自定义提示音改造 + carrot 字体合并 | 完成 | `00edcd8` | 新声音库（URL/试听/保存命名/删除）+ 成功/失败下拉；启动合并 imported_carrot.notifSounds/fonts 到 savedSounds+beautyPresets.font |
+| 表情包细节 + ✕ 延迟修复 | 完成 | `5ec518f` | 4 列 + !important + min-width:0；进编辑模式不再 innerHTML 重渲，原地加 class + 插 ✕；抖动 0.4s→0.25s |
 | M7 教程 + 图床 + 全局背景 | 未开始 | — | 含 S40 需先确认 §7.3 |
 | M8 对话框管理 + 收尾 | 未开始 | — | 含 S47 需先确认 §7.2 |
 
