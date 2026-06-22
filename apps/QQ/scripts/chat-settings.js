@@ -61,11 +61,15 @@ async function applyCharBeauty(characterId) {
                 ? `${bubble.userCss || ''}\n${bubble.charCss || ''}`
                 : '';
         }
-        // 背景：char-beauty.backgroundId 非 default 时，注入到 .bunny-qq-bg
-        const bg = (beauties.backgrounds || []).find(x => x.id === cb.backgroundId);
+        // 背景：优先 char 专属上传（customBackgroundUrl）；否则回退到旧 backgrounds 库
+        let bgUrl = cb.customBackgroundUrl || '';
+        if (!bgUrl) {
+            const libBg = (beauties.backgrounds || []).find(x => x.id === cb.backgroundId);
+            if (libBg && libBg.id !== 'default') bgUrl = libBg.url || '';
+        }
         if (bgStyle) {
-            bgStyle.textContent = (bg && bg.id !== 'default' && bg.url)
-                ? `.bunny-qq-bg { background-image: url('${bg.url.replace(/'/g, "\\'")}'); background-size: cover; background-position: center; }`
+            bgStyle.textContent = bgUrl
+                ? `.bunny-qq-bg { background-image: url('${bgUrl.replace(/'/g, "\\'")}'); background-size: cover; background-position: center; }`
                 : '';
         }
     } catch (err) {
@@ -110,7 +114,6 @@ async function renderChatSettings() {
         const frames = beauties.frames || [];
         const avatars = beauties.avatars || [];
         const bubbles = beauties.bubbles || [];
-        const bgs = beauties.backgrounds || [];
         const opt = (list, currentId) => list.map(it =>
             `<option value="${it.id}"${it.id === currentId ? ' selected' : ''}>${escapeHtmlText(it.name || it.id)}</option>`
         ).join('');
@@ -131,9 +134,18 @@ async function renderChatSettings() {
                 <label>气泡组</label>
                 <select id="chat-settings-bubble">${opt(bubbles, cb.bubbleId)}</select>
             </div>
-            <div class="qq-chat-settings-row">
-                <label>聊天背景</label>
-                <select id="chat-settings-bg">${opt(bgs, cb.backgroundId)}</select>
+            <div class="qq-chat-settings-bg-section">
+                <div class="qq-chat-settings-bg-label">聊天背景（此 char 专属，覆盖式）</div>
+                <button type="button"
+                        class="qq-beauty-bg-single${cb.customBackgroundUrl ? ' has-image' : ''}"
+                        id="chat-settings-bg-upload"
+                        ${cb.customBackgroundUrl ? `style="background-image:url('${cb.customBackgroundUrl.replace(/'/g, "\\'")}')"` : ''}>
+                    ${cb.customBackgroundUrl ? '' : `<div class="qq-beauty-bg-single-hint">
+                        <i class="bi bi-plus-lg"></i><div>点击上传聊天背景</div>
+                    </div>`}
+                </button>
+                <input type="file" id="chat-settings-bg-file" accept="image/*" style="display:none">
+                ${cb.customBackgroundUrl ? `<button type="button" class="qq-chat-settings-bg-clear" id="chat-settings-bg-clear">清除背景</button>` : ''}
             </div>
             <div class="qq-chat-settings-divider"></div>
             <div class="qq-chat-settings-actions">
@@ -154,11 +166,61 @@ async function renderChatSettings() {
         body.querySelector('#chat-settings-bubble').addEventListener('change', e =>
             onChatSettingsBeautyChange('bubbleId', e.target.value)
         );
-        body.querySelector('#chat-settings-bg').addEventListener('change', e =>
-            onChatSettingsBeautyChange('backgroundId', e.target.value)
-        );
+        // 背景上传 / 清除（per-char）
+        const bgUploadBtn = body.querySelector('#chat-settings-bg-upload');
+        const bgFileInput = body.querySelector('#chat-settings-bg-file');
+        if (bgUploadBtn && bgFileInput) {
+            bgUploadBtn.addEventListener('click', () => bgFileInput.click());
+            bgFileInput.addEventListener('change', e => uploadCharBackground(e.target));
+        }
+        const bgClearBtn = body.querySelector('#chat-settings-bg-clear');
+        if (bgClearBtn) bgClearBtn.addEventListener('click', clearCharBackground);
     } catch (err) {
         body.innerHTML = `<div class="qq-beauty-empty">加载失败：${err.message}</div>`;
+    }
+}
+
+function uploadCharBackground(fileInput) {
+    const charId = state.chatSettingsCharId;
+    if (!charId) return;
+    const file = fileInput?.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+        try {
+            const res = await fetch(`/api/qq/char-beauty/${encodeURIComponent(charId)}/background`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ dataUrl: reader.result })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) { toast(data.error || '上传失败'); return; }
+            await applyCharBeauty(charId);
+            renderChatSettings();
+            toast('已上传聊天背景');
+        } catch (err) {
+            toast('上传失败：' + (err.message || '未知错误'));
+        }
+    };
+    reader.onerror = () => toast('读取文件失败');
+    reader.readAsDataURL(file);
+}
+
+async function clearCharBackground() {
+    const charId = state.chatSettingsCharId;
+    if (!charId) return;
+    try {
+        const res = await fetch(`/api/qq/char-beauty/${encodeURIComponent(charId)}/background`, { method: 'DELETE' });
+        if (!res.ok) {
+            const d = await res.json().catch(() => ({}));
+            toast(d.error || '清除失败');
+            return;
+        }
+        await applyCharBeauty(charId);
+        renderChatSettings();
+        toast('已清除背景');
+    } catch (err) {
+        toast('清除失败：' + (err.message || '未知错误'));
     }
 }
 

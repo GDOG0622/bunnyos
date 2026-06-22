@@ -1,14 +1,13 @@
 // QQ 美化商城 · M3 头像框跑通（样板模块）
 // 详见 QQ美化系统计划.md §1.4 §1.6 §8 M3
 //
-// tab 顺序：皮肤 / 头像 / 头像框 / 气泡 / 背景图
-// 头像加回美化模块（用户决策 2026-06-22 反转）：公共库、成对（charUrl + userUrl）、5cc
+// tab 顺序：皮肤 / 头像 / 头像框 / 气泡
+// 背景图改 per-char 直接上传（2026-06-22 二次反转）：从美化商城移除，统一在三个点面板里上传
 const BEAUTY_TAB_DEFS = [
     { type: 'skins',       label: '皮肤',   price: 20 },
     { type: 'avatars',     label: '头像',   price: 5 },
     { type: 'frames',      label: '头像框', price: 5 },
     { type: 'bubbles',     label: '气泡',   price: 5 },
-    { type: 'backgrounds', label: '背景图', price: 0 },
 ];
 
 // 每模块的 mockup 包裹类（§1.6）

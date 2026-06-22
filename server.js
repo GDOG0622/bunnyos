@@ -1154,6 +1154,7 @@ app.get('/api/qq/char-beauty/:characterId', (req, res) => {
             frameUserId:   cur.frameUserId   || legacyFrame || 'default',
             bubbleId:      cur.bubbleId      || 'default',
             backgroundId:  cur.backgroundId  || 'default',
+            customBackgroundUrl: cur.customBackgroundUrl || '',
         });
     } catch { res.status(500).json({ error: '读取 char 美化绑定失败' }); }
 });
@@ -1210,6 +1211,57 @@ app.post('/api/qq/beauties/backgrounds/:id/image', (req, res) => {
     } catch (e) {
         console.error('[BEAUTY BG UPLOAD]', e);
         res.status(500).json({ error: '背景上传失败' });
+    }
+});
+
+// per-char 聊天背景上传（覆盖式，每个 char 一张专属图）
+// 用户决策 2026-06-22：背景不走"公共库 + 下拉选"，改成三个点里直接 per-char 上传
+const QQ_CHAR_BG_DIR = path.join(QQ_DIR, 'char-backgrounds');
+fs.mkdirSync(QQ_CHAR_BG_DIR, { recursive: true });
+
+app.post('/api/qq/char-beauty/:characterId/background', (req, res) => {
+    try {
+        const cid = req.params.characterId;
+        const parsed = parseDataUrl(req.body?.dataUrl);
+        if (!parsed || !parsed.mime.startsWith('image/')) {
+            return res.status(400).json({ error: '只支持图片 Data URL' });
+        }
+        // 覆盖：先删同 cid 旧文件
+        fs.readdirSync(QQ_CHAR_BG_DIR)
+            .filter(f => f === cid || f.startsWith(`${cid}.`))
+            .forEach(f => fs.rmSync(path.join(QQ_CHAR_BG_DIR, f), { force: true }));
+        const ext = extensionFromMime(parsed.mime);
+        const fileName = `${cid}.${ext}`;
+        fs.writeFileSync(path.join(QQ_CHAR_BG_DIR, fileName), parsed.buffer);
+        const version = Date.now();
+        const url = `/data/qq/char-backgrounds/${fileName}?v=${version}`;
+        const cb = readCharBeauty();
+        cb[cid] = cb[cid] || {};
+        cb[cid].customBackgroundUrl = url;
+        writeJsonFile(QQ_CHAR_BEAUTY_FILE, cb);
+        res.json({ customBackgroundUrl: url });
+    } catch (e) {
+        console.error('[CHAR-BG UPLOAD]', e);
+        res.status(500).json({ error: 'char 背景上传失败' });
+    }
+});
+
+app.delete('/api/qq/char-beauty/:characterId/background', (req, res) => {
+    try {
+        const cid = req.params.characterId;
+        if (fs.existsSync(QQ_CHAR_BG_DIR)) {
+            fs.readdirSync(QQ_CHAR_BG_DIR)
+                .filter(f => f === cid || f.startsWith(`${cid}.`))
+                .forEach(f => fs.rmSync(path.join(QQ_CHAR_BG_DIR, f), { force: true }));
+        }
+        const cb = readCharBeauty();
+        if (cb[cid]) {
+            delete cb[cid].customBackgroundUrl;
+            writeJsonFile(QQ_CHAR_BEAUTY_FILE, cb);
+        }
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: '清除 char 背景失败' });
     }
 });
 
