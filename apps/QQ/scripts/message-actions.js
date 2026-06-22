@@ -268,8 +268,15 @@ async function editMessage(idx) {
     renderActiveChat();
     requestAnimationFrame(() => {
         const input = $(`.qq-message-row[data-idx="${idx}"] [data-edit-input]`);
-        input?.focus();
-        input?.setSelectionRange?.(input.value.length, input.value.length);
+        if (!input) return;
+        const autoGrow = () => {
+            input.style.height = 'auto';
+            input.style.height = input.scrollHeight + 'px';
+        };
+        autoGrow();
+        input.addEventListener('input', autoGrow);
+        input.focus();
+        input.setSelectionRange?.(input.value.length, input.value.length);
     });
 }
 

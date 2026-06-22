@@ -1468,43 +1468,52 @@ html[data-app-layout="desktop"] .qq-contact-add {
     white-space: pre-wrap;
     box-shadow: 0 1px 1.5px rgba(0, 0, 0, 0.08);
 }
-.qq-message-edit {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    min-width: min(320px, 70vw);
+/* 编辑模式：textarea 直接嵌进气泡（无独立卡片背景），保持气泡外观 */
+.qq-message.qq-message-editing {
+    position: relative;
+    min-width: min(220px, 60vw);
+    padding-bottom: 30px; /* 给右下角的 ✓/× 留位 */
 }
-.qq-message-edit textarea {
+.qq-message-editing textarea {
+    display: block;
     width: 100%;
-    min-height: 72px;
+    min-height: 1.4em;
     border: none;
     outline: none;
-    resize: vertical;
-    background: rgba(120, 120, 128, 0.14);
-    color: var(--qq-text);
-    border-radius: 10px;
-    padding: 8px 10px;
+    resize: none;
+    background: transparent;
+    color: inherit;
     font: inherit;
-    line-height: 1.45;
+    line-height: inherit;
+    padding: 0;
+    overflow: hidden;
 }
 .qq-message-edit-actions {
+    position: absolute;
+    right: 6px;
+    bottom: 4px;
     display: flex;
-    justify-content: flex-end;
-    gap: 8px;
+    gap: 4px;
 }
 .qq-message-edit-actions button {
-    height: 30px;
-    padding: 0 12px;
+    width: 22px;
+    height: 22px;
     border: none;
-    border-radius: 8px;
-    background: rgba(120, 120, 128, 0.16);
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.12);
     color: var(--qq-text);
     cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    font-size: 12px;
 }
 .qq-message-edit-actions button[data-edit-save] {
     background: var(--qq-accent);
     color: #fff;
 }
+.qq-message-edit-actions button i { font-size: 12px; line-height: 1; }
 .qq-version-nav {
     display: inline-flex;
     align-items: center;

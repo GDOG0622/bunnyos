@@ -159,13 +159,13 @@ function msgActionsHtml(chat, idx) {
 function messageContentHtml(msg, idx) {
     const reply = replyContentHtml(msg.reply_to);
     if (state.editingMessageIndex === idx) {
-        return `<div class="qq-message">
-            <div class="qq-message-edit">
-                <textarea data-edit-input>${escapeHtml(activeMessageText(msg))}</textarea>
-                <div class="qq-message-edit-actions">
-                    <button type="button" data-edit-cancel>取消</button>
-                    <button type="button" data-edit-save>保存</button>
-                </div>
+        // 编辑模式：直接把气泡内容区域换成 textarea，保持气泡外观；
+        // 保存/取消用 ✓/× 两个小圆按钮浮在气泡右下角
+        return `<div class="qq-message qq-message-editing">
+            <textarea data-edit-input rows="1">${escapeHtml(activeMessageText(msg))}</textarea>
+            <div class="qq-message-edit-actions">
+                <button type="button" data-edit-cancel aria-label="取消"><i class="bi bi-x-lg"></i></button>
+                <button type="button" data-edit-save aria-label="保存"><i class="bi bi-check-lg"></i></button>
             </div>
         </div>`;
     }
