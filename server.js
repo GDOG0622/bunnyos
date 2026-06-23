@@ -3244,19 +3244,29 @@ app.get('/app-icon', (req, res) => {
 // 文字 → "content"   表情包 → "[name]"   红包 → [🧧¥10|备注|状态]
 // 状态段：user→char pending=未领 / returned=已自动退回；char→user pending=未领 / received=已领
 // 图片不走文字 wrap，单独走 multimodal image_url（在 /api/qq/reply 里处理）
-function isXhsLinkMessage(msg) {
+function linkPromptKind(msg) {
     if (!msg || msg.type !== 'link') return false;
     const site = String(msg.siteName || '').toLowerCase();
     const source = String(msg.source || '').toLowerCase();
     const url = String(msg.url || '').toLowerCase();
-    return site.includes('小红书') || site.includes('xiaohongshu') || source.includes('xhs') || /(^|\/\/|\.)(xhslink|xiaohongshu)\.com/.test(url);
+    if (site.includes('小红书') || site.includes('xiaohongshu') || source.includes('xhs') || /(^|\/\/|\.)(xhslink|xiaohongshu)\.com/.test(url)) {
+        return { tag: 'xhs', suffix: 'xhs', fallbackTitle: '小红书笔记' };
+    }
+    if (site.includes('抖音') || source.includes('douyin') || /(^|\/\/|\.)(douyin|iesdouyin|amemv)\.com/.test(url)) {
+        return { tag: 'dy', suffix: 'dy', fallbackTitle: '抖音视频' };
+    }
+    if (site.includes('微信公众号') || site.includes('微信公众平台') || source.includes('wechat') || source.includes('weixin') || /(^|\/\/|\.)mp\.weixin\.qq\.com/.test(url)) {
+        return { tag: 'wx', suffix: 'wx', fallbackTitle: '微信公众号文章' };
+    }
+    return null;
 }
 
-function compactXhsLinkText(msg) {
-    const title = String(msg.title || '小红书笔记').replace(/\s+/g, ' ').trim();
+function compactRichLinkText(msg) {
+    const kind = linkPromptKind(msg);
+    const title = String(msg.title || kind?.fallbackTitle || '链接卡片').replace(/\s+/g, ' ').trim();
     const desc = String(msg.fullDescription || msg.description || '').replace(/\s+/g, ' ').trim();
     const head = Array.from(desc).slice(0, 15).join('');
-    return `[${title}${head ? `-${head}` : ''}.xhs]`;
+    return `[${title}${head ? `-${head}` : ''}.${kind?.suffix || 'link'}]`;
 }
 
 function completedUserAssistantGroupsSince(messages, index) {
@@ -3279,13 +3289,13 @@ function completedUserAssistantGroupsSince(messages, index) {
     return groups;
 }
 
-function shouldCompactXhsMessage(messages, index) {
-    return isXhsLinkMessage(messages?.[index]) && completedUserAssistantGroupsSince(messages, index) >= 6;
+function shouldCompactRichLinkMessage(messages, index) {
+    return Boolean(linkPromptKind(messages?.[index])) && completedUserAssistantGroupsSince(messages, index) >= 6;
 }
 
 function qqMessageToPromptText(messages, index) {
     const list = Array.isArray(messages) ? messages : [];
-    return qqMessageToText(list[index], { compactXhs: shouldCompactXhsMessage(list, index) });
+    return qqMessageToText(list[index], { compactRichLink: shouldCompactRichLinkMessage(list, index) });
 }
 
 function qqMessageToText(msg, options = {}) {
@@ -3307,7 +3317,8 @@ function qqMessageToText(msg, options = {}) {
         case 'voice':
             return String(msg.text || '');
         case 'link': {
-            if (options.compactXhs && isXhsLinkMessage(msg)) return compactXhsLinkText(msg);
+            const kind = linkPromptKind(msg);
+            if (options.compactRichLink && kind) return compactRichLinkText(msg);
             const t = String(msg.title || '').trim();
             const d = String(msg.fullDescription || msg.description || '').trim();
             const s = String(msg.siteName || '').trim();
@@ -3326,7 +3337,7 @@ function qqMessageToText(msg, options = {}) {
             }
             if (s) parts.push(`站点：${s}`);
             const text = parts.join('；');
-            if (isXhsLinkMessage(msg)) return `<xhs>\n${text}\n</xhs>`;
+            if (kind) return `<${kind.tag}>\n${text}\n</${kind.tag}>`;
             return `[链接卡片] ${text}`;
         }
         case 'system':
@@ -3446,7 +3457,7 @@ app.post('/api/qq/reply', async (req, res) => {
             for (let i = list.length - 1; i >= 0; i--) {
                 const m = list[i];
                 if (m?.role !== 'assistant' && m?.type === 'image' && /^data:image\//.test(m.image || '')) return i;
-                if (m?.role !== 'assistant' && m?.type === 'link' && m.imageLocal && !shouldCompactXhsMessage(list, i)) return i;
+                if (m?.role !== 'assistant' && m?.type === 'link' && m.imageLocal && !shouldCompactRichLinkMessage(list, i)) return i;
             }
             return -1;
         })();
