@@ -1,20 +1,28 @@
-# 小红书链接解析技术笔记
+# 社交链接解析技术笔记
 
-本文记录 BunnyOS 里小红书链接解析的实现经验，覆盖正文、封面图、评论、前端/后端抓取顺序，以及 AI 可读图片的处理方式。
+本文记录 BunnyOS 里小红书、抖音、微信公众号链接解析的实现经验，覆盖正文、封面图、评论、前端/后端抓取顺序、AI 可读图片，以及 prompt 中的平台标签和轮次衰减。
 
 ## 目标
 
-用户在 QQ 聊天输入小红书分享链接后，系统应生成一张链接卡片，并尽量把可用内容传给 AI：
+用户在 QQ 聊天输入社交平台分享链接后，系统应生成一张链接卡片，并尽量把可用内容传给 AI：
 
 - 识别裸短链，例如 `xhslink.com/o/...`，不要求用户手动补 `https://`
-- 跟随短链跳转到真实 `xiaohongshu.com/discovery/item/...`
-- 解析笔记标题、正文全文、话题标签
+- 跟随短链跳转到真实内容页
+- 解析标题、正文/描述、话题标签等文本内容
 - 解析封面图，并缓存成本地静态文件用于卡片显示
 - 将封面图作为多模态图片附件发给 AI，而不是只把图片 URL 发给 AI
-- 解析页面首屏状态里能拿到的前 10 条评论，包含楼中楼回复
-- 发给 AI 的小红书解析内容用 `<xhs>...</xhs>` 包裹
-- 6 组 user-char 对话后，旧小红书内容从 prompt 中衰减为 `[标题-正文前15字.xhs]`
+- 小红书解析页面首屏状态里能拿到的前 10 条评论，包含楼中楼回复
+- 发给 AI 的平台内容分别用 `<xhs>...</xhs>`、`<dy>...</dy>`、`<wx>...</wx>` 包裹
+- 6 组 user-char 对话后，旧平台链接内容从 prompt 中衰减为 `[标题-正文前15字.xhs|dy|wx]`
 - 原生抓取失败时再走 Jina Reader 兜底
+
+## 平台能力
+
+| 平台 | 识别 host | 原生解析 | 评论 | Prompt 标签 | 6 组后占位 |
+| --- | --- | --- | --- | --- | --- |
+| 小红书 | `xhslink.com`、`xiaohongshu.com`、`xhscdn.com` | `parseXhsFromHtml` 读取 `noteData` | 首屏 state 里最多 10 条 | `<xhs>` | `[标题-正文前15字.xhs]` |
+| 抖音 | `douyin.com`、`iesdouyin.com`、`amemv.com` | `parseDouyinFromHtml` 读取 meta/HTML 描述和封面 | 暂无 | `<dy>` | `[标题-正文前15字.dy]` |
+| 微信公众号 | `mp.weixin.qq.com`、`weixin.qq.com` | `parseWechatFromHtml` 读取 `js_content`、作者和封面 | 暂无 | `<wx>` | `[标题-正文前15字.wx]` |
 
 ## 当前链路
 
@@ -43,9 +51,11 @@
 3. 如果配置了第三方解析 API，先尝试第三方解析。
 4. 原生 `fetchHtml` 抓页面并跟随 HTTP redirect。
 5. 如果 HTML 里有 JS/meta redirect，再追一跳。
-6. 如果最终 host 是小红书，走 `parseXhsFromHtml`。
-7. 小红书原生失败后，才走 Jina Reader。
-8. 返回前统一经过 `sendPreview`，尝试下载封面到本地。
+6. 如果最终 host 是小红书，走 `parseXhsFromHtml`；失败后走 Jina Reader。
+7. 如果最终 host 是抖音，走 `parseDouyinFromHtml`；失败后走 Jina Reader，再退到分享文案。
+8. 如果最终 host 是微信公众号，走 `parseWechatFromHtml`；失败后走 Jina Reader。
+9. 其他网页走通用 OG/meta 解析，失败后走 Jina Reader。
+10. 返回前统一经过 `sendPreview`，尝试下载封面到本地。
 
 ## 前端抓取的现实限制
 
@@ -59,6 +69,8 @@
 实测从 `http://127.0.0.1:3000` 前端直接 `fetch('https://xhslink.com/o/...')` 会返回 `TypeError: Failed to fetch`。因此前端只是第一机会，不可作为主可靠方案。
 
 ## 正文解析
+
+### 小红书
 
 小红书页面首屏 HTML 里通常有 `window.__INITIAL_STATE__`，其中包含 `noteData`。实际结构常见为：
 
@@ -82,6 +94,39 @@
 - 遍历所有同名 key，找到带 `title` 或 `desc` 的 note 对象。
 - 正文不要裁剪，不要删除话题标签。
 - `description` 和 `fullDescription` 都应保存全文，视觉折叠交给 CSS。
+
+### 抖音
+
+抖音分享链接通常先落到短链，再跳到视频页。当前实现主要从 HTML/meta 中取：
+
+- `description` / `og:description`
+- `<title>`
+- `canonical`
+- `og:image` 或首个图片
+
+经验：
+
+- 抖音标题常混在描述里，格式类似“正文 - 作者于日期发布在抖音”。解析时要去掉平台尾巴。
+- 抖音视频本体目前不会下载，也不会转成 AI 可读视频；AI 只看到文本和封面图。
+- 如果原生解析失败，Jina Reader 可作为兜底，但成功率取决于目标页是否对 Jina 开放。
+
+### 微信公众号
+
+微信公众号文章页面较大，目标链接实测可接近 3MB，因此 `fetchHtml` 当前最多读取 4MB，避免正文容器被 2MB 上限截断。
+
+当前解析策略：
+
+- 标题：优先 OG title，其次 `var msg_title`
+- 摘要：OG description 或 `var msg_desc`
+- 作者：`meta name="author"`，兜底 `nickname` / `profile_nickname`
+- 正文：定位 `id="js_content"`，从对应 `<div>` 抽取到二维码/底部栏/脚本前
+- 封面：OG image、`msg_cdn_url` 或正文里的第一张 `mmbiz.qpic.cn` 图片
+
+经验：
+
+- 微信公众号正文 HTML 嵌套复杂，不适合用简单“遇到第一个 `</div>`”截断。
+- 抽正文时应去掉 script/style/svg，再把段落、section、div、br 转成换行。
+- 解析成功时返回 `source: "wechat-html"`；只有正文拿不到但 meta 可用时才是 `wechat-og`。
 
 ## 封面图解析和本地缓存
 
@@ -173,7 +218,7 @@
 
 ## 给 AI 的文本
 
-`qqMessageToText(msg)` 对小红书 `type: "link"` 生成文本：
+`qqMessageToText(msg)` 会先用 `linkPromptKind(msg)` 判断平台。三类平台链接生成结构相同，只是标签不同：
 
 ```text
 <xhs>
@@ -182,6 +227,22 @@
 评论前N条：1. ... / 2. ...
 站点：小红书
 </xhs>
+```
+
+```text
+<dy>
+标题：...
+描述：...
+站点：抖音
+</dy>
+```
+
+```text
+<wx>
+标题：...
+描述：...
+站点：微信公众号 · 作者
+</wx>
 ```
 
 刻意不包含：
@@ -194,19 +255,23 @@
 
 ### 6 组后衰减
 
-小红书解析内容可能很长，不能永久占用 prompt。当前使用轮次衰减：
+社交平台解析内容可能很长，不能永久占用 prompt。当前使用轮次衰减：
 
-- 从该 XHS 链接消息开始计数。
+- 从该链接消息开始计数。
 - 后续每出现一次“至少一条 user 消息之后接到 assistant 回复”，算 1 组 user-char 对话。
 - 同一次 assistant 回复拆成多条气泡不额外计数。
 - 重 roll 是替换同一段 assistant 回复，不增加新消息轮次，因此不额外计数。
-- 达到 6 组后，该 XHS 链接在 prompt 中改写成短占位：
+- 达到 6 组后，该链接在 prompt 中改写成短占位：
 
 ```text
 [标题-正文前15字.xhs]
+[标题-正文前15字.dy]
+[标题-正文前15字.wx]
 ```
 
 聊天记录本身不删全文、不删评论、不删本地封面；只是 prompt 装配时隐藏。
+
+同时，链接封面作为多模态附件发送时也会检查衰减状态：超过 6 组后的平台链接不再把历史封面塞进本次请求。
 
 ## 调试信号
 
@@ -223,6 +288,10 @@
 - `source: "frontend-xhs-state"` 前端解析成功
 - `source: "xhs-state"` 后端小红书 state 解析成功
 - `source: "xhs-og"` 小红书 OG 兜底
+- `source: "douyin-html"` 抖音 HTML/meta 解析成功
+- `source: "douyin-shared-text"` 抖音退到分享文案
+- `source: "wechat-html"` 微信公众号正文解析成功
+- `source: "wechat-og"` 微信公众号 OG/meta 兜底
 - `source: "jina"` Jina 兜底
 - `source: "xhs-limited"` 小红书受限或解析失败
 - `limitedReason` 展示具体失败原因
@@ -269,4 +338,5 @@
 - 不要把图片 URL 当作 AI 可读图片。
 - 不要为了评论数硬凑或猜测，拿不到就返回空数组。
 - 图片缓存目录属于用户数据，应留在 `data/` 下，不提交 Git。
-- 若未来要抓更多评论，应新增独立的 XHS 评论接口适配层，并处理登录态、签名、限流和风控失败提示。
+- 若未来要抓更多评论，应新增独立的平台评论接口适配层，并处理登录态、签名、限流和风控失败提示。
+- 若未来要让 AI 理解抖音视频内容，需要新增视频下载/抽帧/转写流程；当前只处理文本和封面图。
