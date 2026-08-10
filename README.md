@@ -36,10 +36,14 @@ BunnyOS/
 │  └─ scripts/             theme.js / apps.js / window-manager.js / clock.js / notify.js
 ├─ apps/
 │  ├─ settings/            通用 API、美化（含提示音+推送）、生图、语音、存储、关于
-│  ├─ QQ/                  聊天主战场（index.html / styles.css / QQ.js / scripts/*）
+│  ├─ QQ/                  聊天主战场（总结前端集中在 scripts/summary.js）
 │  ├─ prompt-manager/      预设、世界书、变量手册（QQ 内置打开，桌面 hidden）
 │  ├─ suki/                占位
 │  └─ X/                   占位
+├─ modules/
+│  ├─ qq-summary.js         QQ 分层总结后端
+│  └─ st-context/           ST 风格上下文、世界书与 tokenizer/token 预算引擎
+├─ tests/                   node:test 聚焦测试
 └─ data/
    ├─ characters/          角色卡 <id>.json
    ├─ chats/qq/            单人聊天 <characterId>.json
@@ -58,6 +62,8 @@ BunnyOS/
 
 ## 后端 server.js
 
+`server.js` 负责通用装配与启动；QQ 总结由 `modules/qq-summary.js` 驱动，ST 风格上下文由 `modules/st-context/` 独立驱动，可移植备份由 `modules/portable-backup.js` 驱动，前端总结交互集中在 `apps/QQ/scripts/summary.js`。
+
 端口 3000。常量名见文件头。
 
 ### API 速查
@@ -66,6 +72,7 @@ BunnyOS/
 | --- | --- | --- |
 | GET | `/api/apps` | 扫描 `apps/*/manifest.json` 返回 App 清单 |
 | GET / POST | `/api/settings` | 全局 settings.json 读写 |
+| GET / POST | `/api/storage/backup/export` `/restore` | 生成可移植备份 / 恢复备份并自动保留本机回滚快照 |
 | POST | `/api/assets/upload` | 上传壁纸 / App 图标 |
 | GET / POST | `/api/presets` | 生图提示词预设 |
 | GET | `/api/st-presets` | 酒馆预设列表 + 当前 id |
@@ -77,10 +84,12 @@ BunnyOS/
 | GET / POST | `/api/worldbooks` | 全部世界书读 / 覆盖 |
 | POST | `/api/worldbooks/books` | 新建空白本 |
 | DELETE | `/api/worldbooks/books/:id` | 删整本（清角色绑定 + QQ 全局列表） |
-| POST | `/api/worldbooks/import-st` | 导入酒馆世界书 JSON（comment→name, content→content，其他字段丢） |
+| POST | `/api/worldbooks/import-st` | 导入酒馆世界书 JSON，并保留 ST 激活、位置、概率和递归字段 |
 | GET / POST | `/api/qq/global-worldbooks` | QQ 全局选中的书 id 列表 |
 | GET | `/api/qq/preset-marker-preview?characterId=` | 装配预览：world_info + memories 真实内容 |
 | GET / POST | `/api/prompt/variables` `/render` | 变量手册 + 模板渲染 |
+| GET | `/api/tokenizers/status?model=` | 当前模型自动选择的 tokenizer、精确/回退状态 |
+| POST | `/api/tokenizers/openai/count?model=` | ST 兼容消息数组 token 计数 |
 | GET / POST / PUT / DELETE | `/api/userpersonas[/:id]` `/current` | user 人设 |
 | GET / POST | `/api/qq/prompt-preset` | QQ 选用哪个预设 |
 | GET / POST / PUT / DELETE | `/api/qq/characters[/:id]` | 角色卡 |
@@ -104,7 +113,7 @@ BunnyOS/
 | GET / PUT | `/api/qq/char-beauty/:characterId` | char 美化绑定（avatarId / frameCharId / frameUserId / bubbleId / customBackgroundUrl） |
 | POST / DELETE | `/api/qq/char-beauty/:characterId/background` | char 专属聊天背景上传 / 清除（覆盖到 `data/qq/char-backgrounds/<cid>.<ext>`） |
 | GET / PUT | `/api/qq/skin` | 全局皮肤 CSS（写 `qq/settings.json.currentSkinId`，QQ App 启动注入到 `<body class="bunny-qq-skin">`） |
-| GET | `/api/qq/chat-tokens/:characterId` | 当前 prompt token 估算（CJK 1tk + 其余 4 字/tk，沿用酒馆 fallback 思路） |
+| GET | `/api/qq/chat-tokens/:characterId` | 按当前模型 tokenizer 统计 prompt token，并返回上下文分项；加载失败才使用 ST 字节回退估算 |
 | POST | `/api/upload/image-host` | 图床代理：catbox + 自定义 endpoint fallback（顺序：lastWorking → primary → catbox） |
 | GET | `/api/proxy/catbox?url=...` | Catbox 资源流式代理：VPS 直连 → Cloudflare Worker → wsrv 图片兜底；严格域名白名单，单文件上限 30MB |
 | POST | `/api/qq/import-carrot` | 导入 carrot 插件 JSON：表情包 / 头像对 / 头像框 / 字体 / 提示音，去重按 URL 或 pair |
@@ -113,7 +122,7 @@ BunnyOS/
 
 ### 装配链路（核心）
 
-`POST /api/qq/reply` 接收 `{characterId, messages, chatType}`：
+`POST /api/qq/reply` 接收 `{characterId, messages, chatType, generationType}`；`generationType` 支持 normal / continue / swipe / regenerate / quiet：
 
 1. `buildPromptVariables` 算 18 个变量（{{now}} {{char}} {{user}} {{char_role_setting}} {{chat_history}} 等）
 2. `qqMessageToText` 把每条 QQ 消息映射为 AI 文本：
@@ -122,16 +131,23 @@ BunnyOS/
    - image → `[图片]`（同时附 multimodal `image_url`）
    - transfer → `[🧧¥10|备注]`
    - system → `+content+`（BUNNY 元层，char 应忽略）
-3. `injectCharRulesAtDepth` 把角色卡 `rp_rules` 按 `rp_rules_depth` 0-4 splice 进 history 当 system 消息
-4. `buildQqPresetPrompt` 按当前预设 `prompt_order` 遍历 enabled 条目
-   - 普通条目：渲染 `prompt.content` 后按 `prompt.role`（system/user/assistant）独立成消息，相邻同 role 合并
-   - marker：调 `buildBuiltinPromptContent(identifier, character, userPersona, variables, chatType)` 拿动态内容
-   - `chatHistory` marker：原样展开为真实多条 user/assistant
-5. 采样参数从预设 JSON 顶层读：temperature / top_p / frequency_penalty / presence_penalty / openai_max_tokens
-6. **抗截断循环**（开关 `mainApi_antiCutoffEnabled` + 次数 `mainApi_antiCutoffMaxRetries`）：调主 API 后，若 finish_reason=length 或 strip 思维链后为空 → 把已生成内容当 assistant 消息 + 追 user「续写」再调，最多 N 次
-7. **关键**：每个 chunk 单独剥 `<think>...</think>`（含未闭合的）再累加。不能整体累加再 strip——多 chunk 间未闭合的 `<think>` 会让兜底正则吃掉后续好内容
-8. 累加结果用 `splitReplyToSegments`（仅按 `\n` 切，不剥任何文字）拆成多条气泡
-9. 完成时 `sendWebPushToAll(...)` fire-and-forget 推给所有订阅设备
+3. `modules/st-context` 按 ST Chat Completion 语义装配：相对条目遵循 `prompt_order`；聊天内条目按 `injection_depth / injection_order / role` 插入；`injection_trigger` 按生成类型过滤
+4. 世界书先扫描再注入：角色书优先于全局书，总结书独立；支持主/次关键词、四种次关键词逻辑、常驻、概率、递归、独立预算、位置、depth、Outlet、触发类型和包含组；旧条目无激活字段时继续视为常驻
+5. `modules/st-context/tokenizer.js` 按模型自动选择 tokenizer：OpenAI/o 系列用 tiktoken；Gemini 用 ST 同路线的 Gemma SentencePiece；Claude、Llama、Qwen、DeepSeek 等按家族加载本地模型并缓存到 `data/_cache/tokenizers/`；加载失败才按 ST 的 UTF-8 字节估算回退
+6. 用 `mainApi_context - openai_max_tokens` 得到提示词预算；固定提示词先占预算，聊天历史从最新一条向前装入，超出时只丢最旧历史；未固定示例在历史之后竞争剩余预算
+7. 采样参数从预设 JSON 顶层读：temperature / top_p / frequency_penalty / presence_penalty / openai_max_tokens
+8. **抗截断循环**（开关 `mainApi_antiCutoffEnabled` + 次数 `mainApi_antiCutoffMaxRetries`）：调主 API 后，若 finish_reason=length 或 strip 思维链后为空 → 把已生成内容当 assistant 消息 + 追 user「续写」再调，最多 N 次
+9. **关键**：每个 chunk 单独剥 `<think>...</think>`（含未闭合的）再累加。不能整体累加再 strip——多 chunk 间未闭合的 `<think>` 会让兜底正则吃掉后续好内容
+10. 累加结果用 `splitReplyToSegments`（仅按 `\n` 切，不剥任何文字）拆成多条气泡；响应附 `context_itemization / context_warnings` 供诊断
+11. 完成时 `sendWebPushToAll(...)` fire-and-forget 推给所有订阅设备
+
+### 云端备份与公告
+
+- 设置 → 存储配置提供 GitHub 私有仓库和 Supabase Storage 两种手动云端备份；两者分别由独立 provider 类实现。
+- “云端备份”覆盖约定路径的上一份备份；“加载备份”恢复前先在 `data/backups/` 创建本机回滚快照。
+- 备份包含 `settings.json`、`data/` 和用户上传的桌面资源，但排除运行缓存、Web Push 设备密钥与历史回滚快照。
+- OS 公告栏每日首次进入时提醒备份；公告版本变化时同日也会再次显示更新内容，点击“备份 BunnyOS 数据”直达存储配置。
+- QQ 生成任务按角色隔离，不同角色可以并行；App iframe 常驻，因此回到桌面或切换设置、Suki 时生成继续，完成后走 OS 信息条提醒。
 
 ### 模板渲染 renderPromptTemplate
 
@@ -148,8 +164,8 @@ BunnyOS/
 | `bunnyosRealtime` | 实时模式 | 时间变量 |
 | `charDescription` | CHAR人设 | `<character_info>` 包角色卡 role_setting / other_setting（不含 rp_rules） |
 | `personaDescription` | USER人设 | `<user_info>` 包当前 user 人设 |
-| `worldInfoAfter` | 世界书 | `<world_info>` 依次包含角色 `worldbookIds`、QQ `globalWorldbookIds`（角色在前、全局在后） |
-| `worldInfoBefore` | 总结内容 | `<memories>` 只包含当前角色 `summaryWorldbookId` 指定的总结世界书 |
+| `worldInfoAfter` | 世界书 | 世界书扫描后命中“角色定义后”的条目；角色书优先于全局书 |
+| `worldInfoBefore` | 总结内容 | 总结世界书，以及扫描后命中“角色定义前”的条目 |
 | `scenario` | 场景信息 | 角色卡 scenario |
 | `dialogueExamples` | 示例聊天 | 角色卡 mes_example |
 | `onlinePrivateChat` | 线上·私聊 | chatType=private 时注入 `ONLINE_PRIVATE_CHAT_PROTOCOL` 常量 |
@@ -166,11 +182,11 @@ BunnyOS/
 
 **user 人设 `data/userpersonas/<名字>.json`**：`id / name / gender / birthday / status / customStatus / signature / note / prompt / avatar`。注入 AI 的字段：name / gender / birthday / prompt。
 
-**世界书 `data/worlds/worldbooks.json`**：`{books: [{id, name, entries: [{id, name, content, enabled}]}]}`。条目无 key/depth/probability 命中引擎，装配时纯打包；但条目级 `enabled`（默认 `true`）可临时关闭单条而不删除，prompt 装配时按 `entry.enabled !== false` 过滤。
+**世界书 `data/worlds/worldbooks.json`**：`{books: [{id, name, entries: [...]}]}`。基础字段为 `id / name / content / enabled`；ST 兼容字段包括 `key / keysecondary / constant / selectiveLogic / position / order / depth / probability / useProbability / scanDepth / caseSensitive / matchWholeWords / excludeRecursion / preventRecursion / triggers / outletName / group` 等。导入 ST JSON 时保留原字段；旧条目没有激活字段时按常驻处理。
 
 **酒馆预设**：标准 ST 结构。BunnyOS 在 `extensions.bunnyosPromptGroups` 存自定义分组，`extensions.bunnyosBuiltinArranged` 标记 builtin marker 已排序。
 
-**QQ 设置 `data/qq/settings.json`**：`currentPersonaId / currentPromptPresetId / globalWorldbookIds:[]`。
+**QQ 设置 `data/qq/settings.json`**：`currentPersonaId / currentPromptPresetId / globalWorldbookIds:[]`，以及 `world_info_*` 扫描深度、预算、递归、匹配和来源顺序设置。
 
 ## 前端约定
 
@@ -206,6 +222,7 @@ BunnyOS/
 - **存储管理**：设置 → 存储配置 → 缓存管理（IDB 图片库统计 + 清空 / 浏览器站点 caches 清空）；图床配置在同一页
 - **M8 对话框管理**：聊天页三个点面板"清空聊天记录 / 隐藏此聊天 / 删除聊天"三个操作；后端 `DELETE /api/qq/chats/:cid/messages` + chat 加 `hidden` 字段 `PATCH /api/qq/chats/:cid/hidden`；联系人列表过滤 `hidden`，顶栏"显示隐藏聊天"toggle；删除会级联清掉对应的 char-beauty/char-background
 - **分层总结记忆**：聊天页三个点把头像/头像框/气泡/背景收进默认折叠的“美化”，新增“总结”；默认每 100 层总结一次，第 101 层才触发。副 API 生成一张小总结卡写入指定总结世界书，未指定时自动新建“角色名的记忆”；旧层只从 prompt 隐藏，不删聊天记录。启用小总结满 5 张后询问是否生成大总结，用户阅览确认后保存并关闭对应 5 张小卡
+- **ST 风格上下文引擎**：预设相对顺序、聊天内 depth/order/role 注入、generation trigger、世界书关键词与递归预算、历史裁剪、Outlet 和 Prompt Itemization 响应均由独立 `modules/st-context/` 驱动
 - **社交与商品链接解析**（详见 `bunnyos/references/xhs-link-preview.md`）：除小红书/抖音/微信公众号/微博外，识别淘宝、闲鱼、拼多多商品短链，追踪真实商品 URL，尽量提取标题、价格和主图并渲染商品卡；平台限制匿名抓取时使用分享文案/链接参数兜底，不伪造缺失字段。最近一张封面本地缓存后作为多模态附件发给 AI，6 组 user-char 对话后衰减为短标签
 
 ### 下一步

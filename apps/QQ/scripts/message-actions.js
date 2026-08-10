@@ -225,14 +225,25 @@ function parseFrontendXhsFromHtml(html, baseUrl) {
     return null;
 }
 
-let isGenerating = false;
-let abortController = null;
+// 每个角色独立一个生成任务。切换聊天不会中止其他角色的请求。
+const generationTasks = new Map();
+
+function activeGenerationTask(characterId = state.activeChatId) {
+    return characterId ? generationTasks.get(characterId) || null : null;
+}
+
+function syncActiveGenerationUi() {
+    const running = Boolean(activeGenerationTask());
+    setSendButtonAborting(running);
+    setTyping(running);
+}
 
 async function generateReply(e) {
     e.preventDefault();
     // 生成中点击 = 停止
-    if (isGenerating) {
-        abortController?.abort();
+    const runningTask = activeGenerationTask();
+    if (runningTask) {
+        runningTask.controller.abort();
         return;
     }
     const input = $('#chat-input');
@@ -254,7 +265,10 @@ async function generateReply(e) {
 
 // 重新生成：从选中的「对方」消息起截断，再基于前文重新请求
 async function regenerateReplyAt(idx) {
-    if (isGenerating) return;
+    if (activeGenerationTask()) {
+        toast('这个对话正在生成中');
+        return;
+    }
     const chat = state.chats.find(item => item.characterId === state.activeChatId);
     if (!chat || !chat.messages?.length) return;
     const msg = chat.messages[idx];
@@ -307,6 +321,17 @@ async function sendSystemMessage() {
 }
 
 // AI 代回：以 user 视角拟一段回复，仅填入输入框，不发送
+function rememberContextItemization(data) {
+    if (!data?.context_itemization) return;
+    try {
+        localStorage.setItem('bunnyos:last-context-itemization', JSON.stringify({
+            ...data.context_itemization,
+            warnings: data.context_warnings || [],
+            savedAt: Date.now()
+        }));
+    } catch { /* 诊断信息写入失败不影响聊天 */ }
+}
+
 async function requestImpersonateReply() {
     const chat = state.chats.find(item => item.characterId === state.activeChatId);
     if (!state.activeChatId || !chat) {
@@ -325,6 +350,7 @@ async function requestImpersonateReply() {
             body: JSON.stringify({ characterId: chat.characterId, messages: chat.messages || [], chatType: 'private' })
         });
         const data = await readApiResponse(res);
+        rememberContextItemization(data);
         if (!res.ok) {
             await showBackendError(`代回失败 (HTTP ${res.status})`, data, res);
             return;
@@ -354,22 +380,23 @@ async function requestImpersonateReply() {
 
 // 共用：把当前聊天历史发给模型，拿回复逐条显示
 async function requestAssistantReply(chat) {
-    isGenerating = true;
-    abortController = new AbortController();
-    setSendButtonAborting(true);
-    setTyping(true);
+    if (!chat?.characterId || generationTasks.has(chat.characterId)) return;
+    const task = { controller: new AbortController(), startedAt: Date.now(), kind: 'reply' };
+    generationTasks.set(chat.characterId, task);
+    syncActiveGenerationUi();
     let summaryResult = null;
     try {
-        summaryResult = await maybeRunLayerSummary(chat, abortController.signal);
+        summaryResult = await maybeRunLayerSummary(chat, task.controller.signal);
         if (summaryResult?.failed) return;
         const { messages: requestMessages, imageIds: sentImageIds } = await prepareMessagesForReply(chat.messages);
         const res = await fetch('/api/qq/reply', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ characterId: chat.characterId, messages: requestMessages, chatType: 'private' }),
-            signal: abortController.signal,
+            signal: task.controller.signal,
         });
         const data = await readApiResponse(res);
+        rememberContextItemization(data);
         if (!res.ok) {
             await showBackendError(`生成失败 (HTTP ${res.status})`, data, res);
             return;
@@ -385,7 +412,7 @@ async function requestAssistantReply(chat) {
         consumeImageAttachments(chat, sentImageIds);
         await appendAssistantReplySegments(chat, segments);
         notifyParent('success', chat, segments[0] || '');
-        if (summaryResult?.needsBigSummary) {
+        if (summaryResult?.needsBigSummary && state.activeChatId === chat.characterId) {
             setTimeout(() => offerBigSummary(chat.characterId), 250);
         }
     } catch (err) {
@@ -403,10 +430,8 @@ async function requestAssistantReply(chat) {
             notifyParent('fail', chat, '网络错误');
         }
     } finally {
-        isGenerating = false;
-        abortController = null;
-        setSendButtonAborting(false);
-        setTyping(false);
+        if (generationTasks.get(chat.characterId) === task) generationTasks.delete(chat.characterId);
+        syncActiveGenerationUi();
     }
 }
 
@@ -484,7 +509,8 @@ function notifyParent(kind, chat, snippet) {
             characterId: chat.characterId,
             characterName: char?.name || '',
             avatar: char?.avatar || '',
-            snippet: String(snippet || '').slice(0, 80)
+            snippet: String(snippet || '').slice(0, 80),
+            forceBanner: chat.characterId !== state.activeChatId
         };
         window.parent?.postMessage(payload, '*');
     } catch (err) {
@@ -506,41 +532,6 @@ async function readApiResponse(response) {
             detail: rawText.slice(0, 12000),
             timestamp: new Date().toISOString(),
         };
-    }
-}
-
-async function maybeRunLayerSummary(chat, signal) {
-    try {
-        const res = await fetch('/api/qq/summarize', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ characterId: chat.characterId }),
-            signal,
-        });
-        const data = await readApiResponse(res);
-        if (!res.ok) {
-            await showBackendError(`自动总结失败 (HTTP ${res.status})`, data, res);
-            return { failed: true };
-        }
-        if (!data.triggered) return data;
-        const archived = new Set(Array.isArray(data.archivedMessageIndexes) ? data.archivedMessageIndexes : []);
-        (chat.messages || []).forEach((message, index) => {
-            if (archived.has(index)) message.summary_archived = true;
-        });
-        const character = state.characters.find(item => item.id === chat.characterId);
-        if (character && data.summaryWorldbookId) character.summaryWorldbookId = data.summaryWorldbookId;
-        toast(`已生成小总结，前 ${archived.size ? (data.entry?.sourceLayerCount || '') : ''} 层不再发送给 AI`);
-        return data;
-    } catch (error) {
-        if (error.name === 'AbortError') throw error;
-        await showBackendError('自动总结失败', {
-            error: error.message || '无法连接服务器',
-            error_code: error.name || 'CLIENT_NETWORK_ERROR',
-            error_type: 'client_network_error',
-            operation: 'summarize',
-            timestamp: new Date().toISOString(),
-        });
-        return { failed: true };
     }
 }
 
@@ -808,7 +799,10 @@ async function deleteMessage(idx) {
 }
 
 async function generateMessageVersion(idx) {
-    if (isGenerating) return;
+    if (activeGenerationTask()) {
+        toast('这个对话正在生成中');
+        return;
+    }
     const chat = state.chats.find(item => item.characterId === state.activeChatId);
     const msg = chat?.messages?.[idx];
     if (!chat || !msg || msg.role !== 'assistant') {
@@ -819,10 +813,9 @@ async function generateMessageVersion(idx) {
         toast('只能给最后一条角色回复生成新版本');
         return;
     }
-    isGenerating = true;
-    abortController = new AbortController();
-    setSendButtonAborting(true);
-    setTyping(true);
+    const task = { controller: new AbortController(), startedAt: Date.now(), kind: 'version' };
+    generationTasks.set(chat.characterId, task);
+    syncActiveGenerationUi();
     try {
         const group = getReplyGroup(chat, idx);
         const rawContext = chat.messages.slice(0, group.start);
@@ -831,10 +824,11 @@ async function generateMessageVersion(idx) {
         const res = await fetch('/api/qq/reply', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ characterId: chat.characterId, messages: context, chatType: 'private' }),
-            signal: abortController.signal,
+            body: JSON.stringify({ characterId: chat.characterId, messages: context, chatType: 'private', generationType: 'regenerate' }),
+            signal: task.controller.signal,
         });
         const data = await readApiResponse(res);
+        rememberContextItemization(data);
         if (!res.ok) {
             await showBackendError(`生成失败 (HTTP ${res.status})`, data, res);
             return;
@@ -868,10 +862,8 @@ async function generateMessageVersion(idx) {
             });
         }
     } finally {
-        isGenerating = false;
-        abortController = null;
-        setSendButtonAborting(false);
-        setTyping(false);
+        if (generationTasks.get(chat.characterId) === task) generationTasks.delete(chat.characterId);
+        syncActiveGenerationUi();
     }
 }
 

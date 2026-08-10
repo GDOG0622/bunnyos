@@ -58,9 +58,9 @@
 
     // 来自 iframe（QQ）的前台通知：横幅 + 铃声。OS 系统通知由 SW + Web Push 负责
     window.bunnyosNotify = function (data) {
-        const { kind, characterId, characterName, snippet, avatar, sourceAppId } = data || {};
+        const { kind, characterId, characterName, snippet, avatar, sourceAppId, forceBanner } = data || {};
         playSound(kind);
-        if (!isAppVisible(sourceAppId)) {
+        if (forceBanner || !isAppVisible(sourceAppId)) {
             showBanner({ appId: sourceAppId, characterId, characterName, snippet, avatar, kind });
         }
     };

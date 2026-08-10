@@ -57,6 +57,21 @@
             <div class="wb-global-label">全局世界书</div>
             <div class="wb-chips" id="wb-global-chips"></div>
         </div>
+        <details class="wb-engine-settings">
+            <summary>世界书扫描设置</summary>
+            <div class="field-grid">
+                <label><span>扫描消息数</span><input type="number" id="wi-depth" min="0" value="2"></label>
+                <label><span>预算占上下文 %</span><input type="number" id="wi-budget" min="0" max="100" value="25"></label>
+                <label><span>预算硬上限 token</span><input type="number" id="wi-budget-cap" min="0" value="0"></label>
+                <label><span>最大递归轮数（0 不限）</span><input type="number" id="wi-recursion-steps" min="0" value="0"></label>
+                <label><span>角色/全局顺序</span><select id="wi-strategy"><option value="1">角色优先</option><option value="0">均匀混排</option><option value="2">全局优先</option></select></label>
+            </div>
+            <div class="switch-row worldbook-switches">
+                <label><input type="checkbox" id="wi-recursive"> 递归激活</label>
+                <label><input type="checkbox" id="wi-case-sensitive"> 默认区分大小写</label>
+                <label><input type="checkbox" id="wi-whole-words"> 默认全词匹配</label>
+            </div>
+        </details>
         <div class="wb-toolbar">
             <select id="wb-book-select" aria-label="选择世界书"></select>
             <div class="wb-actions">
@@ -118,6 +133,33 @@
             </details>
             <label class="field-label">内容</label>
             <textarea id="editor-content" placeholder="内容"></textarea>
+            <details class="worldbook-fields" id="worldbook-fields" open>
+                <summary>激活与插入（ST 兼容）</summary>
+                <label class="field-label">主关键词（逗号分隔；留空时须开启常驻）</label>
+                <input type="text" id="wb-entry-key" placeholder="关键词1, 关键词2">
+                <label class="field-label">次关键词（逗号分隔）</label>
+                <input type="text" id="wb-entry-keysecondary" placeholder="可选">
+                <div class="field-grid">
+                    <label><span>次关键词逻辑</span><select id="wb-entry-logic"><option value="0">AND ANY</option><option value="1">NOT ALL</option><option value="2">NOT ANY</option><option value="3">AND ALL</option></select></label>
+                    <label><span>插入位置</span><select id="wb-entry-position"><option value="0">角色定义前</option><option value="1">角色定义后</option><option value="2">作者注释顶部</option><option value="3">作者注释底部</option><option value="4">聊天深度</option><option value="5">示例顶部</option><option value="6">示例底部</option><option value="7">Outlet</option></select></label>
+                    <label><span>Order</span><input type="number" id="wb-entry-order" value="100"></label>
+                    <label><span>Depth</span><input type="number" id="wb-entry-depth" min="0" value="4"></label>
+                    <label><span>概率 %</span><input type="number" id="wb-entry-probability" min="0" max="100" value="100"></label>
+                    <label><span>扫描深度</span><input type="number" id="wb-entry-scan-depth" min="0" placeholder="全局设置"></label>
+                </div>
+                <label class="field-label">Outlet 名称</label>
+                <input type="text" id="wb-entry-outlet" placeholder="仅在位置为 Outlet 时使用">
+                <div class="switch-row worldbook-switches">
+                    <label><input type="checkbox" id="wb-entry-constant"> 常驻</label>
+                    <label><input type="checkbox" id="wb-entry-use-probability" checked> 使用概率</label>
+                    <label><input type="checkbox" id="wb-entry-case-sensitive"> 区分大小写</label>
+                    <label><input type="checkbox" id="wb-entry-whole-words"> 全词匹配</label>
+                    <label><input type="checkbox" id="wb-entry-exclude-recursion"> 不参与递归命中</label>
+                    <label><input type="checkbox" id="wb-entry-prevent-recursion"> 内容不触发下一轮递归</label>
+                </div>
+                <label class="field-label">触发类型（逗号分隔）</label>
+                <input type="text" id="wb-entry-triggers" placeholder="normal, regenerate, impersonate">
+            </details>
             <details class="advanced-fields">
                 <summary>高级字段</summary>
                 <div class="field-grid">

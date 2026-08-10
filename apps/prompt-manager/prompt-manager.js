@@ -10,6 +10,7 @@ const state = {
     dirty: false,
     // 世界书：本粒度
     worldbookBooks: [],
+    worldInfoSettings: {},
     currentBookId: '',
     qqGlobalWorldbookIds: [],
     markerPreviewCache: null,
@@ -129,7 +130,11 @@ function bindEvents() {
     $('#editor-delete').addEventListener('click', deleteCurrentEditorItem);
     ['editor-name', 'editor-identifier', 'editor-role', 'editor-content', 'editor-enabled', 'editor-marker',
         'editor-system-prompt', 'editor-injection-position', 'editor-injection-depth', 'editor-injection-order',
-        'editor-injection-trigger', 'editor-forbid-overrides'
+        'editor-injection-trigger', 'editor-forbid-overrides', 'wb-entry-key', 'wb-entry-keysecondary',
+        'wb-entry-logic', 'wb-entry-position', 'wb-entry-order', 'wb-entry-depth', 'wb-entry-probability',
+        'wb-entry-scan-depth', 'wb-entry-outlet', 'wb-entry-constant', 'wb-entry-use-probability',
+        'wb-entry-case-sensitive', 'wb-entry-whole-words', 'wb-entry-exclude-recursion',
+        'wb-entry-prevent-recursion', 'wb-entry-triggers'
     ].forEach(id => $(`#${id}`).addEventListener('input', scheduleEditorAutosave));
     $('#variable-template').addEventListener('input', renderVariablePreview);
     samplingFields.forEach(field => {
@@ -146,6 +151,8 @@ function bindEvents() {
     $('#wb-book-delete').addEventListener('click', deleteCurrentBook);
     $('#wb-import').addEventListener('click', () => $('#wb-import-file').click());
     $('#wb-import-file').addEventListener('change', handleStWorldbookImport);
+    ['wi-depth', 'wi-budget', 'wi-budget-cap', 'wi-recursion-steps', 'wi-strategy', 'wi-recursive', 'wi-case-sensitive', 'wi-whole-words']
+        .forEach(id => $(`#${id}`)?.addEventListener('input', scheduleWorldInfoSettingsSave));
     $('.wb-global').addEventListener('click', (event) => {
         if (event.target.closest('.wb-chip button')) return;
         openChipMenu($('.wb-global'));
@@ -896,7 +903,23 @@ function editorDraft() {
         injection_depth: numberOrString($('#editor-injection-depth').value),
         injection_order: numberOrString($('#editor-injection-order').value),
         injection_trigger: $('#editor-injection-trigger').value,
-        forbid_overrides: $('#editor-forbid-overrides').checked
+        forbid_overrides: $('#editor-forbid-overrides').checked,
+        key: $('#wb-entry-key').value.split(',').map(value => value.trim()).filter(Boolean),
+        keysecondary: $('#wb-entry-keysecondary').value.split(',').map(value => value.trim()).filter(Boolean),
+        selectiveLogic: Number($('#wb-entry-logic').value) || 0,
+        position: Number($('#wb-entry-position').value) || 0,
+        order: Number($('#wb-entry-order').value) || 100,
+        depth: Math.max(0, Number($('#wb-entry-depth').value) || 0),
+        probability: Math.max(0, Math.min(100, Number($('#wb-entry-probability').value) || 0)),
+        scanDepth: $('#wb-entry-scan-depth').value === '' ? null : Math.max(0, Number($('#wb-entry-scan-depth').value) || 0),
+        outletName: $('#wb-entry-outlet').value.trim(),
+        constant: $('#wb-entry-constant').checked,
+        useProbability: $('#wb-entry-use-probability').checked,
+        caseSensitive: $('#wb-entry-case-sensitive').checked,
+        matchWholeWords: $('#wb-entry-whole-words').checked,
+        excludeRecursion: $('#wb-entry-exclude-recursion').checked,
+        preventRecursion: $('#wb-entry-prevent-recursion').checked,
+        triggers: $('#wb-entry-triggers').value.split(',').map(value => value.trim()).filter(Boolean)
     };
 }
 
@@ -988,6 +1011,23 @@ function renderMarkerToggles() {
         btn.addEventListener('click', () => toggleMarkerExpansion(slot));
         wrap.appendChild(btn);
     });
+    const itemization = document.createElement('button');
+    itemization.type = 'button';
+    itemization.className = 'preview-marker-toggle';
+    itemization.textContent = '最近一次 Prompt Itemization';
+    itemization.addEventListener('click', showLastContextItemization);
+    wrap.appendChild(itemization);
+}
+
+function showLastContextItemization() {
+    let value = null;
+    try { value = JSON.parse(localStorage.getItem('bunnyos:last-context-itemization') || 'null'); } catch { value = null; }
+    if (!value) {
+        toast('还没有生成记录；先在 QQ 中完成一次回复');
+        return;
+    }
+    $('#preview-title').textContent = '最近一次 Prompt Itemization';
+    $('#assembly-preview').textContent = JSON.stringify(value, null, 2);
 }
 
 async function toggleMarkerExpansion(slot) {
@@ -1059,6 +1099,8 @@ async function loadWorldbooks() {
     }
     const globalData = globalRes.ok ? await globalRes.json() : { globalWorldbookIds: [] };
     state.qqGlobalWorldbookIds = (globalData.globalWorldbookIds || []).filter(id => state.worldbookBooks.some(book => book.id === id));
+    state.worldInfoSettings = globalData.worldInfoSettings || {};
+    fillWorldInfoSettings();
     renderWorldbookBookSelect();
     renderGlobalChips();
     renderWorldbookEntries();
@@ -1163,9 +1205,39 @@ async function saveGlobalChips() {
     await fetch('/api/qq/global-worldbooks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ globalWorldbookIds: state.qqGlobalWorldbookIds })
+        body: JSON.stringify({ globalWorldbookIds: state.qqGlobalWorldbookIds, worldInfoSettings: state.worldInfoSettings })
     });
     state.markerPreviewCache = null;
+}
+
+function fillWorldInfoSettings() {
+    const value = state.worldInfoSettings || {};
+    $('#wi-depth').value = value.world_info_depth ?? 2;
+    $('#wi-budget').value = value.world_info_budget ?? 25;
+    $('#wi-budget-cap').value = value.world_info_budget_cap ?? 0;
+    $('#wi-recursion-steps').value = value.world_info_max_recursion_steps ?? 0;
+    $('#wi-strategy').value = String(value.world_info_character_strategy ?? 1);
+    $('#wi-recursive').checked = value.world_info_recursive === true;
+    $('#wi-case-sensitive').checked = value.world_info_case_sensitive === true;
+    $('#wi-whole-words').checked = value.world_info_match_whole_words === true;
+}
+
+let worldInfoSettingsTimer = null;
+function scheduleWorldInfoSettingsSave() {
+    clearTimeout(worldInfoSettingsTimer);
+    worldInfoSettingsTimer = setTimeout(async () => {
+        state.worldInfoSettings = {
+            world_info_depth: Math.max(0, Number($('#wi-depth').value) || 0),
+            world_info_budget: Math.max(0, Math.min(100, Number($('#wi-budget').value) || 0)),
+            world_info_budget_cap: Math.max(0, Number($('#wi-budget-cap').value) || 0),
+            world_info_max_recursion_steps: Math.max(0, Number($('#wi-recursion-steps').value) || 0),
+            world_info_character_strategy: Number($('#wi-strategy').value) || 0,
+            world_info_recursive: $('#wi-recursive').checked,
+            world_info_case_sensitive: $('#wi-case-sensitive').checked,
+            world_info_match_whole_words: $('#wi-whole-words').checked
+        };
+        await saveGlobalChips();
+    }, 300);
 }
 
 function renderWorldbookMeta() {
@@ -1220,6 +1292,7 @@ function renderWorldbookEntries() {
         `;
         row.querySelector('.prompt-toggle input')?.addEventListener('change', event => {
             entry.enabled = event.target.checked;
+            entry.disable = !event.target.checked;
             book.updated_at = Date.now();
             saveWorldbooks();
             renderWorldbookMeta();
@@ -1250,7 +1323,7 @@ function openWorldbookEditor(entryId = '') {
     state.editingId = entryId || newId();
     let entry = (book.entries || []).find(item => item.id === state.editingId);
     if (!entry) {
-        entry = { id: state.editingId, name: '', content: '', enabled: true };
+        entry = { id: state.editingId, name: '', content: '', enabled: true, constant: true, key: [], keysecondary: [], position: 1, order: 100, depth: 4, probability: 100, useProbability: true };
         book.entries = Array.isArray(book.entries) ? book.entries : [];
         book.entries.unshift(entry);
     }
@@ -1264,6 +1337,22 @@ function openWorldbookEditor(entryId = '') {
     $('#editor-enabled').checked = entry.enabled !== false;
     $('#editor-marker').checked = false;
     $('#editor-system-prompt').checked = false;
+    $('#wb-entry-key').value = Array.isArray(entry.key) ? entry.key.join(', ') : '';
+    $('#wb-entry-keysecondary').value = Array.isArray(entry.keysecondary) ? entry.keysecondary.join(', ') : '';
+    $('#wb-entry-logic').value = String(entry.selectiveLogic ?? 0);
+    $('#wb-entry-position').value = String(entry.position ?? 1);
+    $('#wb-entry-order').value = entry.order ?? 100;
+    $('#wb-entry-depth').value = entry.depth ?? 4;
+    $('#wb-entry-probability').value = entry.probability ?? 100;
+    $('#wb-entry-scan-depth').value = entry.scanDepth ?? '';
+    $('#wb-entry-outlet').value = entry.outletName || '';
+    $('#wb-entry-constant').checked = entry.constant === true || (!Object.prototype.hasOwnProperty.call(entry, 'key') && !Object.prototype.hasOwnProperty.call(entry, 'position'));
+    $('#wb-entry-use-probability').checked = entry.useProbability !== false;
+    $('#wb-entry-case-sensitive').checked = entry.caseSensitive === true;
+    $('#wb-entry-whole-words').checked = entry.matchWholeWords === true;
+    $('#wb-entry-exclude-recursion').checked = entry.excludeRecursion === true;
+    $('#wb-entry-prevent-recursion').checked = entry.preventRecursion === true;
+    $('#wb-entry-triggers').value = Array.isArray(entry.triggers) ? entry.triggers.join(', ') : '';
     state.snapshot = JSON.stringify(editorDraft());
     $('#editor-modal').classList.remove('hidden');
     notifyNavState();
@@ -1278,6 +1367,24 @@ function saveWorldbookDraft(draft) {
     entry.name = draft.name || '未命名';
     entry.content = draft.content;
     entry.enabled = draft.enabled !== false;
+    entry.disable = draft.enabled === false;
+    entry.key = draft.key;
+    entry.keysecondary = draft.keysecondary;
+    entry.selective = draft.keysecondary.length > 0;
+    entry.selectiveLogic = draft.selectiveLogic;
+    entry.position = draft.position;
+    entry.order = draft.order;
+    entry.depth = draft.depth;
+    entry.probability = draft.probability;
+    entry.scanDepth = draft.scanDepth;
+    entry.outletName = draft.outletName;
+    entry.constant = draft.constant;
+    entry.useProbability = draft.useProbability;
+    entry.caseSensitive = draft.caseSensitive;
+    entry.matchWholeWords = draft.matchWholeWords;
+    entry.excludeRecursion = draft.excludeRecursion;
+    entry.preventRecursion = draft.preventRecursion;
+    entry.triggers = draft.triggers;
     book.updated_at = Date.now();
     saveWorldbooks();
     renderWorldbookEntries();

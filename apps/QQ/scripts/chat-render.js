@@ -65,6 +65,7 @@ function renderActiveChat(options = {}) {
     if (!chat || !character) return;
 
     $('#chat-title').textContent = character.name || '未命名';
+    if (typeof syncActiveGenerationUi === 'function') syncActiveGenerationUi();
     // 套用该 char 的美化：头像对 + 头像框（applyCharBeauty 完成后会 refreshMessageAvatars 把已渲染头像 src 换掉）
     applyCharBeauty(character.id);
     const statusEl = $('#chat-status');

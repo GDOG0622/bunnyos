@@ -6,6 +6,10 @@ const https = require('https');
 const crypto = require('crypto');
 const webpush = require('web-push');
 const { spawn } = require('child_process');
+const { createQqSummaryFeature } = require('./modules/qq-summary');
+const { buildStContext } = require('./modules/st-context');
+const { createModelTokenCounter } = require('./modules/st-context/tokenizer');
+const { createPortableBackupFeature } = require('./modules/portable-backup');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -24,6 +28,45 @@ app.use('/api', (req, res, next) => {
     res.setHeader('Expires', '0');
     res.setHeader('Surrogate-Control', 'no-store');
     next();
+});
+
+app.get('/api/tokenizers/status', async (req, res) => {
+    try {
+        const settings = readJsonFile(SETTINGS_FILE, {});
+        const requestedModel = String(req.query.model || settings.mainApi_model || '');
+        const tokenizer = await createModelTokenCounter({ model: requestedModel });
+        res.json({
+            requestedModel,
+            family: tokenizer.family,
+            resolvedModel: tokenizer.resolvedModel,
+            exact: tokenizer.exact,
+            fallbackReason: tokenizer.fallbackReason || ''
+        });
+    } catch (error) {
+        res.status(500).json({ error: error?.message || 'tokenizer 加载失败' });
+    }
+});
+
+app.post('/api/tokenizers/openai/count', async (req, res) => {
+    try {
+        const settings = readJsonFile(SETTINGS_FILE, {});
+        const requestedModel = String(req.query.model || settings.mainApi_model || '');
+        const tokenizer = await createModelTokenCounter({ model: requestedModel });
+        const messages = Array.isArray(req.body) ? req.body : [req.body || {}];
+        const tokenCount = 3 + messages.reduce((sum, message) => sum + Math.max(0, Number(tokenizer.messageCounter(message)) || 0), 0);
+        res.json({
+            token_count: tokenCount,
+            tokenizer: {
+                requestedModel,
+                family: tokenizer.family,
+                resolvedModel: tokenizer.resolvedModel,
+                exact: tokenizer.exact,
+                fallbackReason: tokenizer.fallbackReason || ''
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ error: error?.message || 'token 计算失败' });
+    }
 });
 
 const settingsEventClients = new Set();
@@ -187,6 +230,7 @@ ensureFileExist(WALLET_FILE, { balance: WALLET_INITIAL_BALANCE, updated_at: Date
 ensureFileExist(QQ_BEAUTIES_FILE, defaultBeautiesData());
 ensureFileExist(QQ_CHAR_BEAUTY_FILE, {});
 fs.mkdirSync(QQ_BEAUTY_BG_DIR, { recursive: true });
+createPortableBackupFeature({ app, rootDir: __dirname });
 // 兜底：若文件存在但缺类目或缺 default 项，补齐
 {
     const cur = readJsonFile(QQ_BEAUTIES_FILE, {});
@@ -614,6 +658,19 @@ function buildWorldbooksContent(bookIds, wrapTag) {
     return `<${wrapTag}>\n${blocks.join('\n\n')}\n</${wrapTag}>`;
 }
 
+function getQqWorldbookGroups(character) {
+    const books = readWorldbooks();
+    const bookMap = new Map(books.map(book => [book.id, book]));
+    const qqSettings = readJsonFile(QQ_SETTINGS_FILE, {});
+    const summaryId = String(character?.summaryWorldbookId || '');
+    const pick = ids => [...new Set(Array.isArray(ids) ? ids : [])].map(id => bookMap.get(id)).filter(Boolean);
+    return {
+        character: pick((character?.worldbookIds || []).filter(id => String(id) !== summaryId)),
+        global: pick((qqSettings.globalWorldbookIds || []).filter(id => String(id) !== summaryId)),
+        memory: summaryId && bookMap.has(summaryId) ? [bookMap.get(summaryId)] : []
+    };
+}
+
 function importStWorldbookData(stData, fallbackName) {
     const entriesSrc = stData?.entries;
     const list = [];
@@ -621,10 +678,23 @@ function importStWorldbookData(stData, fallbackName) {
         if (!e || typeof e !== 'object') return;
         const name = e.comment || e.name || (Array.isArray(e.key) ? e.key[0] : '') || '未命名条目';
         list.push({
+            ...e,
             id: `e_${shortId()}`,
+            uid: e.uid ?? e.id,
             name: String(name),
             content: String(e.content || ''),
-            enabled: e.enabled !== false
+            enabled: e.enabled !== false && e.disable !== true,
+            disable: e.enabled === false || e.disable === true,
+            key: Array.isArray(e.key) ? e.key : (Array.isArray(e.keys) ? e.keys : []),
+            keysecondary: Array.isArray(e.keysecondary) ? e.keysecondary : (Array.isArray(e.secondary_keys) ? e.secondary_keys : []),
+            constant: e.constant === true,
+            position: e.position === 'before_char' ? 0 : e.position === 'after_char' ? 1 : (e.position ?? e.extensions?.position ?? 1),
+            order: e.order ?? e.insertion_order ?? 100,
+            depth: e.depth ?? e.extensions?.depth ?? 4,
+            probability: e.probability ?? e.extensions?.probability ?? 100,
+            useProbability: e.useProbability ?? e.extensions?.useProbability ?? true,
+            selectiveLogic: e.selectiveLogic ?? e.extensions?.selectiveLogic ?? 0,
+            triggers: e.triggers ?? e.extensions?.triggers ?? []
         });
     };
     if (Array.isArray(entriesSrc)) entriesSrc.forEach(collect);
@@ -737,53 +807,49 @@ function getCurrentQqPromptPresetId() {
     return fallbackId;
 }
 
-function buildQqPresetPrompt(character, variables, userPersona, history = [], chatType = 'private') {
+async function buildQqPresetPrompt(character, variables, userPersona, history = [], chatType = 'private', options = {}) {
     const presetId = getCurrentQqPromptPresetId();
     const preset = presetId ? readJsonFile(stPresetFile(presetId), null) : null;
     if (!isSillyTavernPreset(preset)) return null;
 
-    const promptMap = new Map(preset.prompts.map(prompt => [prompt.identifier, prompt]));
-    const order = Array.isArray(preset.prompt_order?.[0]?.order) ? preset.prompt_order[0].order : [];
-    const messages = [];
-    let includesChatHistory = false;
-
-    const pushBlock = (role, body) => {
-        const text = String(body || '').trim();
-        if (!text) return;
-        const safeRole = role === 'user' || role === 'assistant' ? role : 'system';
-        const last = messages[messages.length - 1];
-        // 合并相邻同角色块，避免 API 把它们当多轮
-        if (last && last.role === safeRole && typeof last.content === 'string') {
-            last.content += `\n\n${text}`;
-        } else {
-            messages.push({ role: safeRole, content: text });
+    const qqSettings = readJsonFile(QQ_SETTINGS_FILE, {});
+    const responseTokens = Math.min(Math.max(parseInt(options.responseTokens ?? preset.openai_max_tokens, 10) || 2048, 1), 200000);
+    const contextTokens = Math.min(Math.max(parseInt(options.contextTokens, 10) || 8192, 1), 200000);
+    const rawRules = String(character?.rp_rules || character?.personality || '').trim();
+    const additionalInChat = rawRules ? [{
+        identifier: 'characterDepthPrompt',
+        role: 'system',
+        content: renderPromptTemplate(rawRules, variables),
+        injection_depth: Math.max(0, parseInt(character?.rp_rules_depth, 10) || 0),
+        injection_order: 100
+    }] : [];
+    const configuredModel = String(options.model || readJsonFile(SETTINGS_FILE, {}).mainApi_model || '');
+    const tokenizer = await createModelTokenCounter({ model: configuredModel });
+    const built = buildStContext({
+        preset,
+        character,
+        persona: userPersona,
+        history,
+        books: getQqWorldbookGroups(character),
+        generationType: options.generationType || 'normal',
+        contextTokens,
+        responseTokens,
+        worldInfoSettings: { ...qqSettings, ...preset },
+        render: value => renderPromptTemplate(value, variables),
+        resolveBuiltin: identifier => buildBuiltinPromptContent(identifier, character, userPersona, variables, chatType),
+        pinExamples: preset.pin_examples === true,
+        additionalInChat,
+        tokenCounter: tokenizer.messageCounter,
+        textTokenCounter: tokenizer.textCounter,
+        tokenizerInfo: {
+            family: tokenizer.family,
+            requestedModel: tokenizer.requestedModel,
+            resolvedModel: tokenizer.resolvedModel,
+            exact: tokenizer.exact,
+            fallbackReason: tokenizer.fallbackReason
         }
-    };
-
-    for (const entry of order) {
-        if (!entry?.enabled) continue;
-        const prompt = promptMap.get(entry.identifier);
-        if (!prompt) continue;
-
-        // 聊天记录 marker 单独展开为真实的多条 user/assistant 消息
-        if (prompt.marker && prompt.identifier === 'chatHistory') {
-            includesChatHistory = true;
-            for (const msg of history) messages.push(msg);
-            continue;
-        }
-
-        const rawContent = prompt.marker
-            ? buildBuiltinPromptContent(prompt.identifier, character, userPersona, variables, chatType)
-            : prompt.content || '';
-        const body = renderPromptTemplate(rawContent, variables).trim();
-        if (!body) continue;
-        pushBlock(prompt.role, body);
-    }
-
-    // RP 规则不再硬追加：char_rp_rules 已通过 CHAR 人设 marker 注入，
-    // 若想强化为"尾部约束"，应在预设里自行加一条引用 {{char_rp_rules}} 的尾部条目。
-
-    return { messages, includesChatHistory, presetId };
+    });
+    return { ...built, presetId, includesChatHistory: true };
 }
 
 function savePersonaAvatar(id, name, dataUrl, oldAvatar = '') {
@@ -1346,28 +1412,37 @@ function promptMessagesToText(messages = []) {
 }
 
 // GET /api/qq/chat-tokens/:characterId：把当前 char 的最新 prompt（system + 历史）拼起来估算 token
-app.get('/api/qq/chat-tokens/:characterId', (req, res) => {
+app.get('/api/qq/chat-tokens/:characterId', async (req, res) => {
     try {
         const characterId = req.params.characterId;
         const character = readJsonFile(path.join(CHARACTERS_DIR, `${cleanName(characterId)}.json`), null);
         if (!character) return res.status(404).json({ error: '未找到角色' });
         const chatFile = path.join(CHATS_DIR, `${characterId}.json`);
         const chatRaw = readJsonFile(chatFile, { messages: [] });
-        const list = Array.isArray(chatRaw?.messages)
-            ? chatRaw.messages.filter(message => message?.summary_archived !== true)
-            : [];
+        const list = qqSummaryFeature.filterPromptMessages(chatRaw?.messages);
         const userPersona = getCurrentUserPersona();
         const variables = buildPromptVariables({ characterId, userName: userPersona?.name || '', messages: list });
         const history = list
-            .map((m, idx) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: qqMessageToPromptText(list, idx) }))
+            .map((m, idx) => ({ role: qqMessageToPromptRole(m), content: qqMessageToPromptText(list, idx) }))
             .filter(m => m.content);
-        const enriched = injectCharRulesAtDepth(history, character, variables);
-        const presetPrompt = buildQqPresetPrompt(character, variables, userPersona, enriched, 'private');
+        const settings = readJsonFile(SETTINGS_FILE, {});
+        const presetId = getCurrentQqPromptPresetId();
+        const presetRaw = presetId ? readJsonFile(stPresetFile(presetId), null) : null;
+        const responseTokens = Math.min(Math.max(parseInt(presetRaw?.openai_max_tokens, 10) || 2048, 1), 200000);
+        const contextTokens = Math.min(Math.max(parseInt(settings.mainApi_context, 10) || 8192, 1), 200000);
+        const presetPrompt = await buildQqPresetPrompt(character, variables, userPersona, history, 'private', { contextTokens, responseTokens, model: settings.mainApi_model });
         const messages = presetPrompt
-            ? (presetPrompt.includesChatHistory ? presetPrompt.messages : [...presetPrompt.messages, ...enriched])
-            : [{ role: 'system', content: buildCharacterSystemPrompt(character, variables, userPersona) }, ...enriched];
+            ? presetPrompt.messages
+            : [{ role: 'system', content: buildCharacterSystemPrompt(character, variables, userPersona) }, ...history];
         const promptText = promptMessagesToText(messages);
-        res.json({ tokens: estimateTokens(promptText), messageCount: messages.length, chars: promptText.length, promptText });
+        res.json({
+            tokens: presetPrompt?.itemization?.estimatedPromptTokens ?? estimateTokens(promptText),
+            messageCount: messages.length,
+            chars: promptText.length,
+            promptText,
+            tokenizer: presetPrompt?.itemization?.tokenizer || null,
+            context_itemization: presetPrompt?.itemization || null
+        });
     } catch (e) {
         console.error('[CHAT-TOKENS]', e);
         res.status(500).json({ error: 'token 估算失败' });
@@ -3089,7 +3164,19 @@ app.get('/api/qq/global-worldbooks', (req, res) => {
     try {
         const qqSettings = readJsonFile(QQ_SETTINGS_FILE, {});
         const ids = Array.isArray(qqSettings.globalWorldbookIds) ? qqSettings.globalWorldbookIds : [];
-        res.json({ globalWorldbookIds: ids });
+        res.json({
+            globalWorldbookIds: ids,
+            worldInfoSettings: {
+                world_info_depth: qqSettings.world_info_depth ?? 2,
+                world_info_budget: qqSettings.world_info_budget ?? 25,
+                world_info_budget_cap: qqSettings.world_info_budget_cap ?? 0,
+                world_info_recursive: qqSettings.world_info_recursive ?? false,
+                world_info_max_recursion_steps: qqSettings.world_info_max_recursion_steps ?? 0,
+                world_info_case_sensitive: qqSettings.world_info_case_sensitive ?? false,
+                world_info_match_whole_words: qqSettings.world_info_match_whole_words ?? false,
+                world_info_character_strategy: qqSettings.world_info_character_strategy ?? 1
+            }
+        });
     } catch (e) {
         res.status(500).json({ error: '读取 QQ 全局世界书失败' });
     }
@@ -3099,7 +3186,10 @@ app.post('/api/qq/global-worldbooks', (req, res) => {
     try {
         const ids = Array.isArray(req.body?.globalWorldbookIds) ? req.body.globalWorldbookIds : [];
         const qqSettings = readJsonFile(QQ_SETTINGS_FILE, {});
-        writeJsonFile(QQ_SETTINGS_FILE, { ...qqSettings, globalWorldbookIds: ids });
+        const incoming = req.body?.worldInfoSettings && typeof req.body.worldInfoSettings === 'object' ? req.body.worldInfoSettings : {};
+        const allowed = ['world_info_depth', 'world_info_budget', 'world_info_budget_cap', 'world_info_recursive', 'world_info_max_recursion_steps', 'world_info_case_sensitive', 'world_info_match_whole_words', 'world_info_character_strategy'];
+        const worldInfoSettings = Object.fromEntries(allowed.filter(key => Object.prototype.hasOwnProperty.call(incoming, key)).map(key => [key, incoming[key]]));
+        writeJsonFile(QQ_SETTINGS_FILE, { ...qqSettings, ...worldInfoSettings, globalWorldbookIds: ids });
         res.json({ success: true });
     } catch (e) {
         res.status(500).json({ error: '保存 QQ 全局世界书失败' });
@@ -3398,372 +3488,12 @@ app.put('/api/qq/characters/:id', (req, res) => {
     }
 });
 
-// ========== QQ 分层总结 / 记忆世界书 ==========
-const DEFAULT_SUMMARY_LAYER_THRESHOLD = 100;
-const SUMMARY_BATCH_CARD_COUNT = 5;
-const SUMMARY_PROMPT = `你是一个善于总结的总结助手。你的任务是模拟人类的记忆机制，对记忆进行分层处理，不带任何评判地客观地总结你读到的所有内容。
-
-## 通用规则：
-- 只描述具体行为和场景的变化，禁止使用性格评价词（如占有欲、强势、支柱、保护者、温柔、理性等抽象形容词）。例如不要写“表现出强势的占有欲”，而要写“在xx场合下做了xx事，说了xx话”。
-- 每个部分精简概括但又能让人回想起当时的情景，不应提及日常琐事。对于做爱场景应以一句“发生性关系”带过，不详细复述过程。
-- 去AI味，不可使用AI常用词汇；禁止使用极端词汇，保持用词保守客观。
-- 尽量使用中国现当代文学的文学性语言表达。
-
-## 总结要求
-### 1. 内容提取要求
-- 仔细识别和提取上下文中的所有重要事件、对话、决定、承诺和关键信息。
-- 按时间顺序整理所有事件。
-- 对于每个事件，提供简洁但信息完整的描述。
-- 保留严肃的立场发言、高光对话、尚未完成的约定，以及其他可能影响后续剧情的关键对话。
-- 对于做爱过程用“发生性关系”概括即可。
-
-### 2. 用户和角色识别
-- 准确识别<user>（用户）和<char>（角色）。
-- 如果上下文中有多个角色，明确区分主要角色。
-- 确定当前总结的时间段范围。
-
-## 输出格式要求
-严格按照以下模板输出：
-<summary>
-Title:小总结：<user>【<char>】:\${当前总结时间段}
-· YYYY-MM-DD：{150字记录这一天发生的事，需要包括地点/场景、所包含人物、事件来龙去脉。需尽量具体不可一概而过。}
-
-**讨论过的话题：**
-· YYYY-MM-DD：{150字以内记录聊的话题，包括双方观点和最终讨论结果。如没有，则空}
-
-**高光对白：**
-· \${<char>or<user>}: \${记录下比较touching或者承诺的话。或能体现说话者立场的话。如没有，则空}
-
-**关于{{user}}的小事：**
-· \${提炼在这段时间内，<char>发现的关于<user>的具体小事。只记录可在日后对话中用到的规律性行为、事件或较大生活变化；禁止记录模糊评价以及人设中已经包含的内容。}
-
-</summary>
-
-## 质量标准
-1. 完整性：确保所有重要事件都被记录。
-2. 准确性：时间、人物、事件描述准确无误。
-3. 简洁性：描述简洁但信息充分。
-4. 逻辑性：事件按时间顺序合理排列。
-5. 一致性：格式严格遵循模板要求。
-6. 去AI常用词：整体不可看出AI味。`;
-
-function clampSummaryThreshold(value) {
-    const parsed = parseInt(value, 10);
-    return Number.isFinite(parsed) ? Math.max(1, Math.min(parsed, 5000)) : DEFAULT_SUMMARY_LAYER_THRESHOLD;
-}
-
-function qqSummaryLayers(messages) {
-    const list = Array.isArray(messages) ? messages : [];
-    const layers = [];
-    let previousRole = '';
-    let previousAssistantGroup = '';
-    let current = null;
-    for (let index = 0; index < list.length; index++) {
-        const message = list[index];
-        if (message?.summary_archived === true) continue;
-        if (message?.type === 'system') {
-            if (current) current.indices.push(index);
-            continue;
-        }
-        const role = message?.role === 'assistant' ? 'assistant' : 'user';
-        const assistantGroup = role === 'assistant' ? String(message?.reply_group_id || '') : '';
-        const assistantBoundary = role === 'assistant'
-            && previousRole === 'assistant'
-            && assistantGroup !== previousAssistantGroup
-            && Boolean(assistantGroup || previousAssistantGroup);
-        if (!current || role !== previousRole || assistantBoundary) {
-            current = { role, indices: [] };
-            layers.push(current);
-        }
-        current.indices.push(index);
-        previousRole = role;
-        previousAssistantGroup = assistantGroup;
-    }
-    return layers;
-}
-
-function summaryDateLabel(timestamp) {
-    const date = Number(timestamp);
-    if (!Number.isFinite(date)) return '时间未知';
-    return new Intl.DateTimeFormat('zh-CN', {
-        timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
-        hour: '2-digit', minute: '2-digit', hour12: false
-    }).format(new Date(date)).replaceAll('/', '-');
-}
-
-function summaryContextText(messages, layers, character, userPersona) {
-    const userName = userPersona?.name || 'user';
-    const charName = character?.name || 'char';
-    const indexes = layers.flatMap(layer => layer.indices).sort((a, b) => a - b);
-    return indexes.map(index => {
-        const message = messages[index];
-        const speaker = message?.role === 'assistant' ? charName : userName;
-        return `[${summaryDateLabel(message?.created_at)}] ${speaker}: ${qqMessageToPromptText(messages, index)}`;
-    }).join('\n');
-}
-
-function summaryApiConfig(settings) {
-    const selected = String(settings.subApi_config || '');
-    const saved = settings.apiConfigs?.[selected] || {};
-    return {
-        apiUrl: String(settings.subApi_url || saved.url || '').trim(),
-        apiKey: String(settings.subApi_key || saved.key || '').trim(),
-        model: String(settings.subApi_model || saved.model || '').trim(),
-        temperature: Number.isFinite(parseFloat(settings.subApi_temperature)) ? parseFloat(settings.subApi_temperature) : 0.7,
-        top_p: Number.isFinite(parseFloat(settings.subApi_topP)) ? parseFloat(settings.subApi_topP) : 1,
-        frequency_penalty: Number.isFinite(parseFloat(settings.subApi_frequencyPenalty)) ? parseFloat(settings.subApi_frequencyPenalty) : 0,
-        presence_penalty: Number.isFinite(parseFloat(settings.subApi_presencePenalty)) ? parseFloat(settings.subApi_presencePenalty) : 0,
-        max_tokens: Math.max(1, Math.min(parseInt(settings.subApi_maxReply, 10) || 2048, 200000)),
-    };
-}
-
-async function requestSummaryFromSecondaryApi(context, instruction = '') {
-    const settings = readJsonFile(SETTINGS_FILE, {});
-    const config = summaryApiConfig(settings);
-    if (!config.apiUrl || !config.apiKey || !config.model) {
-        const error = new Error('请先在“设置 → 副 API”中选择并应用 API 配置');
-        error.status = 400;
-        error.payload = {
-            error: error.message, error_code: 'SUB_API_NOT_CONFIGURED',
-            error_type: 'configuration_error', operation: 'summarize'
-        };
-        throw error;
-    }
-    const endpoint = config.apiUrl.endsWith('/chat/completions')
-        ? config.apiUrl
-        : `${config.apiUrl.replace(/\/+$/, '')}/chat/completions`;
-    const upstream = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${config.apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            model: config.model,
-            messages: [
-                { role: 'system', content: SUMMARY_PROMPT },
-                { role: 'user', content: `${instruction ? `${instruction}\n\n` : ''}以下是需要总结的内容：\n${context}` }
-            ],
-            temperature: config.temperature,
-            max_tokens: config.max_tokens,
-            top_p: config.top_p,
-            frequency_penalty: config.frequency_penalty,
-            presence_penalty: config.presence_penalty,
-            stream: false
-        })
-    });
-    const rawText = await upstream.text();
-    if (!upstream.ok) {
-        const error = new Error('副 API 总结失败');
-        error.status = 502;
-        error.payload = buildUpstreamErrorPayload({ upstream, rawText, model: config.model, operation: 'summarize' });
-        throw error;
-    }
-    let data;
-    try { data = JSON.parse(rawText); } catch {
-        const error = new Error('副 API 返回的不是有效 JSON');
-        error.status = 502;
-        error.payload = {
-            error: error.message, error_code: 'INVALID_SUMMARY_UPSTREAM_JSON',
-            error_type: 'invalid_response_error', operation: 'summarize', detail: sanitizeErrorDetail(rawText)
-        };
-        throw error;
-    }
-    const content = stripThinkingTags(data?.choices?.[0]?.message?.content || '').trim();
-    if (!content) {
-        const error = new Error('副 API 没有返回总结正文');
-        error.status = 502;
-        error.payload = {
-            error: error.message, error_code: 'EMPTY_SUMMARY_RESPONSE',
-            error_type: 'empty_response_error', operation: 'summarize', detail: sanitizeErrorDetail(rawText)
-        };
-        throw error;
-    }
-    return content;
-}
-
-function ensureSummaryWorldbook(character, characterFile) {
-    const books = readWorldbooks();
-    let book = character?.summaryWorldbookId
-        ? books.find(item => item.id === character.summaryWorldbookId)
-        : null;
-    if (!book) {
-        const now = Date.now();
-        book = {
-            id: `book_${shortId()}`,
-            name: `${character?.name || '角色'}的记忆`,
-            entries: [], created_at: now, updated_at: now
-        };
-        books.unshift(book);
-        character.summaryWorldbookId = book.id;
-        writeWorldbooks(books);
-        writeJsonFile(characterFile, character);
-    }
-    return { books, book };
-}
-
-function activeSmallSummaryEntries(book, characterId) {
-    return (Array.isArray(book?.entries) ? book.entries : [])
-        .filter(entry => entry?.enabled !== false && entry?.summaryType === 'small' && entry?.summaryCharacterId === characterId)
-        .sort((a, b) => Number(a.created_at || 0) - Number(b.created_at || 0));
-}
-
-app.get('/api/qq/summary-settings/:characterId', (req, res) => {
-    try {
-        const characterId = cleanName(req.params.characterId);
-        const character = readJsonFile(path.join(CHARACTERS_DIR, `${characterId}.json`), null);
-        if (!character) return res.status(404).json({ error: '未找到角色', error_code: 'CHARACTER_NOT_FOUND' });
-        const chat = readJsonFile(path.join(CHATS_DIR, `${characterId}.json`), { messages: [] });
-        const book = readWorldbooks().find(item => item.id === character.summaryWorldbookId);
-        res.json({
-            layerThreshold: clampSummaryThreshold(chat.summaryLayerThreshold),
-            summaryWorldbookId: character.summaryWorldbookId || '',
-            unsummarizedLayers: qqSummaryLayers(chat.messages).length,
-            activeSmallCards: activeSmallSummaryEntries(book, characterId).length,
-        });
-    } catch (error) {
-        res.status(500).json(buildInternalErrorPayload(error, 'summary-settings'));
-    }
+const qqSummaryFeature = createQqSummaryFeature({
+    app, SETTINGS_FILE, CHARACTERS_DIR, CHATS_DIR,
+    cleanName, shortId, readJsonFile, writeJsonFile, readWorldbooks, writeWorldbooks,
+    getCurrentUserPersona, qqMessageToPromptText, stripThinkingTags, sanitizeErrorDetail,
+    buildUpstreamErrorPayload, buildInternalErrorPayload,
 });
-
-app.put('/api/qq/summary-settings/:characterId', (req, res) => {
-    try {
-        const characterId = cleanName(req.params.characterId);
-        const characterFile = path.join(CHARACTERS_DIR, `${characterId}.json`);
-        const character = readJsonFile(characterFile, null);
-        if (!character) return res.status(404).json({ error: '未找到角色', error_code: 'CHARACTER_NOT_FOUND' });
-        const summaryWorldbookId = String(req.body?.summaryWorldbookId || '');
-        if (summaryWorldbookId && !readWorldbooks().some(book => book.id === summaryWorldbookId)) {
-            return res.status(400).json({ error: '选择的总结世界书不存在', error_code: 'SUMMARY_WORLDBOOK_NOT_FOUND' });
-        }
-        character.summaryWorldbookId = summaryWorldbookId;
-        writeJsonFile(characterFile, character);
-        const chatFile = path.join(CHATS_DIR, `${characterId}.json`);
-        const chat = readJsonFile(chatFile, { characterId, messages: [] });
-        chat.summaryLayerThreshold = clampSummaryThreshold(req.body?.layerThreshold);
-        writeJsonFile(chatFile, chat);
-        res.json({ success: true, layerThreshold: chat.summaryLayerThreshold, summaryWorldbookId });
-    } catch (error) {
-        res.status(500).json(buildInternalErrorPayload(error, 'summary-settings'));
-    }
-});
-
-app.post('/api/qq/summarize', async (req, res) => {
-    try {
-        const characterId = cleanName(req.body?.characterId || '');
-        const characterFile = path.join(CHARACTERS_DIR, `${characterId}.json`);
-        const chatFile = path.join(CHATS_DIR, `${characterId}.json`);
-        const character = readJsonFile(characterFile, null);
-        const chat = readJsonFile(chatFile, null);
-        if (!character || !chat) return res.status(404).json({ error: '角色或聊天不存在', error_code: 'SUMMARY_TARGET_NOT_FOUND' });
-        const threshold = clampSummaryThreshold(chat.summaryLayerThreshold);
-        const layers = qqSummaryLayers(chat.messages);
-        if (layers.length <= threshold) {
-            return res.json({ triggered: false, unsummarizedLayers: layers.length, layerThreshold: threshold });
-        }
-        const targetLayers = layers.slice(0, threshold);
-        const userPersona = getCurrentUserPersona();
-        const context = summaryContextText(chat.messages, targetLayers, character, userPersona);
-        const content = await requestSummaryFromSecondaryApi(
-            context,
-            `当前<user>是“${userPersona?.name || 'user'}”，当前<char>是“${character.name || 'char'}”。请用实际名字替换模板中的<user>和<char>。`
-        );
-        const { books, book } = ensureSummaryWorldbook(character, characterFile);
-        const allIndexes = targetLayers.flatMap(layer => layer.indices).sort((a, b) => a - b);
-        const firstMessage = chat.messages[allIndexes[0]];
-        const lastMessage = chat.messages[allIndexes[allIndexes.length - 1]];
-        const now = Date.now();
-        const entry = {
-            id: `e_${shortId()}`,
-            name: `小总结 ${summaryDateLabel(firstMessage?.created_at)} ～ ${summaryDateLabel(lastMessage?.created_at)}`,
-            content, enabled: true,
-            summaryType: 'small', summaryCharacterId: characterId,
-            sourceStartAt: firstMessage?.created_at || 0,
-            sourceEndAt: lastMessage?.created_at || 0,
-            sourceLayerCount: targetLayers.length,
-            created_at: now, updated_at: now,
-        };
-        book.entries = Array.isArray(book.entries) ? book.entries : [];
-        book.entries.push(entry);
-        book.updated_at = now;
-        writeWorldbooks(books);
-        allIndexes.forEach(index => { if (chat.messages[index]) chat.messages[index].summary_archived = true; });
-        chat.summaryLayerThreshold = threshold;
-        chat.lastSummaryAt = now;
-        chat.updated_at = now;
-        writeJsonFile(chatFile, chat);
-        const activeCards = activeSmallSummaryEntries(book, characterId);
-        res.json({
-            triggered: true,
-            entry,
-            summaryWorldbookId: book.id,
-            summaryWorldbookName: book.name,
-            archivedMessageIndexes: allIndexes,
-            activeSmallCards: activeCards.length,
-            needsBigSummary: activeCards.length >= SUMMARY_BATCH_CARD_COUNT,
-            unsummarizedLayers: qqSummaryLayers(chat.messages).length,
-        });
-    } catch (error) {
-        console.error('[QQ summarize]', error);
-        res.status(error.status || 500).json(error.payload || buildInternalErrorPayload(error, 'summarize'));
-    }
-});
-
-app.post('/api/qq/summarize/big/preview', async (req, res) => {
-    try {
-        const characterId = cleanName(req.body?.characterId || '');
-        const character = readJsonFile(path.join(CHARACTERS_DIR, `${characterId}.json`), null);
-        const books = readWorldbooks();
-        const book = books.find(item => item.id === character?.summaryWorldbookId);
-        if (!book) return res.status(400).json({ error: '尚未绑定总结世界书', error_code: 'SUMMARY_WORLDBOOK_NOT_BOUND' });
-        const entries = activeSmallSummaryEntries(book, characterId).slice(-SUMMARY_BATCH_CARD_COUNT);
-        if (entries.length < SUMMARY_BATCH_CARD_COUNT) {
-            return res.status(400).json({ error: '不足 5 个启用的小总结', error_code: 'NOT_ENOUGH_SMALL_SUMMARIES' });
-        }
-        const context = entries.map((entry, index) => `【小总结 ${index + 1}】\n${entry.content}`).join('\n\n');
-        const content = await requestSummaryFromSecondaryApi(
-            context,
-            `下面是“${character.name || 'char'}”与user时间连续的5个小总结。请合并为一张大总结卡片，标题必须以“Title:大总结：”开头。去除重复内容，但不得遗漏会影响后续关系和剧情的事件、决定、承诺、高光对白及关于user的小事。`
-        );
-        res.json({ content, sourceEntryIds: entries.map(entry => entry.id) });
-    } catch (error) {
-        console.error('[QQ big summary preview]', error);
-        res.status(error.status || 500).json(error.payload || buildInternalErrorPayload(error, 'summarize-big-preview'));
-    }
-});
-
-app.post('/api/qq/summarize/big/confirm', (req, res) => {
-    try {
-        const characterId = cleanName(req.body?.characterId || '');
-        const content = String(req.body?.content || '').trim();
-        const sourceEntryIds = Array.isArray(req.body?.sourceEntryIds) ? req.body.sourceEntryIds.map(String) : [];
-        if (!content) return res.status(400).json({ error: '大总结内容不能为空', error_code: 'EMPTY_BIG_SUMMARY' });
-        if (sourceEntryIds.length !== SUMMARY_BATCH_CARD_COUNT) {
-            return res.status(400).json({ error: '大总结必须对应 5 个小总结', error_code: 'INVALID_BIG_SUMMARY_SOURCE_COUNT' });
-        }
-        const character = readJsonFile(path.join(CHARACTERS_DIR, `${characterId}.json`), null);
-        const books = readWorldbooks();
-        const book = books.find(item => item.id === character?.summaryWorldbookId);
-        if (!book) return res.status(400).json({ error: '尚未绑定总结世界书', error_code: 'SUMMARY_WORLDBOOK_NOT_BOUND' });
-        const selected = (book.entries || []).filter(entry => sourceEntryIds.includes(String(entry.id)));
-        if (selected.length !== SUMMARY_BATCH_CARD_COUNT || selected.some(entry => entry.enabled === false || entry.summaryType !== 'small' || entry.summaryCharacterId !== characterId)) {
-            return res.status(409).json({ error: '组成大总结的小总结已发生变化，请重新生成', error_code: 'SUMMARY_SOURCE_CHANGED' });
-        }
-        const now = Date.now();
-        selected.forEach(entry => { entry.enabled = false; entry.closedByBigSummaryAt = now; entry.updated_at = now; });
-        const entry = {
-            id: `e_${shortId()}`,
-            name: `大总结 ${summaryDateLabel(selected[0]?.sourceStartAt)} ～ ${summaryDateLabel(selected[selected.length - 1]?.sourceEndAt)}`,
-            content, enabled: true,
-            summaryType: 'big', summaryCharacterId: characterId,
-            sourceEntryIds, created_at: now, updated_at: now,
-        };
-        book.entries.push(entry);
-        book.updated_at = now;
-        writeWorldbooks(books);
-        res.json({ success: true, entry, disabledEntryIds: sourceEntryIds });
-    } catch (error) {
-        res.status(500).json(buildInternalErrorPayload(error, 'summarize-big-confirm'));
-    }
-});
-
 // 删除角色
 app.delete('/api/qq/characters/:id', (req, res) => {
     try {
@@ -4164,6 +3894,12 @@ function qqMessageToPromptText(messages, index) {
     return qqMessageToText(list[index], { compactRichLink: shouldCompactRichLinkMessage(list, index) });
 }
 
+function qqMessageToPromptRole(message) {
+    if (message?.type === 'system' || message?.role === 'system') return 'system';
+    if (message?.role === 'assistant') return 'assistant';
+    return 'user';
+}
+
 function qqMessageToText(msg, options = {}) {
     if (!msg) return '';
     switch (msg.type) {
@@ -4397,8 +4133,9 @@ function buildInternalErrorPayload(error, operation = 'reply') {
 
 app.post('/api/qq/reply', async (req, res) => {
     try {
-        const { characterId, messages, chatType } = req.body || {};
+        const { characterId, messages, chatType, generationType } = req.body || {};
         const resolvedChatType = chatType === 'group' ? 'group' : 'private';
+        const resolvedGenerationType = ['normal', 'continue', 'swipe', 'regenerate', 'quiet'].includes(generationType) ? generationType : 'normal';
         if (!characterId) return res.status(400).json({
             error: '缺少 characterId', error_code: 'MISSING_CHARACTER_ID', error_type: 'request_validation_error', operation: 'reply'
         });
@@ -4419,8 +4156,7 @@ app.post('/api/qq/reply', async (req, res) => {
             error: '未找到角色', error_code: 'CHARACTER_NOT_FOUND', error_type: 'not_found_error', operation: 'reply'
         });
 
-        const list = (Array.isArray(messages) ? messages : [])
-            .filter(message => message?.summary_archived !== true);
+        const list = qqSummaryFeature.filterPromptMessages(messages);
         const userPersona = getCurrentUserPersona();
         const variables = buildPromptVariables({ characterId, userName: userPersona?.name || '', messages: list });
 
@@ -4436,7 +4172,7 @@ app.post('/api/qq/reply', async (req, res) => {
         })();
         const history = list
             .map((m, idx) => {
-                const role = m.role === 'assistant' ? 'assistant' : 'user';
+                const role = qqMessageToPromptRole(m);
                 if (role === 'user' && m.type === 'image' && idx === latestVisualIndex) {
                     return {
                         role,
@@ -4462,13 +4198,6 @@ app.post('/api/qq/reply', async (req, res) => {
             })
             .filter(m => Array.isArray(m.content) ? m.content.length : m.content);
 
-        const enrichedHistory = injectCharRulesAtDepth(history, character, variables);
-        const presetPrompt = buildQqPresetPrompt(character, variables, userPersona, enrichedHistory, resolvedChatType);
-        // 预设按各条目 role 展开为多条消息；没有可用预设时回退到老的单条 system + 历史
-        const chatMessages = presetPrompt
-            ? (presetPrompt.includesChatHistory ? presetPrompt.messages : [...presetPrompt.messages, ...enrichedHistory])
-            : [{ role: 'system', content: buildCharacterSystemPrompt(character, variables, userPersona) }, ...enrichedHistory];
-
         // 采样参数来自当前 QQ 预设；预设缺字段时回退到温和默认值
         const presetId = getCurrentQqPromptPresetId();
         const presetRaw = presetId ? readJsonFile(stPresetFile(presetId), null) : null;
@@ -4479,6 +4208,17 @@ app.post('/api/qq/reply', async (req, res) => {
         const frequency_penalty = pickNum(presetSampling.frequency_penalty, 0);
         const presence_penalty = pickNum(presetSampling.presence_penalty, 0);
         const maxReply = Math.min(Math.max(parseInt(presetSampling.openai_max_tokens, 10) || 2048, 1), 200000);
+        const contextLimit = Math.min(Math.max(parseInt(settings.mainApi_context, 10) || 8192, 1), 200000);
+        const presetPrompt = await buildQqPresetPrompt(character, variables, userPersona, history, resolvedChatType, {
+            generationType: resolvedGenerationType,
+            contextTokens: contextLimit,
+            responseTokens: maxReply,
+            model
+        });
+        // 有可用预设时由 ST 上下文引擎完成位置、深度、世界书和预算装配。
+        const chatMessages = presetPrompt
+            ? presetPrompt.messages
+            : [{ role: 'system', content: buildCharacterSystemPrompt(character, variables, userPersona) }, ...history];
 
         const endpoint = apiUrl.endsWith('/chat/completions')
             ? apiUrl
@@ -4606,7 +4346,7 @@ app.post('/api/qq/reply', async (req, res) => {
             avatar: character.avatar || '',
             appId: 'QQ'
         }).catch(err => console.warn('[PUSH after reply]', err));
-        res.json({ segments, reply: cleaned });
+        res.json({ segments, reply: cleaned, context_itemization: presetPrompt?.itemization, context_warnings: presetPrompt?.warnings || [] });
     } catch (e) {
         console.error('[QQ reply error]', e);
         res.status(500).json(buildInternalErrorPayload(e, 'reply'));
@@ -4683,25 +4423,12 @@ app.post('/api/qq/impersonate', async (req, res) => {
         if (!character) return res.status(404).json({
             error: '未找到角色', error_code: 'CHARACTER_NOT_FOUND', error_type: 'not_found_error', operation: 'impersonate'
         });
-        const list = (Array.isArray(messages) ? messages : [])
-            .filter(message => message?.summary_archived !== true);
+        const list = qqSummaryFeature.filterPromptMessages(messages);
         const userPersona = getCurrentUserPersona();
         const variables = buildPromptVariables({ characterId, userName: userPersona?.name || '', messages: list });
         const history = list
-            .map((m, idx) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: qqMessageToPromptText(list, idx) }))
+            .map((m, idx) => ({ role: qqMessageToPromptRole(m), content: qqMessageToPromptText(list, idx) }))
             .filter(m => m.content);
-        const enrichedHistory = injectCharRulesAtDepth(history, character, variables);
-        const presetPrompt = buildQqPresetPrompt(character, variables, userPersona, enrichedHistory, resolvedChatType);
-        const baseMessages = presetPrompt
-            ? (presetPrompt.includesChatHistory ? presetPrompt.messages : [...presetPrompt.messages, ...enrichedHistory])
-            : [{ role: 'system', content: buildCharacterSystemPrompt(character, variables, userPersona) }, ...enrichedHistory];
-
-        // 末尾追加代回指令，让模型从 user 视角输出
-        baseMessages.push({
-            role: 'system',
-            content: '学习user_input中user的语言习惯，代替user拟出回复。注意：user是独立人格成年人，禁止娇妻化塑造user。只输出user会发出的纯文字内容，不要任何动作、神态、括号旁白。'
-        });
-
         // 采样参数同 reply：走预设
         const presetId = getCurrentQqPromptPresetId();
         const presetRaw = presetId ? readJsonFile(stPresetFile(presetId), null) : null;
@@ -4712,6 +4439,22 @@ app.post('/api/qq/impersonate', async (req, res) => {
         const frequency_penalty = pickNum(presetSampling.frequency_penalty, 0);
         const presence_penalty = pickNum(presetSampling.presence_penalty, 0);
         const maxReply = Math.min(Math.max(parseInt(presetSampling.openai_max_tokens, 10) || 2048, 1), 200000);
+        const contextLimit = Math.min(Math.max(parseInt(settings.mainApi_context, 10) || 8192, 1), 200000);
+        const presetPrompt = await buildQqPresetPrompt(character, variables, userPersona, history, resolvedChatType, {
+            generationType: 'impersonate',
+            contextTokens: contextLimit,
+            responseTokens: maxReply,
+            model
+        });
+        const baseMessages = presetPrompt
+            ? presetPrompt.messages
+            : [{ role: 'system', content: buildCharacterSystemPrompt(character, variables, userPersona) }, ...history];
+
+        // 末尾控制提示保持最终位置；预设中配置了 impersonate trigger 的条目也会同时生效。
+        baseMessages.push({
+            role: 'system',
+            content: '学习user_input中user的语言习惯，代替user拟出回复。注意：user是独立人格成年人，禁止娇妻化塑造user。只输出user会发出的纯文字内容，不要任何动作、神态、括号旁白。'
+        });
         const endpoint = apiUrl.endsWith('/chat/completions') ? apiUrl : `${apiUrl.replace(/\/+$/, '')}/chat/completions`;
         const upstream = await fetch(endpoint, {
             method: 'POST',
@@ -4766,7 +4509,7 @@ app.post('/api/qq/impersonate', async (req, res) => {
             detail: sanitizeErrorDetail(rawText),
             timestamp: new Date().toISOString()
         });
-        res.json({ text: cleaned });
+        res.json({ text: cleaned, context_itemization: presetPrompt?.itemization, context_warnings: presetPrompt?.warnings || [] });
     } catch (e) {
         console.error('[impersonate]', e);
         res.status(500).json(buildInternalErrorPayload(e, 'impersonate'));

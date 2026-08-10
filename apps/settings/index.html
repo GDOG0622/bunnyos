@@ -625,6 +625,43 @@
             <div class="back-btn" onclick="navBack()"><i class="bi bi-chevron-left"></i>返回</div>
             <span class="breadcrumb-title">设置 / 存储配置</span>
         </div>
+        <div class="section" id="cloud-storage-section">
+            <div class="section-title">云端备份
+                <button class="btn-text" type="button" onclick="showCloudStorageHelp()" aria-label="云端备份配置教程" style="margin-left:6px;"><i class="bi bi-exclamation-circle"></i></button>
+            </div>
+            <div class="list">
+                <div class="item">
+                    <label>存储方式</label>
+                    <select id="cloudStorage_provider" onchange="toggleCloudStorageProvider(); saveData()">
+                        <option value="github">GitHub 私有仓库</option>
+                        <option value="supabase">Supabase Storage</option>
+                    </select>
+                </div>
+                <div id="cloud-storage-github" class="cloud-provider-fields">
+                    <div class="item vertical"><label>GitHub Token</label><input type="password" id="cloudStorage_githubToken" autocomplete="off" placeholder="github_pat_..." oninput="saveData()"></div>
+                    <div class="item vertical"><label>仓库所有者</label><input type="text" id="cloudStorage_githubOwner" placeholder="用户名或组织名" oninput="saveData()"></div>
+                    <div class="item vertical"><label>仓库名</label><input type="text" id="cloudStorage_githubRepo" placeholder="例如 bunnyos-backup" oninput="saveData()"></div>
+                    <div class="item vertical"><label>分支</label><input type="text" id="cloudStorage_githubBranch" value="main" placeholder="main" oninput="saveData()"></div>
+                    <div class="item vertical"><label>备份文件路径</label><input type="text" id="cloudStorage_githubPath" value="bunnyos-backups/latest.json" oninput="saveData()"></div>
+                </div>
+                <div id="cloud-storage-supabase" class="cloud-provider-fields hidden">
+                    <div class="item vertical"><label>Project URL</label><input type="text" id="cloudStorage_supabaseUrl" placeholder="https://xxxx.supabase.co" oninput="saveData()"></div>
+                    <div class="item vertical"><label>Secret / service_role Key</label><input type="password" id="cloudStorage_supabaseKey" autocomplete="off" placeholder="仅填写自己的项目 Key" oninput="saveData()"></div>
+                    <div class="item vertical"><label>Bucket</label><input type="text" id="cloudStorage_supabaseBucket" value="bunnyos-backups" oninput="saveData()"></div>
+                    <div class="item vertical"><label>备份文件路径</label><input type="text" id="cloudStorage_supabasePath" value="latest.json" oninput="saveData()"></div>
+                </div>
+                <div class="item vertical cloud-storage-actions">
+                    <div class="button-row cloud-storage-buttons">
+                        <button type="button" class="pill-btn" data-cloud-action onclick="testCloudStorage()">测试连接</button>
+                        <button type="button" class="pill-btn" data-cloud-action onclick="backupToCloud()">云端备份</button>
+                        <button type="button" class="pill-btn" data-cloud-action onclick="loadCloudBackup()">加载备份</button>
+                    </div>
+                    <div id="cloud-storage-status" class="cloud-storage-status">尚未连接</div>
+                    <div class="setting-hint">仅在点击按钮时访问云端。恢复前会自动保存本机回滚快照。</div>
+                </div>
+            </div>
+        </div>
+
         <div class="section">
             <div class="section-title">图床配置 <button class="btn-text" type="button" onclick="showImageHostHelp()" aria-label="图床配置说明" style="margin-left:6px;"><i class="bi bi-info-circle"></i></button></div>
             <div class="list">
@@ -718,6 +755,10 @@
     </div>
 
     <script src="/assets/scripts/catbox-proxy.js"></script>
+    <script src="storage-providers/base.js"></script>
+    <script src="storage-providers/github.js"></script>
+    <script src="storage-providers/supabase.js"></script>
     <script src="settings.js"></script>
+    <script src="storage-providers/controller.js"></script>
 </body>
 </html>

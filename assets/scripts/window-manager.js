@@ -10,9 +10,9 @@
         const iframeThemeFrames = new WeakMap();
         // appId → iframe element（DOM 中持久存在；关闭/切换只切显示）
         const iframes = new Map();
-        // 按打开顺序排队，超 2 个时挤掉最早的
+        // App iframe 常驻。生成任务可能属于后台 QQ，不能因打开第三个 App 而销毁。
         const openOrder = [];
-        const MAX_OPEN = 2;
+        const MAX_OPEN = Number.POSITIVE_INFINITY;
         let activeAppId = '';
         let activeApp = null;
 
@@ -405,4 +405,19 @@
                 send();
                 setTimeout(send, 400);
             } catch (e) { console.error(e); }
+        };
+
+        window.bunnyosOpenSettingsPage = async function(pageId = 'page-storage') {
+            try {
+                const app = (window.installedApps || []).find(item => item.id === 'settings')
+                    || (await fetch('/api/apps').then(response => response.json())).find(item => item.id === 'settings');
+                if (!app) return;
+                openApp(app);
+                const iframe = getIframeForApp('settings');
+                const send = () => iframe?.contentWindow?.postMessage({ type: 'bunnyos:open-settings-page', pageId }, '*');
+                send();
+                setTimeout(send, 400);
+            } catch (error) {
+                console.error('[open settings page]', error);
+            }
         };

@@ -24,3 +24,41 @@ body {
     color: #333;
 }
 ﻿
+/* 每日备份提醒与版本更新共用的公告栏 */
+.bunnyos-announcement {
+    position: fixed;
+    inset: 0;
+    z-index: 12000;
+    display: grid;
+    place-items: center;
+    padding: 22px;
+    background: rgba(15, 18, 28, 0.34);
+    backdrop-filter: blur(8px);
+}
+
+.bunnyos-announcement.hidden { display: none; }
+
+.bunnyos-announcement-card {
+    width: min(420px, 100%);
+    max-height: min(620px, 80vh);
+    overflow: auto;
+    padding: 20px;
+    border: 1px solid rgba(255,255,255,0.5);
+    border-radius: 18px;
+    color: #25262b;
+    background: rgba(255,255,255,0.94);
+    box-shadow: 0 20px 70px rgba(0,0,0,0.22);
+}
+
+.bunnyos-announcement-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+}
+
+.bunnyos-announcement-heading h2 { margin: 0; font-size: 18px; }
+.bunnyos-announcement-heading button { border: 0; background: transparent; color: #777; cursor: pointer; }
+.bunnyos-announcement-card ul { margin: 16px 0; padding-left: 22px; line-height: 1.7; }
+.bunnyos-announcement-reminder { margin: 0; color: #666; font-size: 14px; }
+.bunnyos-announcement-reminder a { margin-left: 4px; color: #087cff; text-decoration: none; font-weight: 600; }

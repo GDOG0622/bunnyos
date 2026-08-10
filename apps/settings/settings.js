@@ -51,7 +51,11 @@ let settings = {};
 
             pageHistory.push(pageId);
             notifyNavigationState();
-            if (pageId === 'page-storage') { refreshImageCacheStats(); loadImageHostConfig(); }
+            if (pageId === 'page-storage') {
+                refreshImageCacheStats();
+                loadImageHostConfig();
+                window.toggleCloudStorageProvider?.();
+            }
         }
 
         function navBack() {
@@ -84,6 +88,10 @@ let settings = {};
         window.addEventListener('message', event => {
             if (event.data?.type === 'bunnyos:navigate-back') {
                 navBack();
+            }
+            if (event.data?.type === 'bunnyos:open-settings-page' && event.data.pageId) {
+                const pageId = String(event.data.pageId);
+                if (document.getElementById(pageId) && pageHistory[pageHistory.length - 1] !== pageId) navTo(pageId);
             }
         });
 
@@ -167,6 +175,7 @@ let settings = {};
             loadApiConfigToEditor();
             renderWallpaperPreviews();
             renderIconGrid();
+            window.toggleCloudStorageProvider?.();
         }
 
         async function reloadSettingsIfChanged(force = false) {

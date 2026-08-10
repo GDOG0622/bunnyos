@@ -1,0 +1,9 @@
+{
+  "version": "2026.08.10.1",
+  "title": "BunnyOS 更新公告",
+  "items": [
+    "新增 GitHub 与 Supabase 手动云端备份配置。",
+    "新增 ST 风格 tokenizer 与上下文 token 分项诊断。",
+    "QQ 支持不同角色同时生成回复，切换聊天或 App 后继续运行。"
+  ]
+}

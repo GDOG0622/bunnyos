@@ -714,6 +714,9 @@ summary {
     color: var(--pm-text);
     padding: 9px 10px;
 }
+.wb-engine-settings { margin: 8px 0 12px; padding: 10px; border: 0.5px solid var(--pm-line); border-radius: 10px; background: var(--pm-surface); }
+.wb-engine-settings summary { cursor: pointer; color: var(--pm-sub); }
+.wb-engine-settings[open] summary { margin-bottom: 10px; }
 
 .pm-modal-card[data-mode="worldbook"] .field-grid,
 .pm-modal-card[data-mode="worldbook"] .switch-row,
@@ -721,6 +724,14 @@ summary {
 .pm-modal-card[data-mode="worldbook"] .marker-details {
     display: none !important;
 }
+
+.worldbook-fields { display: none; }
+.pm-modal-card[data-mode="worldbook"] .worldbook-fields { display: block; }
+.pm-modal-card[data-mode="worldbook"] .worldbook-fields .field-grid,
+.pm-modal-card[data-mode="worldbook"] .worldbook-fields .switch-row { display: grid !important; }
+.worldbook-fields { margin-top: 12px; border-top: 0.5px solid var(--pm-line); padding-top: 10px; }
+.worldbook-fields summary { cursor: pointer; color: var(--pm-sub); margin-bottom: 10px; }
+.worldbook-switches { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 
 .preview-marker-toggles {
     display: flex;

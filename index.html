@@ -88,6 +88,16 @@
         <div class="resize-handle resize-sw" data-resize="sw"></div>
         <div class="control-hotzone" id="control-hotzone"></div>
     </div>
+    <div class="bunnyos-announcement hidden" id="bunnyos-announcement" role="dialog" aria-modal="true" aria-labelledby="bunnyos-announcement-title">
+        <div class="bunnyos-announcement-card">
+            <div class="bunnyos-announcement-heading">
+                <h2 id="bunnyos-announcement-title">BunnyOS 公告</h2>
+                <button type="button" id="bunnyos-announcement-close" aria-label="关闭"><i class="bi bi-x-lg"></i></button>
+            </div>
+            <ul id="bunnyos-announcement-list"></ul>
+            <p class="bunnyos-announcement-reminder">今天也记得<a href="#" id="bunnyos-announcement-backup">备份 BunnyOS 数据</a>。</p>
+        </div>
+    </div>
     <!-- 后台通知横幅 + 提示音 -->
     <div class="bunnyos-banner hidden" id="bunnyos-banner" role="alert">
         <div class="bunnyos-banner-avatar"><img id="bunnyos-banner-avatar-img" alt=""></div>
@@ -104,6 +114,7 @@
     <script src="assets/scripts/apps.js"></script>
     <script src="assets/scripts/window-manager.js"></script>
     <script src="assets/scripts/notify.js"></script>
+    <script src="assets/scripts/announcement.js"></script>
     <script src="assets/scripts/clock.js"></script>
 </body>
 </html>
