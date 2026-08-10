@@ -2,7 +2,7 @@
     const modal = document.getElementById('bunnyos-announcement');
     const title = document.getElementById('bunnyos-announcement-title');
     const list = document.getElementById('bunnyos-announcement-list');
-    const close = document.getElementById('bunnyos-announcement-close');
+    const closeButtons = document.querySelectorAll('[data-announcement-close]');
     const backupLink = document.getElementById('bunnyos-announcement-backup');
     let currentVersion = '';
 
@@ -25,7 +25,8 @@
             currentVersion = String(data.version || '');
             const seenToday = localStorage.getItem('bunnyos:announcement-date') === todayKey();
             const seenVersion = !currentVersion || localStorage.getItem('bunnyos:announcement-version') === currentVersion;
-            if (seenToday && seenVersion) return;
+            const preview = new URLSearchParams(window.location.search).has('announcement-preview');
+            if (!preview && seenToday && seenVersion) return;
             title.textContent = data.title || 'BunnyOS 公告';
             const items = Array.isArray(data.items) ? data.items : [];
             list.innerHTML = items.map(item => `<li>${escapeAnnouncementText(item)}</li>`).join('');
@@ -41,7 +42,7 @@
         return div.innerHTML;
     }
 
-    close?.addEventListener('click', dismiss);
+    closeButtons.forEach(button => button.addEventListener('click', dismiss));
     modal?.addEventListener('click', event => {
         if (event.target === modal) dismiss();
     });

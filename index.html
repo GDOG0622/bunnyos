@@ -25,6 +25,7 @@
     <link rel="stylesheet" href="assets/styles/base.css">
     <link rel="stylesheet" href="assets/styles/desktop.css">
     <link rel="stylesheet" href="assets/styles/window.css">
+    <link rel="stylesheet" href="assets/styles/announcement.css?v=20260810.2">
 </head>
 <body>
 
@@ -90,12 +91,21 @@
     </div>
     <div class="bunnyos-announcement hidden" id="bunnyos-announcement" role="dialog" aria-modal="true" aria-labelledby="bunnyos-announcement-title">
         <div class="bunnyos-announcement-card">
+            <span class="bunnyos-announcement-doodle top" aria-hidden="true">⌁ ✦ ୨୧</span>
+            <span class="bunnyos-announcement-doodle bottom" aria-hidden="true">☆ bunny memo ──</span>
             <div class="bunnyos-announcement-heading">
-                <h2 id="bunnyos-announcement-title">BunnyOS 公告</h2>
-                <button type="button" id="bunnyos-announcement-close" aria-label="关闭"><i class="bi bi-x-lg"></i></button>
+                <div class="bunnyos-announcement-heading-main">
+                    <span class="bunnyos-announcement-kicker">!!! BUNNY BULLETIN</span>
+                    <h2 id="bunnyos-announcement-title">BunnyOS 公告</h2>
+                </div>
+                <button type="button" class="bunnyos-announcement-close" data-announcement-close aria-label="关闭"><i class="bi bi-x-lg"></i></button>
             </div>
-            <ul id="bunnyos-announcement-list"></ul>
-            <p class="bunnyos-announcement-reminder">今天也记得<a href="#" id="bunnyos-announcement-backup">备份 BunnyOS 数据</a>。</p>
+            <ul class="bunnyos-announcement-list" id="bunnyos-announcement-list"></ul>
+            <p class="bunnyos-announcement-reminder">今日便签：记得给 BunnyOS 留一份云端备份。</p>
+            <div class="bunnyos-announcement-actions">
+                <button type="button" class="bunnyos-announcement-action primary" id="bunnyos-announcement-backup">去备份</button>
+                <button type="button" class="bunnyos-announcement-action secondary" data-announcement-close>晚点再说</button>
+            </div>
         </div>
     </div>
     <!-- 后台通知横幅 + 提示音 -->
