@@ -656,6 +656,7 @@ Templates (Do NOT ignore symbols)：
 - 送礼物：[🎁淘宝|Price|Item|Note]
 - 外卖：[🛵美团|Price|Item|Note]
 - 打车：[🚕滴滴|Price|Item|Note]
+以上三种格式中 Note 可空；没有备注时可省略最后一个 |Note 段。
 5. Examples (禁止抄袭内容)
 +BUNNY：char 当前在忙着打豆豆，预计 12:00 pm 回复。先给他留言吧~+
 "hello(你好)"

@@ -290,6 +290,13 @@ function messageContentHtml(msg, idx) {
         const href = escapeAttr(msg.url || '');
         return `<div class="qq-message qq-link-card">${reply}<a class="qq-link-card-inner" href="${href}" target="_blank" rel="noopener noreferrer">${img}<div class="qq-link-body"><div class="qq-link-title">${t}</div>${d}${comments}${limited}<div class="qq-link-site">${site}</div></div></a></div>`;
     }
+    // 兼容修复前已经以普通 text 存盘的三段/四段生活服务协议，刷新后也能渲染成卡片。
+    if (msg.role === 'assistant' && msg.type === 'text' && typeof parseAssistantSegment === 'function') {
+        const legacyService = parseAssistantSegment(activeMessageText(msg));
+        if (legacyService?.kind === 'service') {
+            return commerceCardHtml({ ...msg, ...legacyService, type: 'service' }, reply);
+        }
+    }
     const voice = parseVoiceText(activeMessageText(msg));
     if (voice) {
         return `<div class="qq-message qq-voice-message"><div class="qq-voice-card collapsed" data-voice-toggle>${reply}<div class="qq-voice-row"><span class="qq-voice-play"><i class="bi bi-play-fill"></i></span><span class="qq-voice-wave" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span></span><span class="qq-voice-duration">${escapeHtml(voice.duration)}</span></div><div class="qq-voice-text">${escapeHtml(voice.content)}</div></div></div>`;

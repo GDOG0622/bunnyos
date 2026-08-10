@@ -1071,10 +1071,10 @@ function replaceReplyGroupWithVersion(chat, group, versionIndex) {
 }
 
 // 解析 AI 输出的红包/领取/生活服务语法。详见 QQ美化系统计划.md §1.2
-// 支持：[🧧¥10|备注] / [🧧¥10|] / [🧧领取] / [🎁淘宝|29.8|毛衣|备注]
+// 支持：[🧧¥10|备注] / [🧧¥10|] / [🧧领取] / [🎁淘宝|29.8|毛衣] / [🎁淘宝|29.8|毛衣|备注]
 const TRANSFER_SEG_RE = /^\s*\[🧧(?!领取\])([^\d|\]]*)([\d.]+)\|([^\]]*)\]\s*$/;
 const TRANSFER_RECEIVE_RE = /^\s*\[🧧领取\]\s*$/;
-const SERVICE_SEG_RE = /^\s*\[(🎁|🛵|🚕)([^|\]]+)\|([\d]+(?:\.\d{1,2})?)\|([^|\]]+)\|([^\]]*)\]\s*$/;
+const SERVICE_SEG_RE = /^\s*\[(🎁|🛵|🚕)([^|\]]+)\|([\d]+(?:\.\d{1,2})?)\|([^|\]]+?)(?:\|([^\]]*))?\]\s*$/;
 function parseAssistantSegment(text) {
     if (TRANSFER_RECEIVE_RE.test(text)) return { kind: 'receive' };
     const m = text.match(TRANSFER_SEG_RE);
@@ -1102,7 +1102,7 @@ function parseAssistantSegment(text) {
                 platform: def.platform,
                 price: service[3],
                 item: service[4].trim(),
-                note: service[5].trim(),
+                note: (service[5] || '').trim(),
             };
         }
     }
