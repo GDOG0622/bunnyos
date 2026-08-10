@@ -97,7 +97,67 @@ function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function openQqDialog({ title = '确认', message = '', input = false, value = '' } = {}) {
+const CHAT_LAYER_PAGE_SIZE = 20;
+
+function chatLayerRange(chat) {
+    const messages = Array.isArray(chat?.messages) ? chat.messages : [];
+    const layerByMessage = new Array(messages.length).fill(-1);
+    let layer = -1;
+    let previousRole = '';
+    let previousAssistantGroup = '';
+    for (let index = 0; index < messages.length; index++) {
+        const message = messages[index];
+        if (message?.type === 'system') {
+            layerByMessage[index] = layer;
+            continue;
+        }
+        const role = message?.role === 'assistant' ? 'assistant' : 'user';
+        const assistantGroup = role === 'assistant' ? String(message?.reply_group_id || '') : '';
+        const assistantBoundary = role === 'assistant'
+            && previousRole === 'assistant'
+            && assistantGroup !== previousAssistantGroup
+            && Boolean(assistantGroup || previousAssistantGroup);
+        if (role !== previousRole || assistantBoundary) layer += 1;
+        layerByMessage[index] = layer;
+        previousRole = role;
+        previousAssistantGroup = assistantGroup;
+    }
+
+    const totalLayers = layer + 1;
+    state.chatVisibleLayers = state.chatVisibleLayers || {};
+    const visibleLayers = Math.max(
+        CHAT_LAYER_PAGE_SIZE,
+        Number(state.chatVisibleLayers[chat?.characterId]) || CHAT_LAYER_PAGE_SIZE,
+    );
+    const firstVisibleLayer = Math.max(0, totalLayers - visibleLayers);
+    let startIndex = 0;
+    if (firstVisibleLayer > 0) {
+        const found = layerByMessage.findIndex(value => value >= firstVisibleLayer);
+        startIndex = found >= 0 ? found : 0;
+    }
+    return { startIndex, totalLayers, visibleLayers, hasMore: firstVisibleLayer > 0 };
+}
+
+function loadEarlierChatLayers() {
+    const chat = state.chats.find(item => item.characterId === state.activeChatId);
+    if (!chat?._messagesLoaded || state.loadingEarlierChatLayers) return;
+    const range = chatLayerRange(chat);
+    if (!range.hasMore) return;
+    const box = $('#chat-messages');
+    const previousHeight = box?.scrollHeight || 0;
+    state.loadingEarlierChatLayers = true;
+    state.chatVisibleLayers[chat.characterId] = range.visibleLayers + CHAT_LAYER_PAGE_SIZE;
+    renderActiveChat({ preserveScroll: true, previousHeight });
+    requestAnimationFrame(() => { state.loadingEarlierChatLayers = false; });
+}
+
+function renderChatLoadError(error) {
+    const box = $('#chat-messages');
+    if (!box) return;
+    box.innerHTML = `<div class="qq-empty qq-empty-inline"><div class="qq-empty-title">聊天记录加载失败</div><div class="qq-empty-sub">${escapeHtml(error?.message || '请稍后重试')}</div></div>`;
+}
+
+function openQqDialog({ title = '确认', message = '', input = false, value = '', copyText = '' } = {}) {
     return new Promise(resolve => {
         const dialog = $('#qq-dialog');
         const titleEl = $('#qq-dialog-title');
@@ -105,10 +165,12 @@ function openQqDialog({ title = '确认', message = '', input = false, value = '
         const inputEl = $('#qq-dialog-input');
         const ok = $('#qq-dialog-ok');
         const cancel = $('#qq-dialog-cancel');
+        const copy = $('#qq-dialog-copy');
         titleEl.textContent = title;
         messageEl.textContent = message;
         inputEl.classList.toggle('hidden', !input);
         inputEl.value = value;
+        copy?.classList.toggle('hidden', !copyText);
         dialog.classList.remove('hidden');
         setTimeout(() => {
             if (input) {
@@ -123,11 +185,20 @@ function openQqDialog({ title = '确认', message = '', input = false, value = '
             dialog.classList.add('hidden');
             ok.removeEventListener('click', onOk);
             cancel.removeEventListener('click', onCancel);
+            copy?.removeEventListener('click', onCopy);
             dialog.removeEventListener('keydown', onKeydown);
             resolve(result);
         };
         const onOk = () => cleanup(input ? inputEl.value : true);
         const onCancel = () => cleanup(input ? null : false);
+        const onCopy = async () => {
+            try {
+                await navigator.clipboard.writeText(copyText);
+                toast('报错详情已复制');
+            } catch {
+                toast('复制失败，请手动选择报错文字');
+            }
+        };
         const onKeydown = (event) => {
             if (event.key === 'Enter' && (!input || document.activeElement === inputEl)) onOk();
             if (event.key === 'Escape') onCancel();
@@ -135,6 +206,7 @@ function openQqDialog({ title = '确认', message = '', input = false, value = '
 
         ok.addEventListener('click', onOk);
         cancel.addEventListener('click', onCancel);
+        copy?.addEventListener('click', onCopy);
         dialog.addEventListener('keydown', onKeydown);
     });
 }

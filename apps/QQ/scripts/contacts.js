@@ -335,14 +335,11 @@ async function startChat(characterId) {
     await autoSaveFriendDraft();
     let chat = state.chats.find(item => item.characterId === characterId);
     if (!chat) {
-        chat = { characterId, messages: [], updated_at: Date.now() };
+        chat = { characterId, messages: [], updated_at: Date.now(), _messagesLoaded: true };
         state.chats.unshift(chat);
         await saveChat(chat);
     }
-    state.activeChatId = characterId;
     await closeFriendModal({ skipAutosave: true });
     switchTab('messages');
-    setChatListCollapsed(true);
-    renderChats();
-    renderActiveChat();
+    await activateChat(characterId);
 }

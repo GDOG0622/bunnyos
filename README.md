@@ -84,7 +84,7 @@ BunnyOS/
 | GET / POST / PUT / DELETE | `/api/userpersonas[/:id]` `/current` | user 人设 |
 | GET / POST | `/api/qq/prompt-preset` | QQ 选用哪个预设 |
 | GET / POST / PUT / DELETE | `/api/qq/characters[/:id]` | 角色卡 |
-| GET / POST | `/api/qq/chats[/:characterId]` | 聊天记录 |
+| GET / POST | `/api/qq/chats[/:characterId]` | 聊天记录；列表启动用 `?summary=1` 只返回最后消息和计数，点入聊天再取全文 |
 | GET / POST | `/api/qq/groups` `/sticker-packs` | 群定义 / 自定义表情包合集 |
 | POST | `/api/qq/reply` | AI 回复（按预设装配 + 采样参数 + 抗截断） |
 | POST | `/api/qq/impersonate` | AI 代回（user 视角拟回复，填入输入框不发送） |
@@ -102,6 +102,7 @@ BunnyOS/
 | GET / PUT | `/api/qq/skin` | 全局皮肤 CSS（写 `qq/settings.json.currentSkinId`，QQ App 启动注入到 `<body class="bunny-qq-skin">`） |
 | GET | `/api/qq/chat-tokens/:characterId` | 当前 prompt token 估算（CJK 1tk + 其余 4 字/tk，沿用酒馆 fallback 思路） |
 | POST | `/api/upload/image-host` | 图床代理：catbox + 自定义 endpoint fallback（顺序：lastWorking → primary → catbox） |
+| GET | `/api/proxy/catbox?url=...` | Catbox 资源流式代理：VPS 直连 → Cloudflare Worker → wsrv 图片兜底；严格域名白名单，单文件上限 30MB |
 | POST | `/api/qq/import-carrot` | 导入 carrot 插件 JSON：表情包 / 头像对 / 头像框 / 字体 / 提示音，去重按 URL 或 pair |
 
 **静态路径必须放在 `:id` 之前**：`/api/st-presets/current` `/new` `/import-default` 都要先注册。
@@ -161,7 +162,7 @@ BunnyOS/
 
 **user 人设 `data/userpersonas/<名字>.json`**：`id / name / gender / birthday / status / customStatus / signature / note / prompt / avatar`。注入 AI 的字段：name / gender / birthday / prompt。
 
-**世界书 `data/worlds/worldbooks.json`**：`{books: [{id, name, entries: [{id, name, content}]}]}`。条目就是文本块，无 key/depth/probability 命中引擎，纯打包集合。
+**世界书 `data/worlds/worldbooks.json`**：`{books: [{id, name, entries: [{id, name, content, enabled}]}]}`。条目无 key/depth/probability 命中引擎，装配时纯打包；但条目级 `enabled`（默认 `true`）可临时关闭单条而不删除，prompt 装配时按 `entry.enabled !== false` 过滤。
 
 **酒馆预设**：标准 ST 结构。BunnyOS 在 `extensions.bunnyosPromptGroups` 存自定义分组，`extensions.bunnyosBuiltinArranged` 标记 builtin marker 已排序。
 
@@ -190,15 +191,17 @@ BunnyOS/
 - 模板宏：`{{//}} / {{random}} / {{roll}}`
 - USER 语音转文字（STT）：QQ 麦克风按钮 → `MediaRecorder` 录 opus → **前端直传** Groq 或硅基流动的 OpenAI 兼容转写端点 → 回填 `=MM:SS|content=`。Key 存在 `settings.json` 的 `asr_groqKey` / `asr_siliconflowKey`，调度顺序按 `asr_lastWorking` 优先。后端零参与
 - **QQ 美化系统**（详见 `QQ美化系统计划.md`）：5 个模块（皮肤 / 头像 / 头像框 / 气泡 / 背景）；公共库 + char-beauty 个性化；头像框 char/user 双侧独立；全局皮肤启动注入；per-char 聊天背景直接上传到 `data/qq/char-backgrounds/<cid>.<ext>`；气泡点击侧弹菜单替代长按；每条消息 QQ 风头像 + frame 叠层；编辑模式 textarea 嵌进气泡（`field-sizing: content`）
-- **钱包（萝卜币 cc）+ 转账闭环**：启动初始化 `data/wallet.json` 20000cc；美化创建按价扣费（皮肤 20 / 其他 5 / 背景 0）；红包 user→char 发送即扣，10 轮 user-char 交互后未领自动退回；char→user 用户点击领取入账；AI 看到三段后缀 `[🧧¥10\|备注\|未领/已领/已自动退回]` 但看不到余额
+- **钱包（萝卜币 cc）+ 转账闭环**：启动初始化 `data/wallet.json` 20000cc；美化创建按价扣费（皮肤 20 / 其他 5 / 背景 0）；红包 user→char 发送即扣，现实时间满 24 小时仍未领取则自动退回；char→user 用户点击领取入账；AI 看到三段后缀 `[🧧¥10\|备注\|未领/已领/已自动退回]` 但看不到余额
+- **QQ 渐进加载**：启动只取角色与聊天摘要，点入某个聊天后才读取其完整记录；界面首次只创建最近 20 层消息（同一方连续发送的一组气泡算 1 层），上滑到顶部每次再追加 20 层。图片、链接封面和表情图仅随当前可见层加载
 - **图床代理**：`POST /api/upload/image-host`（catbox 默认 + 自定义 imgbb/smms endpoint），调用方在美化编辑页头像 / 头像框的 URL 输入旁
+- **Catbox 免梯读取**：主桌面、QQ、设置和提示词管理器加载 `assets/scripts/catbox-proxy.js`，只在渲染时把 Catbox 的 `src/href/poster/srcset/CSS url()` 改写到 `/api/proxy/catbox`，不改存档原 URL；后端直连失败后复用 carrot 的 Cloudflare Worker，支持图片、GIF、视频、音频和字体
 - **carrot 数据迁移**：`POST /api/qq/import-carrot` 把酒馆 carrot 插件导出的 JSON 一键导入到 BunnyOS——表情包按 url 去重 / 头像框按 char-user 拆 / 头像对成对入库 / 字体合并到 `beautyPresets.font` / 提示音合并到 `notify_savedSounds`
 - **图片缓存升级 IndexedDB**：发过的图片 dataURL 写到 IDB `bunnyos-qq/images`（旧 `localStorage qq:img:*` 启动时自动迁移）；后端 chat 文件不存 dataURL 但保留 `client_image_id`；AI prompt 只发最近一张
 - **存储管理**：设置 → 存储配置 → 缓存管理（IDB 图片库统计 + 清空 / 浏览器站点 caches 清空）；图床配置在同一页
+- **M8 对话框管理**：聊天页三个点面板"清空聊天记录 / 隐藏此聊天 / 删除聊天"三个操作；后端 `DELETE /api/qq/chats/:cid/messages` + chat 加 `hidden` 字段 `PATCH /api/qq/chats/:cid/hidden`；联系人列表过滤 `hidden`，顶栏"显示隐藏聊天"toggle；删除会级联清掉对应的 char-beauty/char-background
+- **社交链接解析**（详见 `bunnyos/references/xhs-link-preview.md`）：小红书/抖音/微信公众号/微博四平台。小红书支持短链跳转、`__INITIAL_STATE__` 正文解析、首屏最多 10 条评论；抖音、微博走各自公开 web API 拉最多 10 条评论；微信公众号解析 `js_content` 正文、作者、封面。四类平台在 prompt 中分别用 `<xhs>`、`<dy>`、`<wx>`、`<wb>` 包裹，封面本地缓存 + 多模态附件发给 AI，6 组 user-char 对话后衰减为 `[标题-正文前15字.xhs|dy|wx|wb]`。原生解析失败后走 Jina Reader（Token 支持逗号/空格分隔多 key 轮换，遇额度/限流/鉴权错误自动切下一个）或第三方解析 API 兜底
 
 ### 下一步
-
-**P0 M8 对话框管理**：聊天页三个点面板里"清空聊天记录 / 隐藏此聊天 / 删除聊天"目前是 disabled 占位。需要：后端 `DELETE /api/qq/chats/:cid/messages` 和 chat 加 `hidden` 字段；前端联系人列表过滤 `hidden`，顶栏加"显示隐藏聊天"toggle；删除会清掉对应的 char-beauty/char-background。
 
 **P0 总结模块**：自动给长对话生成摘要，写进角色绑定世界书的某本（"总结世界书"）。触发条件：消息数超阈值或 token 接近上下文上限。新增端点 `POST /api/qq/summarize`，由副 API 跑。
 
@@ -209,9 +212,6 @@ BunnyOS/
 **P1 主动发消息**：新增端点 `POST /api/qq/proactive`，按当前时间/上下文判断 char 是否会主动发。每次调用独立选 chatType。
 
 **P2 加号工具区扩展**：
-- 链接解析按钮：粘贴 URL → BunnyOS 解析链接卡片并把可读内容给 AI。小红书支持短链跳转、正文、封面本地缓存和首屏评论；抖音支持标题/描述/封面；微信公众号支持 `js_content` 正文、作者和封面。三类平台在 prompt 中分别用 `<xhs>`、`<dy>`、`<wx>` 包裹，6 组 user-char 对话后衰减为 `[标题-正文前15字.xhs|dy|wx]`。原生解析失败后再走 Jina Reader 或第三方解析 API 兜底。
-- 语音消息不保存真实音频，只保存转写文本协议 `=MM:SS|content=`。QQ UI 会把它渲染为仿 iOS 语音气泡；点击气泡展开下方文字。AI 侧仍看到这段文本协议，用于理解 user 说了什么。
-- 设置 → 语音功能中分三层：`USER 语音输入权限` 只负责浏览器/系统麦克风授权；`USER 语音转文字 (STT)` 两个 Key 输入框是 ASR 服务商配置（前端直传，零后端依赖）；`CHAR 语音服务商` 才是角色 TTS/声音配置。三块独立，不要混在一起。
 - 礼物：保留占位
 
 **P3 设置 App 弹窗统一**：剩余的几个 `alert` 换成项目内 dialog

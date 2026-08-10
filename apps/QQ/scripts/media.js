@@ -41,7 +41,7 @@ function renderStickerPacks() {
         btn.className = 'qq-sticker-tab';
         btn.dataset.pack = pack.id;
         btn.title = pack.name || '表情包';
-        btn.innerHTML = first ? `<img src="${escapeAttr(first.url)}" alt="">` : '<i class="bi bi-image"></i>';
+        btn.innerHTML = first ? `<img src="${escapeAttr(first.url)}" alt="" loading="lazy" decoding="async">` : '<i class="bi bi-image"></i>';
         btn.addEventListener('click', () => {
             if (state.stickerEditMode) {
                 deleteStickerPack(pack.id);
@@ -66,7 +66,7 @@ function showStickerPack(packId) {
         const xMark = state.stickerEditMode
             ? '<span class="qq-sticker-x" aria-label="删除"><i class="bi bi-x"></i></span>'
             : '';
-        btn.innerHTML = `${xMark}<img src="${escapeAttr(item.url)}" alt="${escapeAttr(item.name)}">`;
+        btn.innerHTML = `${xMark}<img src="${escapeAttr(item.url)}" alt="${escapeAttr(item.name)}" loading="lazy" decoding="async">`;
         btn.addEventListener('click', (e) => {
             if (state.stickerEditMode) {
                 deleteSticker(packId, idx);
@@ -564,7 +564,13 @@ async function saveChat(chat) {
     });
     chat.messages = mergedMessages;
     const idx = state.chats.findIndex(item => item.characterId === saved.characterId);
-    const localChat = { ...saved, messages: mergedMessages };
+    const localChat = {
+        ...saved,
+        messages: mergedMessages,
+        lastMessage: mergedMessages[mergedMessages.length - 1] || null,
+        messageCount: mergedMessages.length,
+        _messagesLoaded: true,
+    };
     if (idx >= 0) state.chats[idx] = localChat;
     else state.chats.unshift(localChat);
     if (walletNeedsRefresh) {

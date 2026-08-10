@@ -1373,7 +1373,7 @@ let settings = {};
                   <li>用 Google / GitHub 登录，复制 <code>jina_</code> 开头的 token</li>
                   <li>粘贴到本输入框（自动保存）</li>
                 </ol>
-                <p class="muted">不填也能用——免 key 模式有限速但够个人偶尔用。填了走 Bearer Token 请求，配额更大。</p>
+                <p class="muted">不填也能用——免 key 模式有限速但够个人偶尔用。填了走 Bearer Token 请求，配额更大。支持填多个 key（用逗号或空格分隔），额度用尽/限流/鉴权失败会自动切下一个再试。</p>
             `);
         }
 

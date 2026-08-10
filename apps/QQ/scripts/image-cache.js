@@ -124,14 +124,14 @@ async function migrateLocalStorageImagesToIdb() {
     }
 }
 
-// 进入聊天前预加载所有图片到 state.imageAttachments，让 renderActiveChat 同步用得到
-async function preloadImagesForActiveChat() {
+// 只预加载当前已经显示的消息图片；向上追加20层时再补更早图片。
+async function preloadImagesForActiveChat(startIndex = 0) {
     if (state.imagePreloadInFlight) return;
     state.imagePreloadInFlight = true;
     try {
         const chat = state.chats.find(c => c.characterId === state.activeChatId);
         if (!chat) return;
-        const ids = (chat.messages || [])
+        const ids = (chat.messages || []).slice(Math.max(0, Number(startIndex) || 0))
             .filter(m => m?.type === 'image' && m.client_image_id)
             .map(m => m.client_image_id)
             .filter(id => !state.imageAttachments?.[id]?.dataUrl);
@@ -145,7 +145,12 @@ async function preloadImagesForActiveChat() {
                 changed = true;
             }
         });
-        if (changed && state.activeChatId === chat.characterId) renderActiveChat();
+        if (changed && state.activeChatId === chat.characterId) {
+            const box = $('#chat-messages');
+            const previousHeight = box?.scrollHeight || 0;
+            const nearBottom = !box || box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+            renderActiveChat(nearBottom ? {} : { preserveScroll: true, previousHeight });
+        }
     } finally {
         state.imagePreloadInFlight = false;
     }

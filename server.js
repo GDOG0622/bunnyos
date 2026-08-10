@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
+const https = require('https');
 const crypto = require('crypto');
 const webpush = require('web-push');
 const { spawn } = require('child_process');
@@ -60,10 +61,13 @@ app.use((err, req, res, next) => {
 app.use(express.static(path.join(__dirname), {
     setHeaders: (res, filePath) => {
         const ext = path.extname(filePath).toLowerCase();
-        if (['.html', '.js', '.css', '.json', '.webmanifest'].includes(ext)) {
+        if (['.html', '.json', '.webmanifest'].includes(ext)) {
             res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
             res.setHeader('Pragma', 'no-cache');
             res.setHeader('Expires', '0');
+        } else if (['.js', '.css'].includes(ext)) {
+            // 允许浏览器短期复用拆分后的前端资源，减少 QQ 每次启动重复下载十几个脚本。
+            res.setHeader('Cache-Control', 'public, max-age=300, must-revalidate');
         }
     }
 }));
@@ -667,7 +671,7 @@ Templates（必须严格遵守符号）：
 - 表情包： [\${name}]  方括号包裹，name 取自 <stickers> 列表
 - 撤回： -\${内容}-
 - 红包： [🧧\${Currency}\${Amount}|\${Note}]   仅你（{{char}}）发给 {{user}} 时使用，单独一行；Note 可空但 | 必须保留
-- 领取红包： [🧧领取]   单独一行；用于明确接受 {{user}} 刚刚发给你的红包。不写就视为没收，10 轮后自动退回 {{user}}
+- 领取红包： [🧧领取]   单独一行；用于明确接受 {{user}} 刚刚发给你的红包。不写就视为没收，发送满 24 小时后自动退回 {{user}}
 - 历史中红包带状态后缀：[🧧¥10|备注|未领]、[🧧¥10|备注|已领]、[🧧¥10|备注|已自动退回]，仅供你判断对方红包状态，你输出时**不要带状态段**
 - 系统提示： +\${BUNNY meta 消息}+  仅 {{user}} 与 BUNNY 元交流，{{char}} 不可见、不应基于此内容反应
 
@@ -1414,6 +1418,188 @@ app.put('/api/qq/skin', (req, res) => {
     }
 });
 
+// ========== Catbox 资源代理（浏览器无需直连猫箱） ==========
+// 与姊妹项目 carrot 共用同一个 Cloudflare Worker 兜底。只代理固定白名单，避免成为开放 SSRF 代理。
+const CATBOX_PROXY_MAX_BYTES = 30 * 1024 * 1024;
+const CATBOX_DIRECT_TIMEOUT_MS = 6000;
+const CATBOX_FALLBACK_TIMEOUT_MS = 15000;
+const CATBOX_DIRECT_CIRCUIT_MS = 5 * 60 * 1000;
+const CATBOX_ALLOWED_HOSTS = new Set(['catbox.moe', 'files.catbox.moe', 'litterbox.catbox.moe']);
+const CATBOX_WSRV_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.tiff', '.svg']);
+const CATBOX_RELAY_URL = process.env.BUNNYOS_CATBOX_RELAY_URL || 'https://carrot-catbox-relay.bunnyj0622.workers.dev';
+const CATBOX_PROXY_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36';
+
+function catboxResourceExtension(contentType, urlPath = '') {
+    const lower = String(contentType || '').toLowerCase();
+    const knownTypes = [
+        ['png', '.png'], ['webp', '.webp'], ['gif', '.gif'], ['jpeg', '.jpg'], ['jpg', '.jpg'],
+        ['svg', '.svg'], ['mp4', '.mp4'], ['webm', '.webm'], ['woff2', '.woff2'], ['woff', '.woff'],
+        ['truetype', '.ttf'], ['font-sfnt', '.ttf'], ['opentype', '.otf'], ['font-otf', '.otf'],
+        ['mpeg', '.mp3'], ['wav', '.wav'], ['ogg', '.ogg'],
+    ];
+    for (const [needle, extension] of knownTypes) {
+        if (lower.includes(needle)) return extension;
+    }
+    const extension = path.extname(urlPath).toLowerCase();
+    return /^\.(png|jpe?g|webp|gif|svg|bmp|tiff|mp4|webm|woff2?|ttf|otf|mp3|wav|ogg)$/.test(extension)
+        ? (extension === '.jpeg' ? '.jpg' : extension)
+        : '';
+}
+
+function catboxContentType(extension) {
+    return ({
+        '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif', '.jpg': 'image/jpeg',
+        '.svg': 'image/svg+xml', '.bmp': 'image/bmp', '.tiff': 'image/tiff', '.mp4': 'video/mp4',
+        '.webm': 'video/webm', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf',
+        '.otf': 'font/otf', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg',
+    })[extension] || '';
+}
+
+function catboxRelayTarget(originalUrl) {
+    if (!CATBOX_RELAY_URL) return '';
+    try {
+        const relay = new URL(CATBOX_RELAY_URL);
+        if (relay.protocol !== 'https:') return '';
+        relay.searchParams.set('url', originalUrl);
+        return relay.toString();
+    } catch {
+        return '';
+    }
+}
+
+function streamCatboxResource(targetUrl, res, { timeoutMs, redirectAllowed, redirectsLeft = 5 } = {}) {
+    return new Promise((resolve, reject) => {
+        let target;
+        try { target = new URL(targetUrl); } catch (error) { reject(error); return; }
+        if (target.protocol !== 'https:' || (redirectAllowed && !redirectAllowed(target))) {
+            reject(new Error('redirect target not allowed'));
+            return;
+        }
+
+        const request = https.request({
+            hostname: target.hostname,
+            port: target.port || 443,
+            path: `${target.pathname}${target.search}`,
+            method: 'GET',
+            headers: { 'User-Agent': CATBOX_PROXY_USER_AGENT },
+            timeout: timeoutMs,
+        }, (upstream) => {
+            const status = upstream.statusCode || 0;
+            if (status >= 300 && status < 400 && upstream.headers.location && redirectsLeft > 0) {
+                upstream.resume();
+                let next;
+                try { next = new URL(upstream.headers.location, target).toString(); } catch (error) { reject(error); return; }
+                resolve(streamCatboxResource(next, res, { timeoutMs, redirectAllowed, redirectsLeft: redirectsLeft - 1 }));
+                return;
+            }
+            if (status < 200 || status >= 300) {
+                upstream.resume();
+                reject(new Error(`upstream status ${status}`));
+                return;
+            }
+            const declaredLength = Number(upstream.headers['content-length'] || 0);
+            if (declaredLength > CATBOX_PROXY_MAX_BYTES) {
+                upstream.resume();
+                reject(new Error('response too large'));
+                return;
+            }
+
+            const upstreamType = upstream.headers['content-type'] || '';
+            const extension = catboxResourceExtension(upstreamType, target.pathname);
+            res.setHeader('Content-Type', catboxContentType(extension) || upstreamType || 'application/octet-stream');
+            res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+            res.setHeader('X-Content-Type-Options', 'nosniff');
+
+            let total = 0;
+            let overflowed = false;
+            upstream.on('data', (chunk) => {
+                total += chunk.length;
+                if (!overflowed && total > CATBOX_PROXY_MAX_BYTES) {
+                    overflowed = true;
+                    upstream.destroy(new Error('response too large'));
+                    request.destroy(new Error('response too large'));
+                    try { res.end(); } catch {}
+                    reject(new Error('response too large'));
+                }
+            });
+            upstream.pipe(res);
+            upstream.once('end', () => { if (!overflowed) resolve(); });
+            upstream.once('error', (error) => { if (!overflowed) reject(error); });
+        });
+        request.on('timeout', () => request.destroy(new Error('request timeout')));
+        request.on('error', reject);
+        request.end();
+    });
+}
+
+let catboxDirectBrokenUntil = 0;
+
+app.get('/api/proxy/catbox', async (req, res) => {
+    const rawUrl = String(req.query.url || '');
+    if (!rawUrl) return res.status(400).json({ error: '缺少 Catbox URL', error_code: 'MISSING_CATBOX_URL' });
+
+    let target;
+    try { target = new URL(rawUrl); } catch {
+        return res.status(400).json({ error: 'Catbox URL 无效', error_code: 'INVALID_CATBOX_URL' });
+    }
+    if (target.protocol !== 'https:' || !CATBOX_ALLOWED_HOSTS.has(target.hostname.toLowerCase())) {
+        return res.status(403).json({ error: '该域名不在 Catbox 代理白名单中', error_code: 'CATBOX_HOST_NOT_ALLOWED' });
+    }
+
+    const originalUrl = target.toString();
+    const attempts = [];
+    if (Date.now() >= catboxDirectBrokenUntil) {
+        attempts.push({
+            label: 'VPS 直连',
+            target: originalUrl,
+            timeoutMs: CATBOX_DIRECT_TIMEOUT_MS,
+            redirectAllowed: url => CATBOX_ALLOWED_HOSTS.has(url.hostname.toLowerCase()),
+            direct: true,
+        });
+    }
+    const relayTarget = catboxRelayTarget(originalUrl);
+    if (relayTarget) {
+        const relayHost = new URL(relayTarget).hostname.toLowerCase();
+        attempts.push({
+            label: 'Cloudflare 中转',
+            target: relayTarget,
+            timeoutMs: CATBOX_FALLBACK_TIMEOUT_MS,
+            redirectAllowed: url => url.hostname.toLowerCase() === relayHost,
+        });
+    }
+    const extension = catboxResourceExtension('', target.pathname);
+    if (CATBOX_WSRV_EXTENSIONS.has(extension)) {
+        attempts.push({
+            label: 'wsrv.nl 图片中转',
+            target: `https://wsrv.nl/?url=${encodeURIComponent(target.hostname + target.pathname + target.search)}`,
+            timeoutMs: CATBOX_FALLBACK_TIMEOUT_MS,
+            redirectAllowed: url => url.hostname.toLowerCase() === 'wsrv.nl',
+        });
+    }
+
+    const failures = [];
+    for (const attempt of attempts) {
+        try {
+            await streamCatboxResource(attempt.target, res, attempt);
+            if (attempt.direct) catboxDirectBrokenUntil = 0;
+            return;
+        } catch (error) {
+            failures.push(`${attempt.label}: ${error?.message || error}`);
+            if (attempt.direct) catboxDirectBrokenUntil = Date.now() + CATBOX_DIRECT_CIRCUIT_MS;
+            if (res.headersSent) {
+                try { res.end(); } catch {}
+                return;
+            }
+            console.warn(`[Catbox proxy] ${attempt.label}失败`, error?.message || error);
+        }
+    }
+    return res.status(502).json({
+        error: 'Catbox 资源的所有访问链路均失败',
+        error_code: 'CATBOX_ALL_UPSTREAMS_FAILED',
+        detail: failures,
+    });
+});
+
 // ========== 图床代理（绕开浏览器 CORS） ==========
 // 详见 QQ美化系统计划.md §1.8。默认走 catbox，可在设置里配自定义端点兜底。
 async function uploadToCatbox(parsed) {
@@ -1931,10 +2117,12 @@ app.post('/api/qq/link-preview', async (req, res) => {
         const isXhsHost = (hostname) => /(^|\.)xhslink\.com$|(^|\.)xiaohongshu\.com$|(^|\.)xhscdn\.com$/i.test(hostname || '');
         const isDouyinHost = (hostname) => /(^|\.)douyin\.com$|(^|\.)iesdouyin\.com$|(^|\.)douyinpic\.com$|(^|\.)amemv\.com$/i.test(hostname || '');
         const isWechatHost = (hostname) => /(^|\.)mp\.weixin\.qq\.com$|(^|\.)weixin\.qq\.com$/i.test(hostname || '');
+        const isWeiboHost = (hostname) => /(^|\.)weibo\.com$|(^|\.)m\.weibo\.cn$|(^|\.)sinaimg\.cn$/i.test(hostname || '');
         const inferSiteName = (hostname) => {
             if (isXhsHost(hostname)) return '小红书';
             if (isDouyinHost(hostname)) return '抖音';
             if (isWechatHost(hostname)) return '微信公众号';
+            if (isWeiboHost(hostname)) return '微博';
             return hostname || '链接';
         };
         const isGenericPreviewText = (text, hostname = host) => {
@@ -1943,6 +2131,10 @@ app.post('/api/qq/link-preview', async (req, res) => {
             if (isXhsHost(hostname)) {
                 return /^(小红书|小红书 - 你的生活指南|小红书 - 标记我的生活|xiaohongshu|xhs)$/i.test(value)
                     || /登录|访问链接异常|正在跳转|安全验证|验证码/.test(value);
+            }
+            if (isWeiboHost(hostname)) {
+                return /^(微博|微博正文 - 微博|新浪微博)$/i.test(value)
+                    || /Sina Visitor System|登录|注册|访问异常|验证码/.test(value);
             }
             return false;
         };
@@ -2107,11 +2299,17 @@ app.post('/api/qq/link-preview', async (req, res) => {
                 source: 'jina'
             };
         };
-        const tryJinaReader = async (targetUrl, token = '') => {
+        // 解析 jinaToken 设置项：支持逗号/空白分隔多个 key，轮流试
+        const parseJinaTokens = (raw) => String(raw || '')
+            .split(/[,\s]+/)
+            .map(s => s.trim())
+            .filter(Boolean);
+        // 401/402/403/429 视为额度/限流/鉴权问题，才切下一个 key；其他错误直接放弃，不空耗额度
+        const isJinaQuotaError = (status) => status === 401 || status === 402 || status === 429 || status === 403;
+        const tryJinaOnce = async (targetUrl, token, timeoutMs = 12000) => {
             const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), 12000);
+            const timer = setTimeout(() => controller.abort(), timeoutMs);
             try {
-                console.log(`[link-preview jina] target=${targetUrl} token=${token ? 'yes' : 'no'}`);
                 const readerResp = await fetch(`https://r.jina.ai/${targetUrl}`, {
                     method: 'GET',
                     redirect: 'follow',
@@ -2121,15 +2319,35 @@ app.post('/api/qq/link-preview', async (req, res) => {
                         ...(token ? { 'Authorization': `Bearer ${token}` } : {})
                     }
                 });
-                if (!readerResp.ok) return null;
-                const markdown = await readerResp.text();
-                return normalizeJinaMarkdown(markdown, targetUrl);
+                return { ok: readerResp.ok, status: readerResp.status, text: readerResp.ok ? await readerResp.text() : '' };
             } catch (e) {
-                console.warn('[link-preview jina failed]', e?.message || e);
-                return null;
+                return { ok: false, status: 0, error: e?.message || String(e) };
             } finally {
                 clearTimeout(timer);
             }
+        };
+        const tryJinaReader = async (targetUrl, rawToken = '') => {
+            const tokens = parseJinaTokens(rawToken);
+            const sequence = tokens.length ? tokens : ['']; // 没配 key 也匿名试一次
+            let lastFail = '';
+            for (let i = 0; i < sequence.length; i++) {
+                const token = sequence[i];
+                const tag = token ? `key #${i + 1}` : '匿名';
+                console.log(`[link-preview jina] target=${targetUrl} ${tag}`);
+                const result = await tryJinaOnce(targetUrl, token);
+                if (result.ok) {
+                    if (i > 0) console.log(`[link-preview jina] 切到 ${tag} 成功`);
+                    return normalizeJinaMarkdown(result.text, targetUrl);
+                }
+                lastFail = result.error || `HTTP ${result.status}`;
+                if (!result.status || !isJinaQuotaError(result.status)) {
+                    console.warn(`[link-preview jina] ${tag} 失败（${lastFail}），不切下一个`);
+                    return null;
+                }
+                console.warn(`[link-preview jina] ${tag} 额度/限流（${lastFail}），尝试下一个 key`);
+            }
+            console.warn(`[link-preview jina] 所有 key 耗尽，最后错误：${lastFail}`);
+            return null;
         };
         const isUsefulPreview = (preview, hostname = host) => {
             if (!preview) return false;
@@ -2262,6 +2480,89 @@ app.post('/api/qq/link-preview', async (req, res) => {
                 source: 'douyin-html'
             };
         };
+
+        // ── 工具：抖音 / 微博评论抓取（走各自公开 web API，非登录态）─────────────
+        const normalizeGenericComments = (list, limit = 10) => {
+            const out = [];
+            const push = (item, parentNickname = '') => {
+                if (!item || out.length >= limit) return;
+                const user = item.user || {};
+                const nickname = String(user.nickname || user.screen_name || user.name || item.screen_name || '').trim();
+                const content = String(item.text || item.text_raw || item.content || item.reply_comment?.text || '').replace(/<[^>]+>/g, '').trim();
+                const ipLocation = String(item.ip_label || item.ipLocation || item.source || '').replace(/^来自/, '').trim();
+                const likeCount = item.digg_count ?? item.like_count ?? item.likeCount ?? item.attitudes_count ?? '';
+                if (!content && !nickname) return;
+                out.push({ nickname, content, ipLocation, likeCount, parentNickname });
+            };
+            for (const item of Array.isArray(list) ? list : []) {
+                push(item);
+                const replies = item.reply_comment ? [item.reply_comment] : [];
+                for (const reply of replies) push(reply, item.user?.nickname || item.user?.screen_name || '');
+                if (out.length >= limit) break;
+            }
+            return out;
+        };
+        const extractDouyinAwemeId = (html, baseUrl) => {
+            try {
+                const parsed = new URL(baseUrl);
+                const pathId = parsed.pathname.match(/\/(?:video|note)\/(\d+)/)?.[1];
+                if (pathId) return pathId;
+                const modalId = parsed.searchParams.get('modal_id') || parsed.searchParams.get('aweme_id');
+                if (modalId) return modalId;
+            } catch {}
+            return String(html || '').match(/(?:aweme_id|modal_id|video_id|itemId)["']?\s*[:=]\s*["']?(\d{10,})/)?.[1] || '';
+        };
+        const fetchDouyinComments = async (awemeId) => {
+            if (!awemeId) return [];
+            try {
+                const r = await fetch(`https://www.iesdouyin.com/web/api/v2/comment/list/?aweme_id=${encodeURIComponent(awemeId)}&count=20&cursor=0`, {
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+                        'Accept': 'application/json,text/plain,*/*',
+                        'Referer': 'https://www.douyin.com/'
+                    }
+                });
+                if (!r.ok) return [];
+                const data = await r.json().catch(() => null);
+                return normalizeGenericComments(data?.comments || [], 10);
+            } catch {
+                return [];
+            }
+        };
+        const extractWeiboId = (url) => {
+            try {
+                const parsed = new URL(url);
+                return parsed.pathname.match(/\/(\d{10,})\/?$/)?.[1]
+                    || parsed.pathname.match(/\/detail\/(\d{10,})/)?.[1]
+                    || parsed.searchParams.get('id')
+                    || '';
+            } catch { return ''; }
+        };
+        const fetchWeiboComments = async (weiboId) => {
+            if (!weiboId) return [];
+            const urls = [
+                `https://m.weibo.cn/comments/hotflow?id=${encodeURIComponent(weiboId)}&mid=${encodeURIComponent(weiboId)}&max_id_type=0`,
+                `https://weibo.com/ajax/statuses/buildComments?is_reload=1&id=${encodeURIComponent(weiboId)}&is_show_bulletin=2&is_mix=0&count=20`
+            ];
+            for (const url of urls) {
+                try {
+                    const r = await fetch(url, {
+                        headers: {
+                            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+                            'Accept': 'application/json,text/plain,*/*',
+                            'Referer': 'https://m.weibo.cn/'
+                        }
+                    });
+                    const ctype = r.headers.get('content-type') || '';
+                    if (!r.ok || !/json/i.test(ctype)) continue;
+                    const data = await r.json().catch(() => null);
+                    const comments = normalizeGenericComments(data?.data?.data || data?.data || [], 10);
+                    if (comments.length) return comments;
+                } catch {}
+            }
+            return [];
+        };
+
         const htmlDecode = (s) => String(s || '')
             .replace(/&nbsp;/g, ' ')
             .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
@@ -2517,15 +2818,50 @@ app.post('/api/qq/link-preview', async (req, res) => {
 
         if (isDouyinHost(finalHost)) {
             const douyinData = html ? parseDouyinFromHtml(html, finalUrl) : null;
+            const douyinComments = await fetchDouyinComments(extractDouyinAwemeId(html, finalUrl));
             if (douyinData && isUsefulPreview(douyinData, finalHost)) {
-                return await sendPreview(douyinData, finalUrl);
+                return await sendPreview({ ...douyinData, comments: douyinComments }, finalUrl);
             }
             const jinaDouyin = await tryJinaReader(finalUrl, jinaToken);
-            if (isUsefulPreview(jinaDouyin, finalHost)) return await sendPreview({ ...jinaDouyin, siteName: '抖音' }, finalUrl);
+            if (isUsefulPreview(jinaDouyin, finalHost)) return await sendPreview({ ...jinaDouyin, siteName: '抖音', comments: douyinComments }, finalUrl);
             const sharedDouyin = cleanSharedText(rawText);
             if (sharedDouyin) {
-                return await sendPreview({ url: finalUrl, title: sharedDouyin, description: sharedDouyin, image: '', siteName: '抖音', source: 'douyin-shared-text' }, finalUrl);
+                return await sendPreview({ url: finalUrl, title: sharedDouyin, description: sharedDouyin, image: '', comments: douyinComments, siteName: '抖音', source: 'douyin-shared-text' }, finalUrl);
             }
+        }
+
+        // Step 3b: 微博。常先跳 visitor 验证页，需在通用 OG 前特化处理。
+        if (isWeiboHost(host) || isWeiboHost(finalHost)) {
+            const weiboComments = await fetchWeiboComments(extractWeiboId(u.toString()) || extractWeiboId(finalUrl));
+            if (html && !/Sina Visitor System|visitor\.passport\.weibo\.cn/i.test(html + finalUrl)) {
+                const og = parseOgFromHtml(html, finalUrl);
+                if (og.description || og.image || (og.title && !isGenericPreviewText(og.title, finalHost))) {
+                    return await sendPreview({
+                        url: finalUrl,
+                        title: og.title || '微博',
+                        description: og.description || '',
+                        image: og.image || '',
+                        comments: weiboComments,
+                        siteName: '微博',
+                        source: 'weibo-og'
+                    }, finalUrl);
+                }
+            }
+            const jinaWeibo = await tryJinaReader(finalUrl, jinaToken);
+            if (isUsefulPreview(jinaWeibo, finalHost)) {
+                return await sendPreview({ ...jinaWeibo, siteName: '微博', comments: weiboComments }, finalUrl);
+            }
+            const sharedWeibo = cleanSharedText(rawText);
+            return await sendPreview({
+                url: finalUrl,
+                title: sharedWeibo || '微博',
+                description: '',
+                image: '',
+                comments: weiboComments,
+                siteName: '微博',
+                source: 'weibo-limited',
+                limitedReason: weiboComments.length ? '' : '微博未登录访问受限，评论可能需要 Cookie'
+            }, finalUrl);
         }
 
         if (isWechatHost(finalHost)) {
@@ -3004,16 +3340,25 @@ function sanitizeChatForStorage(chat) {
 app.get('/api/qq/chats', (req, res) => {
     try {
         if (!fs.existsSync(CHATS_DIR)) return res.json([]);
+        const summaryOnly = req.query.summary === '1' || req.query.summary === 'true';
         const files = fs.readdirSync(CHATS_DIR).filter(f => f.endsWith('.json'));
         const list = files.map(f => {
             try {
                 const file = path.join(CHATS_DIR, f);
                 const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
                 const clean = sanitizeChatForStorage(raw);
+                settleExpiredUserTransfers(clean.messages);
                 if (JSON.stringify(raw) !== JSON.stringify(clean)) {
                     fs.writeFileSync(file, JSON.stringify(clean, null, 2), 'utf-8');
                 }
-                return clean;
+                if (!summaryOnly) return clean;
+                const { messages, ...meta } = clean;
+                return {
+                    ...meta,
+                    lastMessage: messages[messages.length - 1] || null,
+                    messageCount: messages.length,
+                    favoriteCount: messages.filter(message => message?.favorited).length,
+                };
             } catch { return null; }
         }).filter(Boolean);
         list.sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
@@ -3029,6 +3374,7 @@ app.get('/api/qq/chats/:characterId', (req, res) => {
         if (!fs.existsSync(file)) return res.json({ characterId: req.params.characterId, messages: [] });
         const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
         const clean = sanitizeChatForStorage(raw);
+        settleExpiredUserTransfers(clean.messages);
         if (JSON.stringify(raw) !== JSON.stringify(clean)) {
             fs.writeFileSync(file, JSON.stringify(clean, null, 2), 'utf-8');
         }
@@ -3038,32 +3384,20 @@ app.get('/api/qq/chats/:characterId', (req, res) => {
     }
 });
 
-// 1 楼层 = 1 轮 user-char 交互 = transfer 之后出现的 1 个不同 reply_group_id
-// 满 10 轮仍 pending 的 user→char 红包自动退回，详见 QQ美化系统计划.md §1.2
-const TRANSFER_AUTO_RETURN_ROUNDS = 10;
-function countRoundsSince(messages, fromIdx) {
-    const groupIds = new Set();
-    for (let i = fromIdx + 1; i < messages.length; i++) {
-        const m = messages[i];
-        if (m && m.role === 'assistant' && m.reply_group_id) {
-            groupIds.add(m.reply_group_id);
-        }
-    }
-    return groupIds.size;
-}
-
-function settleUserTransfers(messages) {
+// user→char 红包按现实时间满 24 小时自动退回，与后续聊了多少轮无关。
+const TRANSFER_AUTO_RETURN_MS = 24 * 60 * 60 * 1000;
+function settleExpiredUserTransfers(messages, now = Date.now()) {
     let walletDelta = 0;
     const updates = [];
     for (let i = 0; i < messages.length; i++) {
         const m = messages[i];
         if (!m || m.role !== 'user' || m.type !== 'transfer' || m.status !== 'pending') continue;
-        const rounds = countRoundsSince(messages, i);
-        if (rounds < TRANSFER_AUTO_RETURN_ROUNDS) continue;
+        const sentAt = Number(m.created_at);
+        if (!Number.isFinite(sentAt) || now - sentAt < TRANSFER_AUTO_RETURN_MS) continue;
         const amt = Number(m.amount);
         if (!Number.isFinite(amt) || amt <= 0) continue;
         m.status = 'returned';
-        m.settled_at = Date.now();
+        m.settled_at = now;
         walletDelta += amt;
         updates.push({ idx: i, amount: amt });
     }
@@ -3071,13 +3405,70 @@ function settleUserTransfers(messages) {
         try {
             const w = readWallet();
             writeJsonFile(WALLET_FILE, { balance: w.balance + walletDelta, updated_at: Date.now() });
-            console.log(`[WALLET] +${walletDelta} (transfer auto-return × ${updates.length})`);
+            console.log(`[WALLET] +${walletDelta} (24h transfer auto-return × ${updates.length})`);
         } catch (err) {
             console.warn('[WALLET] auto-return write failed', err);
         }
     }
     return updates;
 }
+
+function findEarliestPendingTransferExpiry(messages) {
+    let earliest = Infinity;
+    for (const message of messages) {
+        if (!message || message.role !== 'user' || message.type !== 'transfer' || message.status !== 'pending') continue;
+        const sentAt = Number(message.created_at);
+        const amount = Number(message.amount);
+        if (!Number.isFinite(sentAt) || !Number.isFinite(amount) || amount <= 0) continue;
+        earliest = Math.min(earliest, sentAt + TRANSFER_AUTO_RETURN_MS);
+    }
+    return earliest;
+}
+
+let transferSettlementTimer = null;
+let nextTransferSettlementAt = Infinity;
+
+function armTransferSettlement(expiryAt) {
+    if (!Number.isFinite(expiryAt)) return;
+    if (transferSettlementTimer && expiryAt >= nextTransferSettlementAt) return;
+
+    if (transferSettlementTimer) clearTimeout(transferSettlementTimer);
+    nextTransferSettlementAt = expiryAt;
+    // Node.js 单个 timer 的最大延迟约为 24.8 天；超出时先睡到上限，再重新计算。
+    const delay = Math.min(Math.max(0, expiryAt - Date.now()), 2_147_000_000);
+    transferSettlementTimer = setTimeout(() => {
+        transferSettlementTimer = null;
+        nextTransferSettlementAt = Infinity;
+        scanAndScheduleExpiredUserTransfers();
+    }, delay);
+    transferSettlementTimer.unref?.();
+}
+
+function scanAndScheduleExpiredUserTransfers() {
+    if (!fs.existsSync(CHATS_DIR)) return 0;
+    let settled = 0;
+    let earliestExpiry = Infinity;
+    for (const fileName of fs.readdirSync(CHATS_DIR).filter(name => name.endsWith('.json'))) {
+        const filePath = path.join(CHATS_DIR, fileName);
+        try {
+            const chat = sanitizeChatForStorage(readJsonFile(filePath, {}));
+            const updates = settleExpiredUserTransfers(chat.messages);
+            if (updates.length) {
+                fs.writeFileSync(filePath, JSON.stringify(chat, null, 2), 'utf-8');
+                settled += updates.length;
+            }
+            earliestExpiry = Math.min(earliestExpiry, findEarliestPendingTransferExpiry(chat.messages));
+        } catch (error) {
+            console.warn('[WALLET] scan expired transfers failed', fileName, error?.message || error);
+        }
+    }
+    armTransferSettlement(earliestExpiry);
+    return settled;
+}
+
+// 启动时补结算停机期间已过期的红包；之后只在最近一个红包到期时唤醒。
+const transferSettlementStartupTimer = setTimeout(scanAndScheduleExpiredUserTransfers, 1000);
+transferSettlementStartupTimer.unref?.();
 
 // 领取 char→user 的红包：校验 + 改 status + 加钱 + 落盘
 app.post('/api/qq/chats/:characterId/transfer/:idx/receive', (req, res) => {
@@ -3118,7 +3509,7 @@ app.post('/api/qq/chats/:characterId', (req, res) => {
     try {
         const characterId = req.params.characterId;
         const messages = sanitizeChatMessagesForStorage(req.body?.messages);
-        settleUserTransfers(messages);
+        settleExpiredUserTransfers(messages);
         const chatFile = path.join(CHATS_DIR, `${characterId}.json`);
         // 保留原 chat 的辅助字段（如 hidden），只覆盖 messages + updated_at
         const prev = fs.existsSync(chatFile) ? readJsonFile(chatFile, {}) : {};
@@ -3129,6 +3520,7 @@ app.post('/api/qq/chats/:characterId', (req, res) => {
             updated_at: Date.now()
         };
         fs.writeFileSync(chatFile, JSON.stringify(data, null, 2), 'utf-8');
+        armTransferSettlement(findEarliestPendingTransferExpiry(messages));
         res.json(data);
     } catch (e) {
         res.status(500).json({ error: '保存聊天失败' });
@@ -3257,6 +3649,9 @@ function linkPromptKind(msg) {
     }
     if (site.includes('微信公众号') || site.includes('微信公众平台') || source.includes('wechat') || source.includes('weixin') || /(^|\/\/|\.)mp\.weixin\.qq\.com/.test(url)) {
         return { tag: 'wx', suffix: 'wx', fallbackTitle: '微信公众号文章' };
+    }
+    if (site.includes('微博') || source.includes('weibo') || /(^|\/\/|\.)(weibo\.com|m\.weibo\.cn)/.test(url)) {
+        return { tag: 'wb', suffix: 'wb', fallbackTitle: '微博' };
     }
     return null;
 }
@@ -3430,22 +3825,107 @@ function splitReplyToSegments(text) {
     return segments;
 }
 
+// 模仿 SillyTavern 的错误透传思路：尽量解析上游 JSON，同时保留脱敏后的原始响应。
+function sanitizeErrorDetail(value, maxLength = 12000) {
+    return String(value ?? '')
+        .replace(/(authorization\s*[:=]\s*bearer\s+)[^\s,"'}]+/gi, '$1[REDACTED]')
+        .replace(/("(?:authorization|api[_-]?key|token)"\s*:\s*")[^"]+("?)/gi, '$1[REDACTED]$2')
+        .replace(/\b(sk-[A-Za-z0-9_-]{8,})\b/g, '[REDACTED_API_KEY]')
+        .replace(/([?&](?:key|token|api_key|apikey)=)[^&\s]+/gi, '$1[REDACTED]')
+        .slice(0, maxLength);
+}
+
+function parseJsonResponseText(rawText) {
+    try { return JSON.parse(rawText); } catch { return null; }
+}
+
+function firstErrorValue(...values) {
+    return values.find(value => value !== undefined && value !== null && String(value).trim() !== '');
+}
+
+function buildUpstreamErrorPayload({ upstream, rawText, model = '', operation = 'reply', attempt = 1 }) {
+    const parsed = parseJsonResponseText(rawText);
+    const envelope = parsed?.error && typeof parsed.error === 'object' ? parsed.error : {};
+    const detailError = parsed?.detail?.error && typeof parsed.detail.error === 'object' ? parsed.detail.error : {};
+    const nestedBody = envelope?.upstream_body ?? parsed?.upstream_body;
+    const nestedParsed = typeof nestedBody === 'string' ? parseJsonResponseText(nestedBody) : nestedBody;
+    const providerError = nestedParsed?.error && typeof nestedParsed.error === 'object' ? nestedParsed.error : {};
+
+    const providerMessage = firstErrorValue(
+        providerError.message,
+        detailError.message,
+        envelope.message,
+        typeof parsed?.error === 'string' ? parsed.error : '',
+        parsed?.message,
+        upstream?.statusText
+    );
+    const gatewayMessage = firstErrorValue(envelope.message, parsed?.message);
+    const requestId = firstErrorValue(
+        providerError.request_id,
+        envelope.request_id,
+        parsed?.request_id,
+        upstream?.headers?.get?.('x-request-id'),
+        upstream?.headers?.get?.('request-id'),
+        upstream?.headers?.get?.('x-goog-request-id')
+    );
+    const upstreamStatus = Number(firstErrorValue(
+        envelope.upstream_status,
+        parsed?.upstream_status,
+        providerError.status,
+        upstream?.status
+    )) || upstream?.status || 0;
+
+    return {
+        error: String(providerMessage || `模型接口返回 HTTP ${upstreamStatus || '未知'}`),
+        upstream_message: gatewayMessage && gatewayMessage !== providerMessage ? String(gatewayMessage) : '',
+        error_code: String(firstErrorValue(providerError.code, detailError.code, envelope.code, parsed?.code, upstreamStatus ? `HTTP_${upstreamStatus}` : 'UPSTREAM_ERROR')),
+        error_type: String(firstErrorValue(providerError.type, detailError.type, envelope.type, parsed?.type, 'upstream_error')),
+        error_param: firstErrorValue(providerError.param, detailError.param, envelope.param, parsed?.param),
+        upstream_status: upstreamStatus,
+        upstream_status_text: String(upstream?.statusText || ''),
+        request_id: requestId ? String(requestId) : '',
+        model: String(model || ''),
+        operation,
+        attempt,
+        detail: sanitizeErrorDetail(rawText),
+        timestamp: new Date().toISOString()
+    };
+}
+
+function buildInternalErrorPayload(error, operation = 'reply') {
+    return {
+        error: error?.message || 'BunnyOS 内部错误',
+        error_code: String(error?.code || 'BUNNYOS_INTERNAL_ERROR'),
+        error_type: String(error?.name || 'Error'),
+        operation,
+        detail: sanitizeErrorDetail(error?.stack || error?.message || ''),
+        timestamp: new Date().toISOString()
+    };
+}
+
 app.post('/api/qq/reply', async (req, res) => {
     try {
         const { characterId, messages, chatType } = req.body || {};
         const resolvedChatType = chatType === 'group' ? 'group' : 'private';
-        if (!characterId) return res.status(400).json({ error: '缺少 characterId' });
+        if (!characterId) return res.status(400).json({
+            error: '缺少 characterId', error_code: 'MISSING_CHARACTER_ID', error_type: 'request_validation_error', operation: 'reply'
+        });
 
         const settings = readJsonFile(SETTINGS_FILE, {});
         const apiUrl = (settings.mainApi_url || '').trim();
         const apiKey = (settings.mainApi_key || '').trim();
         const model = (settings.mainApi_model || '').trim();
         if (!apiUrl || !apiKey || !model) {
-            return res.status(400).json({ error: '请先在「设置 / 通用 API」里配置并应用主 API（地址、密钥、模型）' });
+            return res.status(400).json({
+                error: '请先在「设置 / 通用 API」里配置并应用主 API（地址、密钥、模型）',
+                error_code: 'MAIN_API_NOT_CONFIGURED', error_type: 'configuration_error', operation: 'reply'
+            });
         }
 
         const character = readJsonFile(path.join(CHARACTERS_DIR, `${cleanName(characterId)}.json`), null);
-        if (!character) return res.status(404).json({ error: '未找到角色' });
+        if (!character) return res.status(404).json({
+            error: '未找到角色', error_code: 'CHARACTER_NOT_FOUND', error_type: 'not_found_error', operation: 'reply'
+        });
 
         const list = Array.isArray(messages) ? messages : [];
         const userPersona = getCurrentUserPersona();
@@ -3541,11 +4021,26 @@ app.post('/api/qq/reply', async (req, res) => {
             lastRawText = rawText;
             if (!upstream.ok) {
                 console.error('[QQ reply upstream error]', upstream.status, rawText.slice(0, 500));
-                return res.status(502).json({ error: `模型接口返回 ${upstream.status}`, detail: rawText.slice(0, 2000) });
+                return res.status(502).json(buildUpstreamErrorPayload({
+                    upstream, rawText, model, operation: 'reply', attempt: attemptUsed
+                }));
             }
             let data;
             try { data = JSON.parse(rawText); }
-            catch { return res.status(502).json({ error: '模型返回的不是有效 JSON', detail: rawText.slice(0, 500) }); }
+            catch {
+                return res.status(502).json({
+                    error: '模型返回的不是有效 JSON',
+                    error_code: 'INVALID_UPSTREAM_JSON',
+                    error_type: 'invalid_response_error',
+                    upstream_status: upstream.status,
+                    upstream_status_text: upstream.statusText,
+                    model,
+                    operation: 'reply',
+                    attempt: attemptUsed,
+                    detail: sanitizeErrorDetail(rawText),
+                    timestamp: new Date().toISOString()
+                });
+            }
             const chunk = (data?.choices?.[0]?.message?.content || '').trim();
             finishReason = data?.choices?.[0]?.finish_reason || '';
 
@@ -3570,21 +4065,42 @@ app.post('/api/qq/reply', async (req, res) => {
         if (!rawAccumulatedForRetry) {
             return res.status(502).json({
                 error: `模型没有返回内容（finish_reason=${finishReason || '未知'}）`,
-                detail: lastRawText.slice(0, 2000)
+                error_code: 'EMPTY_UPSTREAM_RESPONSE',
+                error_type: 'empty_response_error',
+                finish_reason: finishReason || '',
+                model,
+                operation: 'reply',
+                attempt: attemptUsed,
+                detail: sanitizeErrorDetail(lastRawText),
+                timestamp: new Date().toISOString()
             });
         }
         const cleaned = cleanedAccumulated.trim();
         if (!cleaned) {
             return res.status(502).json({
                 error: `模型只返回了 <think> 思维链，剥离后无可见正文（finish_reason=${finishReason || '未知'}，已尝试 ${attemptUsed} 次）`,
-                detail: lastRawText.slice(0, 2000)
+                error_code: 'THINKING_ONLY_RESPONSE',
+                error_type: 'empty_visible_response_error',
+                finish_reason: finishReason || '',
+                model,
+                operation: 'reply',
+                attempt: attemptUsed,
+                detail: sanitizeErrorDetail(lastRawText),
+                timestamp: new Date().toISOString()
             });
         }
         const segments = splitReplyToSegments(cleaned);
         if (!segments.length) {
             return res.status(502).json({
                 error: '清洗后切不出有效气泡段',
-                detail: lastRawText.slice(0, 2000)
+                error_code: 'EMPTY_REPLY_SEGMENTS',
+                error_type: 'reply_parse_error',
+                finish_reason: finishReason || '',
+                model,
+                operation: 'reply',
+                attempt: attemptUsed,
+                detail: sanitizeErrorDetail(lastRawText),
+                timestamp: new Date().toISOString()
             });
         }
         // 后台推送：SW 收到后决定是否弹（焦点客户端会被 SW 跳过）
@@ -3600,7 +4116,7 @@ app.post('/api/qq/reply', async (req, res) => {
         res.json({ segments, reply: cleaned });
     } catch (e) {
         console.error('[QQ reply error]', e);
-        res.status(500).json({ error: '生成回复失败：' + (e.message || '未知错误') });
+        res.status(500).json(buildInternalErrorPayload(e, 'reply'));
     }
 });
 
@@ -3660,14 +4176,20 @@ app.post('/api/qq/impersonate', async (req, res) => {
     try {
         const { characterId, messages, chatType } = req.body || {};
         const resolvedChatType = chatType === 'group' ? 'group' : 'private';
-        if (!characterId) return res.status(400).json({ error: '缺少 characterId' });
+        if (!characterId) return res.status(400).json({
+            error: '缺少 characterId', error_code: 'MISSING_CHARACTER_ID', error_type: 'request_validation_error', operation: 'impersonate'
+        });
         const settings = readJsonFile(SETTINGS_FILE, {});
         const apiUrl = (settings.mainApi_url || '').trim();
         const apiKey = (settings.mainApi_key || '').trim();
         const model = (settings.mainApi_model || '').trim();
-        if (!apiUrl || !apiKey || !model) return res.status(400).json({ error: '请先在设置里配置主 API' });
+        if (!apiUrl || !apiKey || !model) return res.status(400).json({
+            error: '请先在设置里配置主 API', error_code: 'MAIN_API_NOT_CONFIGURED', error_type: 'configuration_error', operation: 'impersonate'
+        });
         const character = readJsonFile(path.join(CHARACTERS_DIR, `${cleanName(characterId)}.json`), null);
-        if (!character) return res.status(404).json({ error: '未找到角色' });
+        if (!character) return res.status(404).json({
+            error: '未找到角色', error_code: 'CHARACTER_NOT_FOUND', error_type: 'not_found_error', operation: 'impersonate'
+        });
         const list = Array.isArray(messages) ? messages : [];
         const userPersona = getCurrentUserPersona();
         const variables = buildPromptVariables({ characterId, userName: userPersona?.name || '', messages: list });
@@ -3703,29 +4225,61 @@ app.post('/api/qq/impersonate', async (req, res) => {
             body: JSON.stringify({ model, messages: baseMessages, temperature, max_tokens: maxReply, top_p, frequency_penalty, presence_penalty, stream: false })
         });
         const rawText = await upstream.text();
-        if (!upstream.ok) return res.status(502).json({ error: `模型接口返回 ${upstream.status}`, detail: rawText.slice(0, 500) });
+        if (!upstream.ok) {
+            console.error('[QQ impersonate upstream error]', upstream.status, rawText.slice(0, 500));
+            return res.status(502).json(buildUpstreamErrorPayload({
+                upstream, rawText, model, operation: 'impersonate', attempt: 1
+            }));
+        }
         let data;
         try { data = JSON.parse(rawText); }
-        catch { return res.status(502).json({ error: '模型返回的不是有效 JSON' }); }
+        catch {
+            return res.status(502).json({
+                error: '模型返回的不是有效 JSON',
+                error_code: 'INVALID_UPSTREAM_JSON',
+                error_type: 'invalid_response_error',
+                upstream_status: upstream.status,
+                upstream_status_text: upstream.statusText,
+                model,
+                operation: 'impersonate',
+                attempt: 1,
+                detail: sanitizeErrorDetail(rawText),
+                timestamp: new Date().toISOString()
+            });
+        }
         const reply = data?.choices?.[0]?.message?.content?.trim();
         const finishReason = data?.choices?.[0]?.finish_reason;
         if (!reply) return res.status(502).json({
             error: `模型没有返回内容（finish_reason=${finishReason || '未知'}）`,
-            detail: rawText.slice(0, 2000)
+            error_code: 'EMPTY_UPSTREAM_RESPONSE',
+            error_type: 'empty_response_error',
+            finish_reason: finishReason || '',
+            model,
+            operation: 'impersonate',
+            attempt: 1,
+            detail: sanitizeErrorDetail(rawText),
+            timestamp: new Date().toISOString()
         });
         const cleaned = stripThinkingTags(reply);
         if (!cleaned) return res.status(502).json({
             error: `代回只返回了 <think> 思维链，剥离后无可见正文`,
-            detail: rawText.slice(0, 2000)
+            error_code: 'THINKING_ONLY_RESPONSE',
+            error_type: 'empty_visible_response_error',
+            finish_reason: finishReason || '',
+            model,
+            operation: 'impersonate',
+            attempt: 1,
+            detail: sanitizeErrorDetail(rawText),
+            timestamp: new Date().toISOString()
         });
         res.json({ text: cleaned });
     } catch (e) {
         console.error('[impersonate]', e);
-        res.status(500).json({ error: e.message || '代回失败' });
+        res.status(500).json(buildInternalErrorPayload(e, 'impersonate'));
     }
 });
 
-app.listen(PORT, () => {
+const bunnyosHttpServer = app.listen(PORT, () => {
     cleanupLinkPreviewCache();
     console.log('===========================================');
     console.log(`[BunnyOS v2-qq-413debug] booted ${new Date().toISOString()}`);
@@ -3734,3 +4288,5 @@ app.listen(PORT, () => {
     console.log(`  url:        http://localhost:${PORT}/index.html`);
     console.log('===========================================');
 });
+
+module.exports = { app, bunnyosHttpServer };

@@ -1,6 +1,6 @@
 # 社交链接解析技术笔记
 
-本文记录 BunnyOS 里小红书、抖音、微信公众号链接解析的实现经验，覆盖正文、封面图、评论、前端/后端抓取顺序、AI 可读图片，以及 prompt 中的平台标签和轮次衰减。
+本文记录 BunnyOS 里小红书、抖音、微信公众号、微博链接解析的实现经验，覆盖正文、封面图、评论、前端/后端抓取顺序、AI 可读图片，以及 prompt 中的平台标签和轮次衰减。
 
 ## 目标
 
@@ -11,18 +11,19 @@
 - 解析标题、正文/描述、话题标签等文本内容
 - 解析封面图，并缓存成本地静态文件用于卡片显示
 - 将封面图作为多模态图片附件发给 AI，而不是只把图片 URL 发给 AI
-- 小红书解析页面首屏状态里能拿到的前 10 条评论，包含楼中楼回复
-- 发给 AI 的平台内容分别用 `<xhs>...</xhs>`、`<dy>...</dy>`、`<wx>...</wx>` 包裹
-- 6 组 user-char 对话后，旧平台链接内容从 prompt 中衰减为 `[标题-正文前15字.xhs|dy|wx]`
-- 原生抓取失败时再走 Jina Reader 兜底
+- 小红书解析页面首屏状态里能拿到的前 10 条评论，包含楼中楼回复；抖音、微博走各自公开 web API 拉最多 10 条评论
+- 发给 AI 的平台内容分别用 `<xhs>...</xhs>`、`<dy>...</dy>`、`<wx>...</wx>`、`<wb>...</wb>` 包裹
+- 6 组 user-char 对话后，旧平台链接内容从 prompt 中衰减为 `[标题-正文前15字.xhs|dy|wx|wb]`
+- 原生抓取失败时再走 Jina Reader 兜底，Jina Token 支持逗号/空格分隔多个 key 轮流试
 
 ## 平台能力
 
 | 平台 | 识别 host | 原生解析 | 评论 | Prompt 标签 | 6 组后占位 |
 | --- | --- | --- | --- | --- | --- |
 | 小红书 | `xhslink.com`、`xiaohongshu.com`、`xhscdn.com` | `parseXhsFromHtml` 读取 `noteData` | 首屏 state 里最多 10 条 | `<xhs>` | `[标题-正文前15字.xhs]` |
-| 抖音 | `douyin.com`、`iesdouyin.com`、`amemv.com` | `parseDouyinFromHtml` 读取 meta/HTML 描述和封面 | 暂无 | `<dy>` | `[标题-正文前15字.dy]` |
+| 抖音 | `douyin.com`、`iesdouyin.com`、`amemv.com` | `parseDouyinFromHtml` 读取 meta/HTML 描述和封面 | `iesdouyin` 评论接口，按 `awemeId` 拉最多 10 条 | `<dy>` | `[标题-正文前15字.dy]` |
 | 微信公众号 | `mp.weixin.qq.com`、`weixin.qq.com` | `parseWechatFromHtml` 读取 `js_content`、作者和封面 | 暂无 | `<wx>` | `[标题-正文前15字.wx]` |
+| 微博 | `weibo.com`、`m.weibo.cn`、`sinaimg.cn` | 通用 `parseOgFromHtml`（无专用结构化解析） | `m.weibo.cn`/`weibo.com` 评论接口，最多 10 条 | `<wb>` | `[标题-正文前15字.wb]` |
 
 ## 当前链路
 
@@ -128,6 +129,17 @@
 - 抽正文时应去掉 script/style/svg，再把段落、section、div、br 转成换行。
 - 解析成功时返回 `source: "wechat-html"`；只有正文拿不到但 meta 可用时才是 `wechat-og`。
 
+### 微博
+
+微博没有像小红书那样稳定的内嵌 JSON 结构，正文解析直接复用通用 `parseOgFromHtml`（OG title/description/image）。
+
+经验：
+
+- 微博常把未登录访客跳到 `Sina Visitor System` / `visitor.passport.weibo.cn` 验证页，HTML 里检测到这个特征就跳过 OG 解析，直接走 Jina 兜底，避免把验证页内容当正文。
+- 只有 HTML 不含 visitor 特征且 OG 有内容（description/image，或 title 不是"微博"这种通用词）时才用 `source: "weibo-og"`。
+- 评论走独立接口（见下方评论解析），跟正文解析是否成功无关，两边并行处理。
+- 都拿不到内容时用分享文案兜底，`source: "weibo-limited"`，`limitedReason` 提示"微博未登录访问受限"。
+
 ## 封面图解析和本地缓存
 
 封面候选顺序：
@@ -216,9 +228,24 @@
 - 若页面不下发评论，需要登录态、接口签名、风控参数或二次请求，当前不强行抓。
 - `commentCount` 可能大于实际已展开评论数。例如页面显示 16，但 state 里只展开 8 条，则只返回 8 条。
 
+### 抖音 / 微博评论
+
+小红书是从页面首屏 state 里"顺手"抠评论；抖音和微博没有这种内嵌结构，改成直接调各自的公开 web API：
+
+- 抖音：从 `finalUrl` 路径 `/video/<id>` 或 `/note/<id>`、`modal_id`/`aweme_id` 查询参数、或 HTML 里的 `aweme_id`/`modal_id`/`video_id`/`itemId` 字段提取 `awemeId`，再请求 `https://www.iesdouyin.com/web/api/v2/comment/list/?aweme_id=...&count=20&cursor=0`。
+- 微博：从 URL 路径末尾的数字 ID、`/detail/<id>` 或 `id` 查询参数提取微博 ID，依次尝试 `m.weibo.cn/comments/hotflow` 和 `weibo.com/ajax/statuses/buildComments`，第一个返回非空评论就用。
+- 两者都用 `normalizeGenericComments` 统一归一化字段（`nickname` / `content` / `ipLocation` / `likeCount` / `parentNickname`），楼中楼通过 `reply_comment` 展开，最多 10 条。
+- 都是非登录态公开接口，请求头带移动端 UA + 对应站点 `Referer`；返回非 JSON（例如又被跳到验证页）直接判空，不抛错中断主流程。
+- 抖音评论请求失败不影响正文解析结果，两者独立 try/catch，即使评论接口挂了也照常返回标题/描述/封面。
+
+限制：
+
+- 抖音、微博评论接口都可能因为风控临时返回空或非 JSON，此时静默返回空数组，不重试、不报错给用户。
+- 微博未登录态能看到的评论有限，量大或热门微博可能只返回一部分。
+
 ## 给 AI 的文本
 
-`qqMessageToText(msg)` 会先用 `linkPromptKind(msg)` 判断平台。三类平台链接生成结构相同，只是标签不同：
+`qqMessageToText(msg)` 会先用 `linkPromptKind(msg)` 判断平台。四类平台链接生成结构相同，只是标签不同：
 
 ```text
 <xhs>
@@ -245,6 +272,15 @@
 </wx>
 ```
 
+```text
+<wb>
+标题：...
+描述：...
+评论前N条：1. ... / 2. ...
+站点：微博
+</wb>
+```
+
 刻意不包含：
 
 - 原链接 URL
@@ -267,6 +303,7 @@
 [标题-正文前15字.xhs]
 [标题-正文前15字.dy]
 [标题-正文前15字.wx]
+[标题-正文前15字.wb]
 ```
 
 聊天记录本身不删全文、不删评论、不删本地封面；只是 prompt 装配时隐藏。
@@ -279,7 +316,9 @@
 
 ```text
 [link-preview xhs] finalUrl=... htmlLen=... hasState=true hasNote=true blocked=false
-[link-preview jina] target=... token=yes
+[link-preview jina] target=... key #1
+[link-preview jina] key #1 额度/限流（HTTP 429），尝试下一个 key
+[link-preview jina] 切到 key #2 成功
 [link-preview image cache failed] ...
 ```
 
@@ -292,9 +331,20 @@
 - `source: "douyin-shared-text"` 抖音退到分享文案
 - `source: "wechat-html"` 微信公众号正文解析成功
 - `source: "wechat-og"` 微信公众号 OG/meta 兜底
+- `source: "weibo-og"` 微博 OG 解析成功
+- `source: "weibo-limited"` 微博受限或解析失败
 - `source: "jina"` Jina 兜底
 - `source: "xhs-limited"` 小红书受限或解析失败
 - `limitedReason` 展示具体失败原因
+
+### Jina Token 多 key 轮换
+
+`linkPreview_jinaToken` 这一个设置字段现在可以填多个 key，用逗号或空白分隔。`tryJinaReader` 依次尝试：
+
+- 命中 401/402/403/429（额度耗尽/限流/鉴权失败）才切下一个 key 重试。
+- 网络错误或其他状态码直接放弃，不消耗后面的 key（这类错误换 key 也没用）。
+- 一个 key 都没配时，仍会匿名试一次（免费档，限速更严）。
+- 所有 key 都失败后返回 `null`，上层照常走各平台自己的兜底（分享文案 / `xhs-limited` / `weibo-limited` 等）。
 
 ## 常见故障
 

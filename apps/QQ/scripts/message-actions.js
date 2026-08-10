@@ -313,9 +313,9 @@ async function requestImpersonateReply() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ characterId: chat.characterId, messages: chat.messages || [], chatType: 'private' })
         });
-        const data = await res.json().catch(() => ({}));
+        const data = await readApiResponse(res);
         if (!res.ok) {
-            await showBackendError(`代回失败 (HTTP ${res.status})`, data);
+            await showBackendError(`代回失败 (HTTP ${res.status})`, data, res);
             return;
         }
         if (!data.text) {
@@ -328,7 +328,13 @@ async function requestImpersonateReply() {
         input.focus();
         input.setSelectionRange?.(input.value.length, input.value.length);
     } catch (err) {
-        toast('网络错误：' + (err.message || '无法连接服务器'));
+        await showBackendError('网络错误：无法连接 BunnyOS 后端', {
+            error: err.message || '无法连接服务器',
+            error_code: err.name || 'CLIENT_NETWORK_ERROR',
+            error_type: 'client_network_error',
+            operation: 'impersonate',
+            timestamp: new Date().toISOString(),
+        });
     } finally {
         input.disabled = false;
         input.placeholder = oldPlaceholder;
@@ -349,9 +355,9 @@ async function requestAssistantReply(chat) {
             body: JSON.stringify({ characterId: chat.characterId, messages: requestMessages, chatType: 'private' }),
             signal: abortController.signal,
         });
-        const data = await res.json().catch(() => ({}));
+        const data = await readApiResponse(res);
         if (!res.ok) {
-            await showBackendError(`生成失败 (HTTP ${res.status})`, data);
+            await showBackendError(`生成失败 (HTTP ${res.status})`, data, res);
             return;
         }
         const segments = Array.isArray(data.segments) && data.segments.length
@@ -370,7 +376,13 @@ async function requestAssistantReply(chat) {
             toast('已停止生成');
             // user 主动停，不算失败，不响铃
         } else {
-            toast('网络错误：' + (err.message || '无法连接服务器'));
+            await showBackendError('网络错误：无法连接 BunnyOS 后端', {
+                error: err.message || '无法连接服务器',
+                error_code: err.name || 'CLIENT_NETWORK_ERROR',
+                error_type: 'client_network_error',
+                operation: 'reply',
+                timestamp: new Date().toISOString(),
+            });
             notifyParent('fail', chat, '网络错误');
         }
     } finally {
@@ -463,14 +475,70 @@ function notifyParent(kind, chat, snippet) {
     }
 }
 
-// 把后台错误（包括 detail 原始响应）完整呈现给用户
-async function showBackendError(fallback, data) {
-    const headline = data?.error || fallback;
-    const detail = data?.detail ? `\n\n— 上游原始返回 —\n${data.detail}` : '';
-    console.error('[QQ reply error]', data);
+// 和 SillyTavern 一样先保留原始响应，再按常见 API 错误结构提取原因。
+async function readApiResponse(response) {
+    const rawText = await response.text();
+    if (!rawText) return {};
+    try {
+        return JSON.parse(rawText);
+    } catch {
+        return {
+            error: 'BunnyOS 后端返回了非 JSON 内容',
+            error_code: 'INVALID_BACKEND_RESPONSE',
+            error_type: 'invalid_response_error',
+            detail: rawText.slice(0, 12000),
+            timestamp: new Date().toISOString(),
+        };
+    }
+}
+
+function formatErrorValue(value) {
+    if (value === undefined || value === null || value === '') return '';
+    if (typeof value === 'object') {
+        try { return JSON.stringify(value); } catch { return String(value); }
+    }
+    return String(value);
+}
+
+function formatRawErrorDetail(detail) {
+    if (!detail) return '';
+    if (typeof detail === 'object') return JSON.stringify(detail, null, 2);
+    const text = String(detail);
+    try { return JSON.stringify(JSON.parse(text), null, 2); } catch { return text; }
+}
+
+// 把可读原因、错误码、请求信息和上游原始响应完整呈现给用户。
+async function showBackendError(fallback, data = {}, response = null) {
+    const headline = formatErrorValue(data.error) || fallback;
+    const rows = [
+        ['错误原因', headline],
+        ['上游说明', data.upstream_message],
+        ['BunnyOS HTTP', response ? `${response.status} ${response.statusText || ''}`.trim() : ''],
+        ['上游 HTTP', data.upstream_status ? `${data.upstream_status} ${data.upstream_status_text || ''}`.trim() : ''],
+        ['错误代码', data.error_code ?? data.code],
+        ['错误类型', data.error_type ?? data.type],
+        ['相关参数', data.error_param ?? data.param],
+        ['模型', data.model],
+        ['请求 ID', data.request_id],
+        ['请求阶段', data.operation],
+        ['第几次尝试', data.attempt],
+        ['结束原因', data.finish_reason],
+        ['发生时间', data.timestamp],
+    ].filter(([, value]) => formatErrorValue(value));
+    const summary = rows.map(([label, value]) => `${label}：${formatErrorValue(value)}`).join('\n');
+    const rawDetail = formatRawErrorDetail(data.detail);
+    const fullMessage = rawDetail
+        ? `${summary}\n\n— 上游原始返回 —\n${rawDetail}`
+        : summary;
+    const titleStatus = data.upstream_status || response?.status;
+
+    console.error('[QQ request error]', { response, data });
     toast(headline);
-    // detail 长时再用 dialog 展开，让用户能看清模型实际返回了什么
-    if (detail) await askQqConfirm(`${headline}${detail}`, '后台报错');
+    await openQqDialog({
+        title: titleStatus ? `请求失败 · HTTP ${titleStatus}` : '请求失败',
+        message: fullMessage || fallback,
+        copyText: fullMessage || fallback,
+    });
 }
 
 function setSendButtonAborting(aborting) {
@@ -586,7 +654,7 @@ function renderFavList() {
                 <div class="qq-row-sub">${escapeHtml(text)}</div>
             </div>
         `;
-        row.addEventListener('click', () => {
+        row.addEventListener('click', async () => {
             if (favState.selectMode) {
                 if (favState.selected.has(key)) favState.selected.delete(key);
                 else favState.selected.add(key);
@@ -594,11 +662,8 @@ function renderFavList() {
                 updateFavHeader();
                 return;
             }
-            state.activeChatId = it.chat.characterId;
             $('#fav-list-modal')?.classList.add('hidden');
-            setChatListCollapsed(true);
-            renderChats();
-            renderActiveChat();
+            await activateChat(it.chat.characterId);
         });
         list.appendChild(row);
     }
@@ -652,14 +717,17 @@ async function batchUnfavorite() {
     toast(`已取消收藏 ${n} 条`);
 }
 
-function openFavListModal() {
+async function openFavListModal() {
     const modal = $('#fav-list-modal');
     if (!modal) return;
     favState.selectMode = false;
     favState.selected = new Set();
     updateFavHeader();
-    renderFavList();
     modal.classList.remove('hidden');
+    const list = $('#fav-list');
+    if (list) list.innerHTML = '<div class="qq-empty qq-empty-inline"><div class="qq-empty-title">正在加载收藏…</div></div>';
+    await ensureAllChatsLoaded();
+    renderFavList();
 }
 
 // 收藏 / 取消收藏某条消息
@@ -714,9 +782,9 @@ async function generateMessageVersion(idx) {
             body: JSON.stringify({ characterId: chat.characterId, messages: context, chatType: 'private' }),
             signal: abortController.signal,
         });
-        const data = await res.json().catch(() => ({}));
+        const data = await readApiResponse(res);
         if (!res.ok) {
-            await showBackendError(`生成失败 (HTTP ${res.status})`, data);
+            await showBackendError(`生成失败 (HTTP ${res.status})`, data, res);
             return;
         }
         const segments = Array.isArray(data.segments) && data.segments.length
@@ -739,7 +807,13 @@ async function generateMessageVersion(idx) {
         if (err.name === 'AbortError') {
             toast('已停止生成');
         } else {
-            toast('网络错误：' + (err.message || '无法连接服务器'));
+            await showBackendError('网络错误：无法连接 BunnyOS 后端', {
+                error: err.message || '无法连接服务器',
+                error_code: err.name || 'CLIENT_NETWORK_ERROR',
+                error_type: 'client_network_error',
+                operation: 'reply_version',
+                timestamp: new Date().toISOString(),
+            });
         }
     } finally {
         isGenerating = false;

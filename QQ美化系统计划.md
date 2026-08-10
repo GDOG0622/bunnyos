@@ -57,10 +57,10 @@
 
 | 里程碑 | 状态 | commit | 备注 |
 |---|---|---|---|
-| M1 钱包闭环 | 完成 | `ed7b464`, `dccb4d5` | S1-S4 + S33/S34/S35 部分前置：红包扣款 + 10轮自动退回 + 视觉徽章 |
+| M1 钱包闭环 | 完成 | `ed7b464`, `dccb4d5` | S1-S4 + S33/S34/S35 部分前置：红包扣款 + 现实24小时自动退回 + 视觉徽章 |
 | M6 转账闭环 · S33 status字段 | 完成 | `dccb4d5` | 顺势在 M1 做了 |
 | M6 转账闭环 · S34 发送时扣款 | 完成 | `dccb4d5` | 顺势在 M1 做了 |
-| M6 转账闭环 · S35 10轮自动退回 | 完成 | `dccb4d5` | 顺势在 M1 做了 |
+| M6 转账闭环 · S35 自动退回 | 完成 | `dccb4d5` | 原10轮规则后续改为现实时间满24小时 |
 | M6 转账闭环 · S32 三段状态后缀 | 完成 | `51db1ea` | AI 语法解析 [🧧¥X\|note] 同时落地 |
 | M6 转账闭环 · S36+S37 领取闭环 | 完成 | `ceca8f1` | 后端 receive 端点 + 前端点击领取 |
 | M2 美化库后端+商城骨架 | 完成 | `7af2b5c` | S5-S10：beauties/char-beauty 端点 + #me-beauty 入口 + 5 tab 骨架 |
@@ -163,10 +163,10 @@ publish-github.cmd 会自动 git add + commit + push 到 origin/main，GitHub we
 
 | 方向 | 立即动账 | 领取/退回 | AI 提示词标注 |
 |---|---|---|---|
-| user → char | 发送时立即 -user 余额 | **10 轮 user-char 交互**后仍 pending → 自动 +回 user 余额、status=returned | "未领" / "已自动退回" |
+| user → char | 发送时立即 -user 余额 | **现实时间满 24 小时**后仍 pending → 自动 +回 user 余额、status=returned | "未领" / "已自动退回" |
 | char → user | 不动钱（status=pending） | user 点气泡上的"领取"按钮 → +user 余额、status=received | "未领" / "已领" |
 
-**"1 轮 user-char 交互"定义**：从该 transfer 消息往后数，每出现一次"user 至少 1 条消息 + 紧接着 char 至少 1 条消息"算 1 轮。reply_group 内多气泡只算 char 那一侧的 1 次。退回检测时机：每次新增消息后扫描所有 pending user→char transfer，若已满 10 轮则结算。
+**自动退回定义（现行）**：以 transfer 消息的 `created_at` 为起点，现实时间满 24 小时仍为 pending 即结算；服务启动后立即补扫，此后按最近一个待领取红包的到期时间动态唤醒，不依赖新增消息或对话轮数。
 
 提示词暴露方式：`qqMessageToText`（**在 `server.js:2013` 附近**，现有渲染 `[🧧¥10|备注]`，无备注时是 `[🧧¥10|]`）。改为**三段**：`[🧧${currency}${amount}|${note}|${status}]`，无备注则中间为空但保留两个分隔符。
 
@@ -382,7 +382,7 @@ publish-github.cmd 会自动 git add + commit + push 到 origin/main，GitHub we
 
 **A4. transfer 改造**
 - `qqMessageToText` 中按 1.2 表加 status 后缀
-- 新增「领取/退回结算」逻辑：每次 `POST /api/qq/chats/:characterId` 写入消息后，扫描所有 pending user→char transfer，按"轮"判定是否到 10 轮，到了改 status=returned + 调钱包 +回
+- 新增「领取/退回结算」逻辑：扫描所有 pending user→char transfer，现实时间满 24 小时后改 status=returned + 调钱包 +回
 - 新端点 `POST /api/qq/chats/:characterId/transfer/:messageId/receive`（user 领取 char→user 红包）：把 status=received + 调钱包 +
 - 旧消息无 status 字段视为 received/closed，不再结算
 
@@ -605,7 +605,7 @@ postimages 的免登录 API 不如 catbox 稳；是否要换成别的（如 0x0.
 - [x] **S32** 改 `qqMessageToText`（server.js）：transfer 渲染加 status 后缀（见 §0.3 commit `51db1ea`）
 - [x] **S33** 给 transfer 消息加 `status / settled_at` 字段；老数据兜底当 received 处理（见 §0.3 commit `dccb4d5`）
 - [x] **S34** 改 `media.js:sendTransfer`：先 POST /api/wallet/adjust 扣钱，失败中断（见 §0.3 commit `dccb4d5`）
-- [x] **S35** 服务端 messages 写入端点里加结算扫描：每次写入后扫所有 pending user→char transfer，按"1 轮"定义算够 10 轮就标 returned + +回 user（见 §0.3 commit `dccb4d5`）
+- [x] **S35** 服务端结算扫描：pending user→char transfer 现实时间满 24 小时即标 returned + +回 user；启动补扫，之后按最近到期时间动态唤醒
 - [x] **S36** 新端点 `POST /api/qq/chats/:characterId/transfer/:messageId/receive`（见 §0.3 commit `ceca8f1`）
 - [x] **S37** chat-render.js 改 transfer 渲染：char→user 且 pending 显示"领取"按钮 → click 调 S36（见 §0.3 commit `ceca8f1`）
 
@@ -657,7 +657,7 @@ S1-S51 全部 ──► S48-S51 (收尾)
 - [ ] 选择气泡套到 char，进聊天看到生效
 - [ ] 两个 char 用同一个气泡，改 CSS 同步变
 - [ ] 删除被使用的气泡有 X 个 char 确认提示
-- [ ] user 发红包扣钱，10 轮后自动退回
+- [x] user 发红包扣钱，现实时间满 24 小时后自动退回
 - [ ] char 发红包点领取后 user 余额 +
 - [ ] AI 提示词里能看到 transfer 状态后缀，但看不到余额
 - [ ] 图床上传按钮能拿回直链

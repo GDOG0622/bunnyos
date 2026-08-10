@@ -39,6 +39,9 @@ const state = {
     messageMenuOpenedAt: 0,
     pageHistory: ['main'],
     imageAttachments: {},
+    chatVisibleLayers: {},
+    activeVisibleMessageStart: 0,
+    loadingEarlierChatLayers: false,
     walletBalance: null,
     stickerEditMode: false,
 };

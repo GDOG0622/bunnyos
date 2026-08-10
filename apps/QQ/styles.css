@@ -1128,6 +1128,7 @@ html[data-app-layout="desktop"] .qq-topbar {
     color: var(--qq-text);
     cursor: pointer;
 }
+#qq-dialog-copy { margin-right: auto; }
 .qq-dialog-actions #qq-dialog-ok {
     background: var(--qq-accent);
     color: #fff;
@@ -1521,6 +1522,12 @@ html[data-app-layout="desktop"] .qq-contact-add {
 }
 .qq-chat-messages > * {
     flex-shrink: 0;
+}
+.qq-history-loader {
+    padding: 8px 0 10px;
+    color: var(--qq-text-fade);
+    font-size: 12px;
+    text-align: center;
 }
 .qq-message-row {
     display: flex;

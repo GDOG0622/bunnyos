@@ -107,17 +107,14 @@
     $('#system-msg-send')?.addEventListener('click', sendSystemMessage);
     $('#transfer-send').addEventListener('click', sendTransfer);
     // 来自横幅的"打开聊天"指令
-    window.addEventListener('message', (event) => {
+    window.addEventListener('message', async (event) => {
         if (event.source !== window.parent) return;
         if (event.data?.type !== 'bunnyos:open-chat') return;
         const cid = event.data.characterId;
         if (!cid) return;
         if (state.characters.find(c => c.id === cid)) {
-            state.activeChatId = cid;
             switchTab('messages');
-            setChatListCollapsed(true);
-            renderChats();
-            renderActiveChat();
+            await activateChat(cid);
         }
     });
     $('#btn-chat-image').addEventListener('click', () => {
@@ -264,4 +261,8 @@
             lastY = y;
         }, { passive: true });
     }
+    const chatMessages = $('#chat-messages');
+    chatMessages?.addEventListener('scroll', () => {
+        if (chatMessages.scrollTop <= 36) loadEarlierChatLayers();
+    }, { passive: true });
 }

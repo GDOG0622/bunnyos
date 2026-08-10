@@ -31,7 +31,9 @@
         const row = document.createElement('div');
         row.className = 'qq-row qq-chat-row';
         row.classList.toggle('active', state.activeChatId === chat.characterId);
-        const lastMsg = chat.messages?.[chat.messages.length - 1];
+        const lastMsg = chat._messagesLoaded
+            ? chat.messages?.[chat.messages.length - 1]
+            : chat.lastMessage;
         const last = lastMsg ? messageSummaryText(lastMsg) : summaryForCharacter(c);
         const lastTime = formatConversationTime(lastMsg?.created_at || chat.updated_at);
         row.innerHTML = `
@@ -44,17 +46,12 @@
                 <div class="qq-row-sub">${escapeHtml(last)}</div>
             </div>
         `;
-        row.addEventListener('click', () => {
-            state.activeChatId = chat.characterId;
-            setChatListCollapsed(true);
-            renderChats();
-            renderActiveChat();
-        });
+        row.addEventListener('click', () => activateChat(chat.characterId));
         list.appendChild(row);
     }
 }
 
-function renderActiveChat() {
+function renderActiveChat(options = {}) {
     const chat = state.chats.find(item => item.characterId === state.activeChatId);
     const character = state.characters.find(item => item.id === state.activeChatId);
     if (state.replyDraft && state.replyDraft.characterId !== state.activeChatId) {
@@ -74,6 +71,10 @@ function renderActiveChat() {
     if (statusEl && !statusEl.dataset.typing) statusEl.textContent = '在线';
     const box = $('#chat-messages');
     box.innerHTML = '';
+    if (!chat._messagesLoaded && !Array.isArray(chat.messages)) {
+        box.innerHTML = '<div class="qq-empty qq-empty-inline"><div class="qq-empty-title">正在加载聊天记录…</div></div>';
+        return;
+    }
     if (!chat.messages?.length) {
         const empty = document.createElement('div');
         empty.className = 'qq-empty qq-empty-inline';
@@ -81,8 +82,16 @@ function renderActiveChat() {
         box.appendChild(empty);
         return;
     }
+    const visibleRange = chatLayerRange(chat);
+    state.activeVisibleMessageStart = visibleRange.startIndex;
+    if (visibleRange.hasMore) {
+        const loader = document.createElement('div');
+        loader.className = 'qq-history-loader';
+        loader.textContent = '上滑加载更早的消息';
+        box.appendChild(loader);
+    }
     let lastDay = '';
-    for (let i = 0; i < chat.messages.length; i++) {
+    for (let i = visibleRange.startIndex; i < chat.messages.length; i++) {
         const msg = chat.messages[i];
         // 日期分割线
         const day = dayKey(msg.created_at);
@@ -132,10 +141,16 @@ function renderActiveChat() {
         });
         box.appendChild(item);
     }
-    box.scrollTop = box.scrollHeight;
+    if (options.preserveScroll) {
+        requestAnimationFrame(() => {
+            box.scrollTop = Math.max(0, box.scrollHeight - Number(options.previousHeight || 0));
+        });
+    } else {
+        box.scrollTop = box.scrollHeight;
+    }
     logChatLayoutDebug();
     // 历史图片从 IndexedDB 拉到 state.imageAttachments，拉到再重渲一次（无图片时是 no-op）
-    if (typeof preloadImagesForActiveChat === 'function') preloadImagesForActiveChat();
+    if (typeof preloadImagesForActiveChat === 'function') preloadImagesForActiveChat(visibleRange.startIndex);
 }
 
 function logChatLayoutDebug() {
@@ -202,7 +217,7 @@ function messageContentHtml(msg, idx) {
         if (!imageSrc) {
             return `<div class="qq-message">${reply}${escapeHtml(msg.text || '[图片]')}</div>`;
         }
-        return `<div class="qq-message qq-message-media">${reply}<img src="${escapeAttr(imageSrc)}" alt="${escapeAttr(msg.text || '')}"></div>`;
+        return `<div class="qq-message qq-message-media">${reply}<img src="${escapeAttr(imageSrc)}" alt="${escapeAttr(msg.text || '')}" loading="lazy" decoding="async"></div>`;
     }
     if (msg.type === 'transfer') {
         const amount = `${escapeHtml(msg.currency || '')}${escapeHtml(msg.amount || '')}`;
@@ -233,7 +248,7 @@ function messageContentHtml(msg, idx) {
         const site = escapeHtml(msg.siteName || '');
         const imgSrc = msg.imageLocal || msg.image || '';
         const img = imgSrc
-            ? `<img class="qq-link-thumb" src="${escapeAttr(imgSrc)}" alt="" onerror="this.remove()">`
+            ? `<img class="qq-link-thumb" src="${escapeAttr(imgSrc)}" alt="" loading="lazy" decoding="async" onerror="this.remove()">`
             : '';
         const comments = Array.isArray(msg.comments) && msg.comments.length
             ? `<div class="qq-link-comments">${msg.comments.slice(0, 3).map((item, i) => {
@@ -261,7 +276,7 @@ function messageContentHtml(msg, idx) {
                 if (item) { stickerUrl = item.url; break; }
             }
             if (stickerUrl) {
-                return `<div class="qq-message qq-message-media">${reply}<img src="${escapeAttr(stickerUrl)}" alt="${escapeAttr(stickerName)}"></div>`;
+                return `<div class="qq-message qq-message-media">${reply}<img src="${escapeAttr(stickerUrl)}" alt="${escapeAttr(stickerName)}" loading="lazy" decoding="async"></div>`;
             }
         }
     }

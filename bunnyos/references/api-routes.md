@@ -30,6 +30,9 @@ app.use(express.static(path.join(__dirname)));
 | `GET` | `/api/settings` | Read root `settings.json`. |
 | `POST` | `/api/settings` | Replace root `settings.json` with request body. |
 | `POST` | `/api/assets/upload` | Upload beauty assets from image Data URLs. |
+| `GET` | `/api/qq/chats?summary=1` | Return chat metadata, last message, message count, and favorite count without returning full histories. |
+| `GET` | `/api/qq/chats/:characterId` | Return one complete chat after the user opens it. |
+| `GET` | `/api/proxy/catbox?url=...` | Stream Catbox resources through a strict host allowlist; try VPS direct, then the carrot Cloudflare Worker, then wsrv for supported images. |
 | `GET` | `/api/presets` | Read `data/presets/image-prompts.json`. |
 | `POST` | `/api/presets` | Replace `data/presets/image-prompts.json` with request body. |
 
@@ -69,3 +72,8 @@ Rules:
 
 If `server.js` changes, restart the backend. A running `node server.js` process will not reload route or body-limit changes.
 
+## Catbox Resource Proxy
+
+`assets/scripts/catbox-proxy.js` rewrites Catbox URLs only when rendering them; saved character, sticker, beauty, and font URLs remain unchanged. The script covers `src`, `href`, `poster`, `srcset`, inline styles, and CSS `url(...)` values in the desktop, QQ, Settings, and Prompt Manager documents.
+
+The backend route accepts only HTTPS URLs on `catbox.moe`, `files.catbox.moe`, or `litterbox.catbox.moe`. It streams without disk caching, limits each response to 30MB, applies a five-minute direct-connect circuit breaker, and falls back to `BUNNYOS_CATBOX_RELAY_URL` or the shared carrot Worker.
