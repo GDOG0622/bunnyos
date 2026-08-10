@@ -179,6 +179,32 @@ function logChatLayoutDebug() {
     console.table(metrics);
 }
 
+function commerceCardHtml(msg, reply = '') {
+    const serviceLabels = { gift: '礼物', delivery: '外卖', ride: '打车' };
+    const platform = String(msg.platform || msg.siteName || '').trim() || '商品';
+    const title = String(msg.item || msg.title || '商品').trim();
+    const price = String(msg.price || '').trim();
+    const note = String(msg.note || msg.description || msg.limitedReason || '').trim();
+    const icon = String(msg.icon || ({ gift: '🎁', delivery: '🛵', ride: '🚕' }[msg.serviceType]) || '🛍️');
+    const imageSrc = msg.imageLocal || msg.image || '';
+    const label = serviceLabels[msg.serviceType] || '商品分享';
+    const platformClass = /拼多多/.test(platform) ? 'pdd'
+        : /闲鱼/.test(platform) ? 'xianyu'
+            : /美团/.test(platform) ? 'meituan'
+                : /滴滴/.test(platform) ? 'didi'
+                    : 'taobao';
+    const media = imageSrc
+        ? `<img class="qq-commerce-thumb" src="${escapeAttr(imageSrc)}" alt="" loading="lazy" decoding="async" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'qq-commerce-thumb qq-commerce-thumb-fallback',textContent:'${escapeAttr(icon)}'}))">`
+        : `<span class="qq-commerce-thumb qq-commerce-thumb-fallback">${escapeHtml(icon)}</span>`;
+    const priceHtml = price ? `<span class="qq-commerce-price">¥${escapeHtml(price)}</span>` : '';
+    const noteHtml = note ? `<div class="qq-commerce-note">${escapeHtml(note)}</div>` : '';
+    const inner = `<div class="qq-commerce-main"><div class="qq-commerce-copy"><div class="qq-commerce-title">${priceHtml}${escapeHtml(title)}</div>${noteHtml}</div>${media}</div><div class="qq-commerce-footer"><span class="qq-commerce-platform ${platformClass}">${escapeHtml(platform)}</span><span>${escapeHtml(label)}</span></div>`;
+    const linked = msg.url
+        ? `<a class="qq-commerce-link" href="${escapeAttr(msg.url)}" target="_blank" rel="noopener noreferrer">${inner}</a>`
+        : inner;
+    return `<div class="qq-message qq-commerce-card">${reply}${linked}</div>`;
+}
+
 // 「对方」气泡旁的操作按钮（横屏悬停显示）
 function msgActionsHtml(chat, idx) {
     const msg = chat.messages[idx];
@@ -241,7 +267,11 @@ function messageContentHtml(msg, idx) {
         if (canReceive) extraClass += ' qq-transfer-claimable';
         return `<div class="qq-message qq-transfer-card${extraClass}"${receiveAttr}>${reply}<div class="qq-transfer-amount">${amount}</div>${note}<div class="qq-transfer-label">转账</div>${badge}</div>`;
     }
+    if (msg.type === 'service') {
+        return commerceCardHtml(msg, reply);
+    }
     if (msg.type === 'link') {
+        if (msg.previewType === 'product') return commerceCardHtml(msg, reply);
         const t = escapeHtml(msg.title || msg.url || '链接');
         const d = msg.description ? `<div class="qq-link-desc">${escapeHtml(msg.description)}</div>` : '';
         const limited = msg.limitedReason ? `<div class="qq-link-limited">${escapeHtml(msg.limitedReason)}</div>` : '';

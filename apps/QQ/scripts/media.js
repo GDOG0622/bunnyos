@@ -269,6 +269,67 @@ async function sendTransfer() {
     closePopModal('transfer-modal');
 }
 
+const SERVICE_CARD_DEFS = {
+    gift: { icon: '🎁', platform: '淘宝', itemPlaceholder: '礼物是什么', label: '礼物' },
+    delivery: { icon: '🛵', platform: '美团', itemPlaceholder: '外卖是什么', label: '外卖' },
+    ride: { icon: '🚕', platform: '滴滴', itemPlaceholder: '行程或目的地', label: '打车' },
+};
+
+function updateServiceComposer() {
+    const kind = $('#service-kind')?.value || 'gift';
+    const def = SERVICE_CARD_DEFS[kind] || SERVICE_CARD_DEFS.gift;
+    const platform = $('#service-platform');
+    const item = $('#service-item');
+    if (platform) platform.textContent = def.platform;
+    if (item) item.placeholder = def.itemPlaceholder;
+}
+
+function openServiceComposer() {
+    updateServiceComposer();
+    openPopModal('service-modal');
+}
+
+async function sendServiceCard() {
+    if (!state.activeChatId) return;
+    const kind = $('#service-kind')?.value || 'gift';
+    const def = SERVICE_CARD_DEFS[kind] || SERVICE_CARD_DEFS.gift;
+    const priceText = $('#service-price')?.value.trim() || '';
+    const item = $('#service-item')?.value.trim() || '';
+    const note = $('#service-note')?.value.trim() || '';
+    const price = Number(priceText);
+    if (!/^\d+(?:\.\d{1,2})?$/.test(priceText) || !Number.isFinite(price) || price <= 0) {
+        toast('价格必须是正数，最多保留两位小数');
+        return;
+    }
+    if (!item) {
+        toast(`请填写${def.itemPlaceholder}`);
+        return;
+    }
+    try {
+        await adjustWallet(-price, `${kind} to ${state.activeChatId}`);
+    } catch (err) {
+        if (err.status === 402) toast(`余额不足，当前 ${formatCC(err.balance)} cc`);
+        else toast('扣款失败：' + (err.message || '未知错误'));
+        return;
+    }
+    await appendChatMessage({
+        role: 'user',
+        type: 'service',
+        serviceType: kind,
+        icon: def.icon,
+        platform: def.platform,
+        price: priceText,
+        item,
+        note,
+        text: `${def.label} ${def.platform} ¥${priceText} ${item}${note ? ` ${note}` : ''}`,
+        created_at: Date.now(),
+    });
+    $('#service-price').value = '';
+    $('#service-item').value = '';
+    $('#service-note').value = '';
+    closePopModal('service-modal');
+}
+
 // STT：MediaRecorder 录音 → 直传 Groq / 硅基流动 → 回填 =MM:SS|content=
 // 上次成功的服务商优先，配额/网络失败自动切对家；Key 无效不切（让用户去修）
 const voiceState = { recorder: null, stream: null, chunks: [], startAt: 0, mime: '', stopping: false, maxTimer: null };

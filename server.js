@@ -639,46 +639,27 @@ function importStWorldbookData(stData, fallbackName) {
 }
 
 // ========== 「线上提示词」内置 marker（私聊 / 群聊） ==========
-const ONLINE_PRIVATE_CHAT_PROTOCOL = `[Output Protocol: Instant Messaging Mode]
+const ONLINE_PRIVATE_CHAT_PROTOCOL = `[Output protocol: Instant Messaging Mode]
+基础要义：
+> {{char}}线上即时聊天方式回复。对话需保持语言简洁、低信息利用度和饱满度。每条信息单独一行，每种消息单独一行。
 
-{{char}} 用熟人聊天的方式回复 {{user}}：短、碎、松散、低负荷。允许"嗯""哦哦""在干嘛""等下"这种近似废话的日常回复，不要长段、不要小说对白、不要每句都"完整回应"。
-
-1. 不待命
-- {{char}} 有自己的生活，{{user}} 的消息只是注意力的一部分
-- 可因工作/通勤/做饭/睡觉/情绪低落或不想说话而延迟、不回
-- Offline 是常态。Offline 时完全停止输出，由 BUNNY 系统输出一条 +...+ 提示说明原因
-
-2. 抓重量
-- {{user}} 连发多条时，先判断情绪重量与现实影响，抓 1-2 个最有重量的点
-- 优先级：现实安排 > 情绪变化 > 关系张力 > 生活新信息 > 寒暄
-- 同一话题合并成一句自然反应，不要逐条回；亲昵称呼、表情包等社交泡沫可略过
-- 禁止逐条对齐式回复、客服式总结、阅读理解式复述
-
-3. 碎、慢、不收口
-- 多层意思时用换行切碎，不堆段落
-- 禁止用问句收尾把球踢回（"你觉得呢？""那你打算怎么办？" 是客服话术不是聊天）
-- 允许单音节回复（"嗯""哦""啊？"）、半句话、未完成的念头
-- 零旁白：禁止星号动作或括号心理，只输出纯聊天文字
-
-4. 格式规范
-
-Language: 非中文母语 {{char}} 必须先输出母语紧接圆括号附中文翻译，格式 "{Native}({Translation})"，例 "Hello(你好)"。中文母语 {{char}} 不需要翻译。
-
-Templates（必须严格遵守符号）：
-- 文字： 直接输出纯文本，不加任何包裹
-- 媒体： [描述.jpg/mp3/mp4]  仅 {{char}} 输出时使用；{{user}} 发媒体走系统通道直接附文件
-- 语音： =\${MM:SS}|\${content}=
-- 表情包： [\${name}]  方括号包裹，name 取自 <stickers> 列表
-- 撤回： -\${内容}-
-- 红包： [🧧\${Currency}\${Amount}|\${Note}]   仅你（{{char}}）发给 {{user}} 时使用，单独一行；Note 可空但 | 必须保留
-- 领取红包： [🧧领取]   单独一行；用于明确接受 {{user}} 刚刚发给你的红包。不写就视为没收，发送满 24 小时后自动退回 {{user}}
-- 历史中红包带状态后缀：[🧧¥10|备注|未领]、[🧧¥10|备注|已领]、[🧧¥10|备注|已自动退回]，仅供你判断对方红包状态，你输出时**不要带状态段**
-- 系统提示： +\${BUNNY meta 消息}+  仅 {{user}} 与 BUNNY 元交流，{{char}} 不可见、不应基于此内容反应
-
-**绝对禁止回复表情包内容**——表情包仅辅助理解感受，使用具有随机性。
-
-5. Offline 示例
-+BUNNY：{{char}} 当前在忙，预计 12:00 pm 回复。先留言吧~+`;
+格式规范：
+Language Policy：非中文母语的<char>  必须先输出母语，紧接圆括号附中文翻译，格式 "Native(Translation)"，例如 "Why?(为什么?)"。中文母语<char> 不需要中文翻译。
+Templates (Do NOT ignore symbols)：
+- 文字：纯文字，不加任何包裹
+- 媒体：[描述.jpg/mp3/mp4]
+- 语音：=MM:SS|content=
+- 系统提示：+Technical Content+ — 仅限 {{user}} 与 BUNNY 元交流，{{char}} 不可见。**char不需回复每一次信息**，当char在忙无法回复或单纯不想回复的时候，BUNNY用系统提示告知user不在线状态与原因。
+- 表情包：[\${name}]  name 取自 <stickers> 列表。仅用于参考/辅助表达和理解双方的心情和感受，没有实际意义。使用通常具有极强随机性，表达的只是一种很抽象的意象无需在意，使用也具有很强的随机和发散性。**绝对禁止回复表情包内容**
+- 红包：[🧧CurrencyAmount|Note]
+- 领取红包： [🧧领取] --根据关系、情景char决定要不要接受红包，并非一定要接受。
+- 送礼物：[🎁淘宝|Price|Item|Note]
+- 外卖：[🛵美团|Price|Item|Note]
+- 打车：[🚕滴滴|Price|Item|Note]
+5. Examples (禁止抄袭内容)
++BUNNY：char 当前在忙着打豆豆，预计 12:00 pm 回复。先给他留言吧~+
+"hello(你好)"
+---`;
 
 const ONLINE_GROUP_CHAT_PROTOCOL = `<Group_Chat_Protocol>
 
@@ -2118,7 +2099,18 @@ app.post('/api/qq/link-preview', async (req, res) => {
         const isDouyinHost = (hostname) => /(^|\.)douyin\.com$|(^|\.)iesdouyin\.com$|(^|\.)douyinpic\.com$|(^|\.)amemv\.com$/i.test(hostname || '');
         const isWechatHost = (hostname) => /(^|\.)mp\.weixin\.qq\.com$|(^|\.)weixin\.qq\.com$/i.test(hostname || '');
         const isWeiboHost = (hostname) => /(^|\.)weibo\.com$|(^|\.)m\.weibo\.cn$|(^|\.)sinaimg\.cn$/i.test(hostname || '');
+        const isTaobaoHost = (hostname) => /(^|\.)(e\.tb\.cn|m\.tb\.cn|taobao\.com|tmall\.com)$/i.test(hostname || '');
+        const isXianyuHost = (hostname) => /(^|\.)(goofish\.com|2\.taobao\.com)$/i.test(hostname || '');
+        const isPddHost = (hostname) => /(^|\.)(yangkeduo\.com|pinduoduo\.com)$/i.test(hostname || '');
+        const shoppingPlatform = (hostname, text = rawText) => {
+            if (/【?闲鱼】?/i.test(text || '') || isXianyuHost(hostname)) return '闲鱼';
+            if (/【?拼多多】?/i.test(text || '') || isPddHost(hostname)) return '拼多多';
+            if (/【?淘宝】?/i.test(text || '') || isTaobaoHost(hostname)) return '淘宝';
+            return '';
+        };
         const inferSiteName = (hostname) => {
+            const shop = shoppingPlatform(hostname);
+            if (shop) return shop;
             if (isXhsHost(hostname)) return '小红书';
             if (isDouyinHost(hostname)) return '抖音';
             if (isWechatHost(hostname)) return '微信公众号';
@@ -2136,6 +2128,10 @@ app.post('/api/qq/link-preview', async (req, res) => {
                 return /^(微博|微博正文 - 微博|新浪微博)$/i.test(value)
                     || /Sina Visitor System|登录|注册|访问异常|验证码/.test(value);
             }
+            if (shoppingPlatform(hostname)) {
+                return /^(商品详情页|商品详情|登录|闲鱼宝贝详情|拼多多|拼多多商城|淘宝网|天猫)$/i.test(value)
+                    || /登录|验证码|安全验证|打开App|APP内打开/.test(value);
+            }
             return false;
         };
         const cleanSharedText = (text) => {
@@ -2146,6 +2142,22 @@ app.post('/api/qq/link-preview', async (req, res) => {
                 .replace(/[“”"']/g, '')
                 .replace(/\s+/g, ' ')
                 .replace(/^[,，。:：\s]+|[,，。:：\s]+$/g, '')
+                .slice(0, 200);
+        };
+        const sharedProductTitle = () => {
+            const quoted = rawText.match(/[「“"]([^」”"]{2,200})[」”"]/i)?.[1]?.trim();
+            if (quoted) return quoted;
+            return String(rawText || '')
+                .replace(/【(?:淘宝|闲鱼|拼多多)】/g, '')
+                .replace(/\[https?:\/\/[^\]]+]\(https?:\/\/[^)]+\)/gi, '')
+                .replace(/https?:\/\/[^\s<>()\]]+/gi, '')
+                .replace(/\b(?:[A-Z]{1,4}\d{2,}|[A-Za-z0-9]{8,})\b/g, '')
+                .replace(/点击链接.*$/is, '')
+                .replace(/(?:淘宝搜索|复制后打开).*$/is, '')
+                .replace(/[「」“”"']/g, '')
+                .replace(/[\[\]()]/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim()
                 .slice(0, 200);
         };
         const fallbackPreview = (finalUrl = u.toString(), reason = '') => {
@@ -2245,13 +2257,21 @@ app.post('/api/qq/link-preview', async (req, res) => {
             const imageCandidate = data.image || data.cover || data.coverUrl || data.thumbnail || images[0] || '';
             const title = data.title || data.desc || data.description || data.content || data.text || '';
             const description = data.description || data.desc || data.content || data.text || '';
+            let payloadHost = '';
+            try { payloadHost = new URL(data.url || data.shareUrl || u.toString()).hostname; } catch {}
+            const detectedPlatform = shoppingPlatform(payloadHost) || shoppingPlatform(host);
+            const platform = data.platform || data.siteName || detectedPlatform || data.source || '';
+            const price = data.price || data.priceText || data.salePrice || data.currentPrice || '';
             if (!title && !description && !imageCandidate) return null;
             return {
                 url: data.url || data.shareUrl || u.toString(),
                 title: String(title || inferSiteName(host)),
                 description: String(description || ''),
                 image: imageCandidate ? new URL(String(imageCandidate), u.toString()).toString() : '',
-                siteName: data.siteName || data.source || inferSiteName(host),
+                siteName: platform || inferSiteName(host),
+                platform: platform || '',
+                price: String(price || '').replace(/^[¥￥$]\s*/, ''),
+                previewType: detectedPlatform ? 'product' : (data.previewType || ''),
                 source: 'third-party'
             };
         };
@@ -2426,6 +2446,9 @@ app.post('/api/qq/link-preview', async (req, res) => {
             if (metaR?.[1]) return metaR[1].trim();
             const jsR = html.match(/(?:window\.location(?:\.href)?|location\.replace\()\s*[=\(]\s*["'](https?:\/\/[^"']+)["']/i);
             if (jsR?.[1]) return jsR[1].trim();
+            // 淘宝/闲鱼短链页先把目标写入 url 变量，再调用 location.replace(url)。
+            const assignedUrl = html.match(/\burl\s*=\s*["'](https?:\/\/[^"']+)["']/i)?.[1];
+            if (assignedUrl) return assignedUrl.replace(/&amp;/g, '&').trim();
             return null;
         };
 
@@ -2448,6 +2471,36 @@ app.post('/api/qq/link-preview', async (req, res) => {
             const image = imageRaw ? (() => { try { return new URL(imageRaw, baseUrl).toString(); } catch { return ''; } })() : '';
             const siteName = metaC('og:site_name') || inferSiteName(finalHost);
             return { title, description, image, siteName };
+        };
+        const parseShoppingFromHtml = (html, baseUrl) => {
+            let pageHost = host;
+            try { pageHost = new URL(baseUrl).hostname; } catch {}
+            const platform = shoppingPlatform(pageHost) || shoppingPlatform(host);
+            if (!platform) return null;
+            const og = parseOgFromHtml(html || '', baseUrl);
+            const titleFromShare = sharedProductTitle();
+            const title = titleFromShare || (!isGenericPreviewText(og.title, pageHost) ? og.title : '') || `${platform}商品`;
+            const priceCandidates = [];
+            for (const candidateUrl of [baseUrl, u.toString()]) {
+                try {
+                    const parsed = new URL(candidateUrl);
+                    priceCandidates.push(parsed.searchParams.get('price'), parsed.searchParams.get('currentPrice'));
+                } catch {}
+            }
+            const htmlPrice = String(html || '').match(/(?:product:price:amount|priceText|salePrice|currentPrice)[^>:=]{0,20}(?:content\s*=\s*)?["']?([\d]+(?:\.\d{1,2})?)/i)?.[1] || '';
+            const price = String(priceCandidates.find(value => value && /^\d+(?:\.\d{1,2})?$/.test(value)) || htmlPrice || '').replace(/\.0+$/, '');
+            const image = /(?:share_logo|\/logo(?:[._/-]|$))/i.test(og.image || '') ? '' : (og.image || '');
+            return {
+                url: baseUrl,
+                title,
+                description: og.description && !isGenericPreviewText(og.description, pageHost) ? og.description : '',
+                image,
+                siteName: platform,
+                platform,
+                price,
+                previewType: 'product',
+                source: 'shopping-native'
+            };
         };
         const parseDouyinFromHtml = (html, baseUrl) => {
             const decEnt = (s) => String(s || '')
@@ -2756,6 +2809,14 @@ app.post('/api/qq/link-preview', async (req, res) => {
         // Step 1: 抓原始 URL，拿到 finalUrl（追 HTTP redirect）
         let fetchResult;
         try { fetchResult = await fetchHtml(u.toString()); } catch (e) {
+            const initialShop = shoppingPlatform(host);
+            if (initialShop) {
+                const product = parseShoppingFromHtml('', u.toString());
+                return await sendPreview({
+                    ...product,
+                    limitedReason: `${initialShop}链接抓取超时，已使用分享文案兜底`
+                }, u.toString());
+            }
             // 网络完全失败 → 直接 Jina 兜底
             const jinaFb = await tryJinaReader(u.toString(), jinaToken);
             return await sendPreview(isUsefulPreview(jinaFb, host) ? jinaFb : fallbackPreview(u.toString(), '抓取超时'), u.toString());
@@ -2764,6 +2825,14 @@ app.post('/api/qq/link-preview', async (req, res) => {
 
         // Step 2: 如果 HTML 里有 JS/meta redirect（常见于短链跳转页），追一跳
         if (!html && !isXhsHost(host)) {
+            const initialShop = shoppingPlatform(host);
+            if (initialShop) {
+                const product = parseShoppingFromHtml('', finalUrl);
+                return await sendPreview({
+                    ...product,
+                    limitedReason: `${initialShop}未返回商品页面，已使用分享文案兜底`
+                }, finalUrl);
+            }
             // 非 XHS 短链，直接 Jina 兜底
             const jinaFb = await tryJinaReader(finalUrl, jinaToken);
             return await sendPreview(isUsefulPreview(jinaFb, new URL(finalUrl).hostname)
@@ -2785,7 +2854,26 @@ app.post('/api/qq/link-preview', async (req, res) => {
         const finalHost = (() => { try { return new URL(finalUrl).hostname; } catch { return host; } })();
         try { if (isBlockedHost(finalHost)) return res.status(400).json({ error: '禁止访问内网地址' }); } catch {}
 
-        // Step 3: 针对小红书特化解析（OG + __INITIAL_STATE__）
+        // Step 3: 淘宝 / 闲鱼 / 拼多多商品卡。短链已在上面追到真实商品页。
+        const finalShoppingPlatform = shoppingPlatform(finalHost) || shoppingPlatform(host);
+        if (finalShoppingPlatform) {
+            const product = parseShoppingFromHtml(html, finalUrl) || {
+                url: finalUrl,
+                title: sharedProductTitle() || `${finalShoppingPlatform}商品`,
+                description: '', image: '', price: '',
+                siteName: finalShoppingPlatform,
+                platform: finalShoppingPlatform,
+                previewType: 'product',
+                source: 'shopping-fallback'
+            };
+            const missing = [];
+            if (!product.price) missing.push('价格');
+            if (!product.image) missing.push('主图');
+            if (missing.length) product.limitedReason = `${finalShoppingPlatform}限制匿名抓取，暂未取得${missing.join('和')}`;
+            return await sendPreview(product, finalUrl);
+        }
+
+        // Step 3a: 针对小红书特化解析（OG + __INITIAL_STATE__）
         if (isXhsHost(finalHost)) {
             // 诊断：VPS 机房 IP 常被小红书反爬，返回的页面里没有 __INITIAL_STATE__/noteData
             const hasState = html.includes('__INITIAL_STATE__');
@@ -3641,6 +3729,10 @@ function linkPromptKind(msg) {
     const site = String(msg.siteName || '').toLowerCase();
     const source = String(msg.source || '').toLowerCase();
     const url = String(msg.url || '').toLowerCase();
+    if (msg.previewType === 'product') {
+        const suffix = site.includes('拼多多') ? 'pdd' : site.includes('闲鱼') ? 'xy' : 'tb';
+        return { tag: 'product', suffix, fallbackTitle: `${msg.platform || msg.siteName || '购物平台'}商品` };
+    }
     if (site.includes('小红书') || site.includes('xiaohongshu') || source.includes('xhs') || /(^|\/\/|\.)(xhslink|xiaohongshu)\.com/.test(url)) {
         return { tag: 'xhs', suffix: 'xhs', fallbackTitle: '小红书笔记' };
     }
@@ -3709,9 +3801,30 @@ function qqMessageToText(msg, options = {}) {
             else if (status === 'returned') label = '已自动退回';
             return `[🧧${msg.currency || ''}${msg.amount || ''}|${note}${label ? `|${label}` : ''}]`;
         }
+        case 'service': {
+            const defs = {
+                gift: { icon: '🎁', platform: '淘宝' },
+                delivery: { icon: '🛵', platform: '美团' },
+                ride: { icon: '🚕', platform: '滴滴' },
+            };
+            const def = defs[msg.serviceType] || defs.gift;
+            return `[${def.icon}${def.platform}|${msg.price || ''}|${msg.item || ''}|${msg.note || ''}]`;
+        }
         case 'voice':
             return String(msg.text || '');
         case 'link': {
+            if (msg.previewType === 'product') {
+                if (options.compactRichLink) return compactRichLinkText(msg);
+                const platform = String(msg.platform || msg.siteName || '购物平台').trim();
+                const title = String(msg.title || '商品').trim();
+                const price = String(msg.price || '').trim();
+                const description = String(msg.fullDescription || msg.description || '').trim();
+                const fields = [`平台：${platform}`, `标题：${title}`];
+                if (price) fields.push(`价格：¥${price}`);
+                if (description && description !== title) fields.push(`说明：${description}`);
+                fields.push(`链接：${msg.url || ''}`);
+                return `<product>\n${fields.join('\n')}\n</product>`;
+            }
             const kind = linkPromptKind(msg);
             if (options.compactRichLink && kind) return compactRichLinkText(msg);
             const t = String(msg.title || '').trim();

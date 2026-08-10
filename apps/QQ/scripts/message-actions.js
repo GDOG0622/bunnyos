@@ -60,13 +60,16 @@ async function appendLinkPreviewMessage(data, fallbackUrl) {
         image: data?.image || '',
         imageLocal: data?.imageLocal || '',
         siteName: data?.siteName || '',
+        previewType: data?.previewType || '',
+        platform: data?.platform || '',
+        price: data?.price || '',
         comments,
         source,
         limitedReason,
         text: `[链接] ${parts.join('：') || data?.siteName || fallbackUrl}`,
         created_at: Date.now()
     });
-    if (limitedReason) toast(limitedReason);
+    if (limitedReason && data?.previewType !== 'product') toast(limitedReason);
 }
 
 function isUsefulLinkPreview(data) {
@@ -80,6 +83,8 @@ function isUsefulLinkPreview(data) {
 
 async function tryFrontendLinkPreview(url, rawText) {
     try {
+        // 电商短链需要后端追踪 JS 跳转并提取商品 ID；前端通用 OG 容易只拿到“登录/商品详情页”。
+        if (isShoppingLinkUrl(url, rawText)) return null;
         const first = await fetchFrontendHtml(url);
         if (!first?.html) return null;
         let finalUrl = first.finalUrl || url;
@@ -103,6 +108,12 @@ async function tryFrontendLinkPreview(url, rawText) {
         console.info('[link-preview frontend failed]', err?.message || err);
     }
     return null;
+}
+
+function isShoppingLinkUrl(url, rawText = '') {
+    const value = `${url || ''} ${rawText || ''}`.toLowerCase();
+    return /(^|[\s/.:])(e\.tb\.cn|m\.tb\.cn|taobao\.com|tmall\.com|goofish\.com|2\.taobao\.com|yangkeduo\.com|pinduoduo\.com)(?:[\s/:]|$)/i.test(value)
+        || /【(?:淘宝|闲鱼|拼多多)】/.test(rawText || '');
 }
 
 async function fetchFrontendHtml(url) {
@@ -1059,10 +1070,11 @@ function replaceReplyGroupWithVersion(chat, group, versionIndex) {
     chat.messages.splice(group.start, group.end - group.start + 1, ...nextMessages);
 }
 
-// 解析 AI 输出的红包/领取语法。详见 QQ美化系统计划.md §1.2
-// 支持：[🧧¥10|备注] / [🧧¥10|] / [🧧领取]
+// 解析 AI 输出的红包/领取/生活服务语法。详见 QQ美化系统计划.md §1.2
+// 支持：[🧧¥10|备注] / [🧧¥10|] / [🧧领取] / [🎁淘宝|29.8|毛衣|备注]
 const TRANSFER_SEG_RE = /^\s*\[🧧(?!领取\])([^\d|\]]*)([\d.]+)\|([^\]]*)\]\s*$/;
 const TRANSFER_RECEIVE_RE = /^\s*\[🧧领取\]\s*$/;
+const SERVICE_SEG_RE = /^\s*\[(🎁|🛵|🚕)([^|\]]+)\|([\d]+(?:\.\d{1,2})?)\|([^|\]]+)\|([^\]]*)\]\s*$/;
 function parseAssistantSegment(text) {
     if (TRANSFER_RECEIVE_RE.test(text)) return { kind: 'receive' };
     const m = text.match(TRANSFER_SEG_RE);
@@ -1073,6 +1085,26 @@ function parseAssistantSegment(text) {
             amount: m[2],
             note: (m[3] || '').trim()
         };
+    }
+    const service = text.match(SERVICE_SEG_RE);
+    if (service) {
+        const defs = {
+            '🎁': { serviceType: 'gift', platform: '淘宝' },
+            '🛵': { serviceType: 'delivery', platform: '美团' },
+            '🚕': { serviceType: 'ride', platform: '滴滴' },
+        };
+        const def = defs[service[1]];
+        if (def && service[2].trim() === def.platform) {
+            return {
+                kind: 'service',
+                serviceType: def.serviceType,
+                icon: service[1],
+                platform: def.platform,
+                price: service[3],
+                item: service[4].trim(),
+                note: service[5].trim(),
+            };
+        }
     }
     return { kind: 'text' };
 }
@@ -1131,6 +1163,18 @@ async function appendAssistantReplySegments(chat, segments) {
                 note: parsed.note,
                 status: 'pending',
                 settled_at: null,
+            });
+        } else if (parsed.kind === 'service') {
+            chat.messages.push({
+                ...base,
+                type: 'service',
+                serviceType: parsed.serviceType,
+                icon: parsed.icon,
+                platform: parsed.platform,
+                price: parsed.price,
+                item: parsed.item,
+                note: parsed.note,
+                text: `${parsed.platform} ¥${parsed.price} ${parsed.item}${parsed.note ? ` ${parsed.note}` : ''}`,
             });
         } else {
             chat.messages.push({ ...base, type: 'text', text: segText });

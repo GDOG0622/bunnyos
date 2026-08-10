@@ -1736,6 +1736,89 @@ html[data-app-layout="desktop"] .qq-contact-add {
     font-size: 12px;
     opacity: 0.82;
 }
+
+.qq-commerce-card {
+    width: min(258px, 72vw);
+    padding: 0 !important;
+    overflow: hidden;
+    background: #ededed !important;
+    color: #2d2d2d !important;
+    border: 1px solid rgba(0, 0, 0, 0.05);
+    border-radius: 10px !important;
+}
+.qq-commerce-link {
+    display: block;
+    color: inherit;
+    text-decoration: none;
+}
+.qq-commerce-main {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 64px;
+    gap: 10px;
+    min-height: 82px;
+    padding: 10px;
+}
+.qq-commerce-copy {
+    min-width: 0;
+}
+.qq-commerce-title {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    font-size: 14px;
+    line-height: 1.35;
+    word-break: break-word;
+}
+.qq-commerce-price {
+    margin-right: 5px;
+    color: #e43d30;
+    font-weight: 700;
+}
+.qq-commerce-note {
+    display: -webkit-box;
+    overflow: hidden;
+    margin-top: 5px;
+    color: #8a8a8a;
+    font-size: 12px;
+    line-height: 1.3;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}
+.qq-commerce-thumb {
+    width: 64px;
+    height: 64px;
+    border-radius: 7px;
+    object-fit: cover;
+    align-self: center;
+}
+.qq-commerce-thumb-fallback {
+    display: grid;
+    place-items: center;
+    background: rgba(255, 255, 255, 0.76);
+    font-size: 30px;
+}
+.qq-commerce-footer {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 30px;
+    padding: 6px 10px;
+    border-top: 1px solid rgba(0, 0, 0, 0.06);
+    color: #8a8a8a;
+    font-size: 11px;
+}
+.qq-commerce-platform {
+    padding: 2px 6px;
+    border-radius: 5px;
+    background: #ff5000;
+    color: #fff;
+    font-weight: 700;
+}
+.qq-commerce-platform.xianyu { background: #ffd633; color: #222; }
+.qq-commerce-platform.pdd { background: #e02e24; }
+.qq-commerce-platform.meituan { background: #ffd100; color: #222; }
+.qq-commerce-platform.didi { background: #ff7a1a; }
 .qq-transfer-status {
     display: inline-block;
     margin-top: 6px;
@@ -2392,6 +2475,22 @@ html:not([data-app-layout="desktop"]) #qq-root.chat-open .qq-tabbar {
 .qq-pop-card textarea {
     min-height: 120px;
     resize: vertical;
+}
+.qq-pop-card .qq-pop-textarea-compact {
+    min-height: 72px;
+}
+.qq-service-platform-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 9px 12px;
+    border-radius: 12px;
+    background: rgba(120, 120, 128, 0.08);
+    color: var(--qq-text-sub);
+    font-size: 13px;
+}
+.qq-service-platform-row strong {
+    color: var(--qq-text);
 }
 .qq-pop-actions {
     display: flex;

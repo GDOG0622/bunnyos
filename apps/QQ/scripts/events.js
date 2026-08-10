@@ -102,6 +102,9 @@
     $('#btn-edit-sticker-packs')?.addEventListener('click', toggleStickerEditMode);
     $('#sticker-pack-save').addEventListener('click', saveStickerPack);
     $('#btn-transfer').addEventListener('click', () => openPopModal('transfer-modal'));
+    $('#btn-service-gift')?.addEventListener('click', openServiceComposer);
+    $('#service-kind')?.addEventListener('change', updateServiceComposer);
+    $('#service-send')?.addEventListener('click', sendServiceCard);
     $('#btn-impersonate')?.addEventListener('click', () => requestImpersonateReply());
     $('#btn-system-msg')?.addEventListener('click', () => openPopModal('system-msg-modal'));
     $('#system-msg-send')?.addEventListener('click', sendSystemMessage);

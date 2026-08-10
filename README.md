@@ -88,6 +88,7 @@ BunnyOS/
 | GET / POST | `/api/qq/groups` `/sticker-packs` | 群定义 / 自定义表情包合集 |
 | POST | `/api/qq/reply` | AI 回复（按预设装配 + 采样参数 + 抗截断） |
 | POST | `/api/qq/impersonate` | AI 代回（user 视角拟回复，填入输入框不发送） |
+| POST | `/api/qq/link-preview` | 社交/商品链接解析；支持淘宝、闲鱼、拼多多短链和商品卡 |
 | GET | `/api/notify/vapid-public-key` | Web Push 公钥（前端订阅时取）|
 | POST | `/api/notify/subscribe` `/unsubscribe` | 订阅 / 取消订阅本设备的推送 |
 | GET | `/api/notify/subscriptions` | 查询订阅数量 |
@@ -158,7 +159,7 @@ BunnyOS/
 
 **角色卡 `data/characters/<id>.json`**：核心字段 `name / avatar / role_setting / rp_rules / rp_rules_depth(0-4) / other_setting / scenario / mes_example / worldbookIds:[]`。`description / personality / nsfw_setting` 是旧兼容字段，分别映射 role_setting / rp_rules / other_setting。
 
-**聊天记录 `data/chats/qq/<characterId>.json`**：`{characterId, messages:[{role, type, text, created_at, ...}], updated_at}`。message type：`text / image / sticker / transfer / system`。可选字段：`reply_to`（回复引用） / `favorited` / `persona`（发送时 user 人设快照） / `reply_group_id` / `reply_group_versions` / `reply_group_version_index`（同一次 AI 生成的多气泡 + 多版本）。
+**聊天记录 `data/chats/qq/<characterId>.json`**：`{characterId, messages:[{role, type, text, created_at, ...}], updated_at}`。message type：`text / image / sticker / transfer / service / link / system`。`service` 用 `serviceType / platform / price / item / note` 表示礼物、外卖和打车；商品 `link` 额外带 `previewType: "product" / platform / price`。可选字段：`reply_to`（回复引用） / `favorited` / `persona`（发送时 user 人设快照） / `reply_group_id` / `reply_group_versions` / `reply_group_version_index`（同一次 AI 生成的多气泡 + 多版本）。
 
 **user 人设 `data/userpersonas/<名字>.json`**：`id / name / gender / birthday / status / customStatus / signature / note / prompt / avatar`。注入 AI 的字段：name / gender / birthday / prompt。
 
@@ -191,7 +192,8 @@ BunnyOS/
 - 模板宏：`{{//}} / {{random}} / {{roll}}`
 - USER 语音转文字（STT）：QQ 麦克风按钮 → `MediaRecorder` 录 opus → **前端直传** Groq 或硅基流动的 OpenAI 兼容转写端点 → 回填 `=MM:SS|content=`。Key 存在 `settings.json` 的 `asr_groqKey` / `asr_siliconflowKey`，调度顺序按 `asr_lastWorking` 优先。后端零参与
 - **QQ 美化系统**（详见 `QQ美化系统计划.md`）：5 个模块（皮肤 / 头像 / 头像框 / 气泡 / 背景）；公共库 + char-beauty 个性化；头像框 char/user 双侧独立；全局皮肤启动注入；per-char 聊天背景直接上传到 `data/qq/char-backgrounds/<cid>.<ext>`；气泡点击侧弹菜单替代长按；每条消息 QQ 风头像 + frame 叠层；编辑模式 textarea 嵌进气泡（`field-sizing: content`）
-- **钱包（萝卜币 cc）+ 转账闭环**：启动初始化 `data/wallet.json` 20000cc；美化创建按价扣费（皮肤 20 / 其他 5 / 背景 0）；红包 user→char 发送即扣，现实时间满 24 小时仍未领取则自动退回；char→user 用户点击领取入账；AI 看到三段后缀 `[🧧¥10\|备注\|未领/已领/已自动退回]` 但看不到余额
+- **钱包（萝卜币 cc）+ 转账闭环**：启动初始化 `data/wallet.json` 20000cc；美化创建按价扣费（皮肤 20 / 其他 5 / 背景 0）；红包 user→char 发送即扣，现实时间满 24 小时仍未领取则自动退回；char→user 用户点击领取入账；礼物/外卖/打车由 user 发送时也按填写价格立即扣款；AI 看到红包状态但看不到余额
+- **生活服务商品卡**：QQ 输入栏 🎁 统一入口发送淘宝礼物、美团外卖、滴滴打车；char 可按 `[🎁淘宝\|Price\|Item\|Note]`、`[🛵美团\|Price\|Item\|Note]`、`[🚕滴滴\|Price\|Item\|Note]` 输出同款卡片
 - **QQ 渐进加载**：启动只取角色与聊天摘要，点入某个聊天后才读取其完整记录；界面首次只创建最近 20 层消息（同一方连续发送的一组气泡算 1 层），上滑到顶部每次再追加 20 层。图片、链接封面和表情图仅随当前可见层加载
 - **图床代理**：`POST /api/upload/image-host`（catbox 默认 + 自定义 imgbb/smms endpoint），调用方在美化编辑页头像 / 头像框的 URL 输入旁
 - **Catbox 免梯读取**：主桌面、QQ、设置和提示词管理器加载 `assets/scripts/catbox-proxy.js`，只在渲染时把 Catbox 的 `src/href/poster/srcset/CSS url()` 改写到 `/api/proxy/catbox`，不改存档原 URL；后端直连失败后复用 carrot 的 Cloudflare Worker，支持图片、GIF、视频、音频和字体
@@ -199,7 +201,7 @@ BunnyOS/
 - **图片缓存升级 IndexedDB**：发过的图片 dataURL 写到 IDB `bunnyos-qq/images`（旧 `localStorage qq:img:*` 启动时自动迁移）；后端 chat 文件不存 dataURL 但保留 `client_image_id`；AI prompt 只发最近一张
 - **存储管理**：设置 → 存储配置 → 缓存管理（IDB 图片库统计 + 清空 / 浏览器站点 caches 清空）；图床配置在同一页
 - **M8 对话框管理**：聊天页三个点面板"清空聊天记录 / 隐藏此聊天 / 删除聊天"三个操作；后端 `DELETE /api/qq/chats/:cid/messages` + chat 加 `hidden` 字段 `PATCH /api/qq/chats/:cid/hidden`；联系人列表过滤 `hidden`，顶栏"显示隐藏聊天"toggle；删除会级联清掉对应的 char-beauty/char-background
-- **社交链接解析**（详见 `bunnyos/references/xhs-link-preview.md`）：小红书/抖音/微信公众号/微博四平台。小红书支持短链跳转、`__INITIAL_STATE__` 正文解析、首屏最多 10 条评论；抖音、微博走各自公开 web API 拉最多 10 条评论；微信公众号解析 `js_content` 正文、作者、封面。四类平台在 prompt 中分别用 `<xhs>`、`<dy>`、`<wx>`、`<wb>` 包裹，封面本地缓存 + 多模态附件发给 AI，6 组 user-char 对话后衰减为 `[标题-正文前15字.xhs|dy|wx|wb]`。原生解析失败后走 Jina Reader（Token 支持逗号/空格分隔多 key 轮换，遇额度/限流/鉴权错误自动切下一个）或第三方解析 API 兜底
+- **社交与商品链接解析**（详见 `bunnyos/references/xhs-link-preview.md`）：除小红书/抖音/微信公众号/微博外，识别淘宝、闲鱼、拼多多商品短链，追踪真实商品 URL，尽量提取标题、价格和主图并渲染商品卡；平台限制匿名抓取时使用分享文案/链接参数兜底，不伪造缺失字段。最近一张封面本地缓存后作为多模态附件发给 AI，6 组 user-char 对话后衰减为短标签
 
 ### 下一步
 

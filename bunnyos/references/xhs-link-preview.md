@@ -24,6 +24,9 @@
 | 抖音 | `douyin.com`、`iesdouyin.com`、`amemv.com` | `parseDouyinFromHtml` 读取 meta/HTML 描述和封面 | `iesdouyin` 评论接口，按 `awemeId` 拉最多 10 条 | `<dy>` | `[标题-正文前15字.dy]` |
 | 微信公众号 | `mp.weixin.qq.com`、`weixin.qq.com` | `parseWechatFromHtml` 读取 `js_content`、作者和封面 | 暂无 | `<wx>` | `[标题-正文前15字.wx]` |
 | 微博 | `weibo.com`、`m.weibo.cn`、`sinaimg.cn` | 通用 `parseOgFromHtml`（无专用结构化解析） | `m.weibo.cn`/`weibo.com` 评论接口，最多 10 条 | `<wb>` | `[标题-正文前15字.wb]` |
+| 淘宝 | `e.tb.cn`、`m.tb.cn`、`taobao.com`、`tmall.com` | 追 JS 短链 + OG/分享文案/URL price | — | `<product>` | `[标题.tb]` |
+| 闲鱼 | `m.tb.cn`、`goofish.com`、`2.taobao.com` | 追 JS 短链 + OG/分享文案 | — | `<product>` | `[标题.xy]` |
+| 拼多多 | `yangkeduo.com`、`pinduoduo.com` | 追 HTTP 跳转 + OG/第三方解析 | — | `<product>` | `[标题.pdd]` |
 
 ## 当前链路
 

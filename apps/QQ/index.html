@@ -97,7 +97,7 @@
                                     <circle cx="9.6" cy="9.4" r="0.65" fill="#fff"/>
                                 </svg>
                             </button>
-                            <button type="button" aria-label="礼物"><i class="bi bi-gift"></i></button>
+                            <button type="button" id="btn-service-gift" aria-label="礼物、外卖或打车"><i class="bi bi-gift"></i></button>
                             <button type="button" id="btn-voice-input" aria-label="语音输入"><i class="bi bi-mic"></i></button>
                             <button type="button" id="btn-fav-list" aria-label="已收藏的对话"><i class="bi bi-clock"></i></button>
                             <button type="button" id="btn-folder" aria-label="文件夹"><i class="bi bi-folder"></i></button>
@@ -430,6 +430,7 @@
                 <div class="qq-wallet-note">
                     <p>· 美化商城创建头像框 / 气泡需 5cc，皮肤需 20cc，背景图免费</p>
                     <p>· 发送红包会立即扣款；未被领取的红包将在现实时间满 24 小时后自动退回</p>
+                    <p>· 发送礼物、外卖或打车卡片会按填写价格立即扣款</p>
                     <p>· 余额不可负数</p>
                 </div>
             </div>
@@ -562,6 +563,29 @@
             <div class="qq-pop-actions">
                 <button type="button" data-pop-close="transfer-modal">取消</button>
                 <button type="button" id="transfer-send">发送</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 礼物 / 外卖 / 打车 -->
+    <div class="qq-pop-modal hidden" id="service-modal" role="dialog" aria-modal="true">
+        <div class="qq-pop-card">
+            <div class="qq-pop-title">送点什么</div>
+            <select id="service-kind" aria-label="选择类型">
+                <option value="gift">🎁 送礼物</option>
+                <option value="delivery">🛵 点外卖</option>
+                <option value="ride">🚕 打车</option>
+            </select>
+            <div class="qq-service-platform-row">
+                <span>平台</span>
+                <strong id="service-platform">淘宝</strong>
+            </div>
+            <input type="number" min="0" step="0.01" id="service-price" placeholder="价格">
+            <input type="text" id="service-item" placeholder="礼物是什么">
+            <textarea id="service-note" class="qq-pop-textarea-compact" placeholder="备注（可不填）"></textarea>
+            <div class="qq-pop-actions">
+                <button type="button" data-pop-close="service-modal">取消</button>
+                <button type="button" id="service-send">发送</button>
             </div>
         </div>
     </div>
