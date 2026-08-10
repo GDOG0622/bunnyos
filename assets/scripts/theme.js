@@ -97,8 +97,16 @@ select {
 
 function injectFont(root, settings = bunnyThemeSettings) {
     const fontUrl = (settings.beauty_fontUrl || "").trim();
+    const signature = JSON.stringify([
+        fontUrl,
+        getPositiveNumber(settings.beauty_fontSize),
+        getFontWeight(settings.beauty_fontWeight)
+    ]);
+    if (root.documentElement?.dataset.bunnyTypographySignature === signature) return;
+
     removeNode("bunny-custom-font-css", root);
     removeNode("bunny-custom-font-style", root);
+    if (root.documentElement) root.documentElement.dataset.bunnyTypographySignature = signature;
 
     if (!fontUrl) {
         const typographyRules = getTypographyRules(settings);
@@ -199,12 +207,7 @@ function applyThemeSettings(settings = bunnyThemeSettings) {
     window.bunnyThemeSettings = bunnyThemeSettings;
     bunnyThemeSettingsVersion = Number(bunnyThemeSettings._updatedAt || bunnyThemeSettingsVersion || 0);
 
-    const wallpaper = getWallpaperForViewport(bunnyThemeSettings);
-    if (wallpaper) {
-        document.body.style.backgroundImage = `url("${escapeCssUrl(wallpaper)}")`;
-    } else {
-        document.body.style.backgroundImage = "";
-    }
+    applyViewportWallpaper();
 
     injectDarkMode(document, bunnyThemeSettings.beauty_darkMode);
     injectFont(document, bunnyThemeSettings);
@@ -214,6 +217,18 @@ function applyThemeSettings(settings = bunnyThemeSettings) {
     if (typeof window.renderApps === "function" && Array.isArray(window.installedApps)) {
         window.renderApps(window.installedApps);
     }
+}
+
+let themeResizeFrame = null;
+let appliedWallpaper = "";
+
+function applyViewportWallpaper() {
+    const wallpaper = getWallpaperForViewport(bunnyThemeSettings) || "";
+    if (wallpaper === appliedWallpaper) return;
+    appliedWallpaper = wallpaper;
+    document.body.style.backgroundImage = wallpaper
+        ? `url("${escapeCssUrl(wallpaper)}")`
+        : "";
 }
 
 function applyThemeToIframe(iframe) {
@@ -264,7 +279,13 @@ window.applyThemeToIframe = applyThemeToIframe;
 window.loadThemeSettings = loadThemeSettings;
 window.refreshThemeSettingsIfChanged = refreshThemeSettingsIfChanged;
 
-window.addEventListener("resize", () => applyThemeSettings(bunnyThemeSettings));
+window.addEventListener("resize", () => {
+    if (themeResizeFrame) return;
+    themeResizeFrame = requestAnimationFrame(() => {
+        themeResizeFrame = null;
+        applyViewportWallpaper();
+    });
+});
 window.addEventListener("focus", () => refreshThemeSettingsIfChanged());
 document.addEventListener("visibilitychange", () => {
     if (!document.hidden) refreshThemeSettingsIfChanged();

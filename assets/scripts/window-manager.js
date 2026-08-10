@@ -7,6 +7,7 @@
         let activeAppState = { canGoBack: false };
         let hideControlsTimer = null;
         let layoutFrame = null;
+        const iframeThemeFrames = new WeakMap();
         // appId → iframe element（DOM 中持久存在；关闭/切换只切显示）
         const iframes = new Map();
         // 按打开顺序排队，超 2 个时挤掉最早的
@@ -335,15 +336,15 @@
             });
         }
 
-        function scheduleIframeThemeSync(iframe, attempt = 0) {
-            if (!iframe || iframe.style.display === 'none') {
-                // 后台 iframe 也试着同步主题，但不强制
-                if (!iframe) return;
-            }
-            window.setTimeout(() => {
+        function scheduleIframeThemeSync(iframe) {
+            if (!iframe) return;
+            const pending = iframeThemeFrames.get(iframe);
+            if (pending) cancelAnimationFrame(pending);
+            const frame = requestAnimationFrame(() => {
+                iframeThemeFrames.delete(iframe);
                 window.applyThemeToIframe?.(iframe);
-                if (attempt < 5) scheduleIframeThemeSync(iframe, attempt + 1);
-            }, attempt === 0 ? 0 : 180);
+            });
+            iframeThemeFrames.set(iframe, frame);
         }
 
         // 主题变化时刷所有 iframe
@@ -351,6 +352,13 @@
             iframes.forEach(ifr => scheduleIframeThemeSync(ifr));
         }
         window.bunnyosSyncThemeToAllIframes = syncThemeToAllIframes;
+
+        // 桌面空闲时可预热常用 App；只创建 iframe，不显示窗口。
+        window.bunnyosPreloadApp = function(app) {
+            if (!app?.id || !app.entryUrl || iframes.has(app.id)) return;
+            getOrCreateIframe(app);
+            trackOpen(app.id);
+        };
 
         new ResizeObserver(updateAppLayoutMode).observe(appWindow);
 
@@ -398,4 +406,3 @@
                 setTimeout(send, 400);
             } catch (e) { console.error(e); }
         };
-

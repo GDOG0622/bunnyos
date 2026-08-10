@@ -54,10 +54,23 @@
                 const res = await fetch('/api/apps');
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const apps = await res.json();
-                renderApps(apps.length ? apps : defaultApps);
+                const resolvedApps = apps.length ? apps : defaultApps;
+                renderApps(resolvedApps);
+                schedulePrimaryAppPreload(resolvedApps);
             } catch (e) {
                 console.warn('无法读取后端 App 清单，使用默认 App。', e);
                 renderApps(defaultApps);
+            }
+        }
+
+        function schedulePrimaryAppPreload(apps) {
+            const primaryApp = apps.find(app => app.id === 'QQ' && app.entryUrl);
+            if (!primaryApp || navigator.connection?.saveData) return;
+            const preload = () => window.bunnyosPreloadApp?.(primaryApp);
+            if ('requestIdleCallback' in window) {
+                requestIdleCallback(preload, { timeout: 1800 });
+            } else {
+                setTimeout(preload, 900);
             }
         }
 
