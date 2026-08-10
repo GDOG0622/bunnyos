@@ -39,6 +39,10 @@
         el.addEventListener('click', closePromptPreview);
     });
     $('#prompt-preview-copy')?.addEventListener('click', copyPromptPreview);
+    $$('#summary-review-modal [data-summary-review-close]').forEach(el => {
+        el.addEventListener('click', closeSummaryReview);
+    });
+    $('#summary-review-save')?.addEventListener('click', confirmBigSummary);
     $('#me-prompt-preset')?.addEventListener('change', event => savePromptPresetSetting(event.target.value));
     $('#me-prompt-manager')?.addEventListener('click', openPromptManager);
     $('#me-switch-account')?.addEventListener('click', openAccountModal);
@@ -137,6 +141,15 @@
 
     $('#btn-input-message').addEventListener('click', inputMessage);
     $('#chat-compose').addEventListener('submit', generateReply);
+    $('#chat-input')?.addEventListener('keydown', event => {
+        if (event.key !== 'Enter' || event.isComposing || event.keyCode === 229) return;
+        if (document.documentElement.dataset.appLayout !== 'desktop') return;
+        // PC 横屏：Shift/Alt/Meta + Enter 仍保留 textarea 原生换行。
+        if (event.shiftKey || event.altKey || event.metaKey) return;
+        event.preventDefault();
+        if (event.ctrlKey) $('#chat-compose')?.requestSubmit();
+        else inputMessage();
+    });
     $('#reply-draft-clear')?.addEventListener('click', clearReplyDraft);
     $('#btn-delete-mode')?.addEventListener('click', () => setDeleteMode(true));
     $('#delete-cancel')?.addEventListener('click', () => setDeleteMode(false));

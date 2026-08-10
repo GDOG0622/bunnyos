@@ -356,10 +356,13 @@ async function requestImpersonateReply() {
 async function requestAssistantReply(chat) {
     isGenerating = true;
     abortController = new AbortController();
-    const { messages: requestMessages, imageIds: sentImageIds } = await prepareMessagesForReply(chat.messages);
     setSendButtonAborting(true);
     setTyping(true);
+    let summaryResult = null;
     try {
+        summaryResult = await maybeRunLayerSummary(chat, abortController.signal);
+        if (summaryResult?.failed) return;
+        const { messages: requestMessages, imageIds: sentImageIds } = await prepareMessagesForReply(chat.messages);
         const res = await fetch('/api/qq/reply', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -382,6 +385,9 @@ async function requestAssistantReply(chat) {
         consumeImageAttachments(chat, sentImageIds);
         await appendAssistantReplySegments(chat, segments);
         notifyParent('success', chat, segments[0] || '');
+        if (summaryResult?.needsBigSummary) {
+            setTimeout(() => offerBigSummary(chat.characterId), 250);
+        }
     } catch (err) {
         if (err.name === 'AbortError') {
             toast('已停止生成');
@@ -500,6 +506,41 @@ async function readApiResponse(response) {
             detail: rawText.slice(0, 12000),
             timestamp: new Date().toISOString(),
         };
+    }
+}
+
+async function maybeRunLayerSummary(chat, signal) {
+    try {
+        const res = await fetch('/api/qq/summarize', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ characterId: chat.characterId }),
+            signal,
+        });
+        const data = await readApiResponse(res);
+        if (!res.ok) {
+            await showBackendError(`自动总结失败 (HTTP ${res.status})`, data, res);
+            return { failed: true };
+        }
+        if (!data.triggered) return data;
+        const archived = new Set(Array.isArray(data.archivedMessageIndexes) ? data.archivedMessageIndexes : []);
+        (chat.messages || []).forEach((message, index) => {
+            if (archived.has(index)) message.summary_archived = true;
+        });
+        const character = state.characters.find(item => item.id === chat.characterId);
+        if (character && data.summaryWorldbookId) character.summaryWorldbookId = data.summaryWorldbookId;
+        toast(`已生成小总结，前 ${archived.size ? (data.entry?.sourceLayerCount || '') : ''} 层不再发送给 AI`);
+        return data;
+    } catch (error) {
+        if (error.name === 'AbortError') throw error;
+        await showBackendError('自动总结失败', {
+            error: error.message || '无法连接服务器',
+            error_code: error.name || 'CLIENT_NETWORK_ERROR',
+            error_type: 'client_network_error',
+            operation: 'summarize',
+            timestamp: new Date().toISOString(),
+        });
+        return { failed: true };
     }
 }
 

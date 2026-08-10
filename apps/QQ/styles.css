@@ -624,6 +624,29 @@ html[data-app-layout="desktop"] .qq-topbar {
     cursor: pointer;
 }
 .qq-chat-settings-tokens:active { filter: brightness(0.97); }
+.qq-chat-settings-section {
+    margin: 8px 0;
+    border: 1px solid var(--qq-border, #eaeaea);
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--qq-bg, #fff);
+}
+.qq-chat-settings-section > summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px;
+    color: var(--qq-text, #333);
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    list-style: none;
+}
+.qq-chat-settings-section > summary::-webkit-details-marker { display: none; }
+.qq-chat-settings-section > summary i { transition: transform .18s ease; }
+.qq-chat-settings-section[open] > summary i { transform: rotate(180deg); }
+.qq-chat-settings-section[open] > summary { border-bottom: 1px solid var(--qq-border, #eaeaea); }
+.qq-chat-settings-section-body { padding: 2px 10px 10px; }
 .qq-chat-settings-row {
     display: grid;
     grid-template-columns: 90px 1fr;
@@ -641,6 +664,24 @@ html[data-app-layout="desktop"] .qq-topbar {
     border-radius: 8px;
     background: var(--qq-bg, #fff);
     font: inherit;
+}
+.qq-summary-threshold-control { display: flex; align-items: center; gap: 6px; }
+.qq-summary-threshold-control input {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 6px 10px;
+    border: 1px solid var(--qq-border, #eaeaea);
+    border-radius: 8px;
+    background: var(--qq-bg, #fff);
+    color: var(--qq-text, #333);
+    font: inherit;
+}
+.qq-summary-status {
+    padding: 8px 4px 2px;
+    color: var(--qq-text-fade, #888);
+    font-size: 12px;
+    line-height: 1.55;
 }
 .qq-chat-settings-row.qq-chat-settings-disabled select { opacity: 0.5; }
 .qq-chat-settings-divider {
@@ -675,6 +716,22 @@ html[data-app-layout="desktop"] .qq-topbar {
     color: var(--qq-danger, #e74c3c);
     cursor: pointer;
     font: inherit;
+}
+.qq-summary-review-card { display: flex; flex-direction: column; }
+.qq-summary-review-body { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: 10px; }
+.qq-summary-review-body p { margin: 0; color: var(--qq-text-fade, #888); font-size: 12px; line-height: 1.5; }
+.qq-summary-review-body textarea {
+    flex: 1;
+    width: 100%;
+    min-height: 320px;
+    box-sizing: border-box;
+    resize: none;
+    padding: 12px;
+    border: 1px solid var(--qq-border, #eaeaea);
+    border-radius: 10px;
+    background: var(--qq-bg-soft, #f7f7f7);
+    color: var(--qq-text, #333);
+    font: 13px/1.65 ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 
 /* M8 聊天列表顶部"显示隐藏"开关 */

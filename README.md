@@ -85,6 +85,9 @@ BunnyOS/
 | GET / POST | `/api/qq/prompt-preset` | QQ 选用哪个预设 |
 | GET / POST / PUT / DELETE | `/api/qq/characters[/:id]` | 角色卡 |
 | GET / POST | `/api/qq/chats[/:characterId]` | 聊天记录；列表启动用 `?summary=1` 只返回最后消息和计数，点入聊天再取全文 |
+| GET / PUT | `/api/qq/summary-settings/:characterId` | 每个角色的总结层数阈值 + 总结世界书选择 |
+| POST | `/api/qq/summarize` | 第 `阈值+1` 层触发小总结；副 API 生成、写世界书并归档旧层 |
+| POST | `/api/qq/summarize/big/preview` `/big/confirm` | 最新 5 张小总结生成大总结草稿；用户确认后保存并关闭原卡 |
 | GET / POST | `/api/qq/groups` `/sticker-packs` | 群定义 / 自定义表情包合集 |
 | POST | `/api/qq/reply` | AI 回复（按预设装配 + 采样参数 + 抗截断） |
 | POST | `/api/qq/impersonate` | AI 代回（user 视角拟回复，填入输入框不发送） |
@@ -145,8 +148,8 @@ BunnyOS/
 | `bunnyosRealtime` | 实时模式 | 时间变量 |
 | `charDescription` | CHAR人设 | `<character_info>` 包角色卡 role_setting / other_setting（不含 rp_rules） |
 | `personaDescription` | USER人设 | `<user_info>` 包当前 user 人设 |
-| `worldInfoAfter` | 世界书 | `<world_info>` 包 QQ globalWorldbookIds 选中书 |
-| `worldInfoBefore` | 总结内容 | `<memories>` 包当前角色 worldbookIds 选中书（=AI 记忆） |
+| `worldInfoAfter` | 世界书 | `<world_info>` 依次包含角色 `worldbookIds`、QQ `globalWorldbookIds`（角色在前、全局在后） |
+| `worldInfoBefore` | 总结内容 | `<memories>` 只包含当前角色 `summaryWorldbookId` 指定的总结世界书 |
 | `scenario` | 场景信息 | 角色卡 scenario |
 | `dialogueExamples` | 示例聊天 | 角色卡 mes_example |
 | `onlinePrivateChat` | 线上·私聊 | chatType=private 时注入 `ONLINE_PRIVATE_CHAT_PROTOCOL` 常量 |
@@ -157,9 +160,9 @@ BunnyOS/
 
 ## 关键数据模型
 
-**角色卡 `data/characters/<id>.json`**：核心字段 `name / avatar / role_setting / rp_rules / rp_rules_depth(0-4) / other_setting / scenario / mes_example / worldbookIds:[]`。`description / personality / nsfw_setting` 是旧兼容字段，分别映射 role_setting / rp_rules / other_setting。
+**角色卡 `data/characters/<id>.json`**：核心字段 `name / avatar / role_setting / rp_rules / rp_rules_depth(0-4) / other_setting / scenario / mes_example / worldbookIds:[] / summaryWorldbookId`。`worldbookIds` 是角色专属世界书；`summaryWorldbookId` 是独立的总结世界书。`description / personality / nsfw_setting` 是旧兼容字段，分别映射 role_setting / rp_rules / other_setting。
 
-**聊天记录 `data/chats/qq/<characterId>.json`**：`{characterId, messages:[{role, type, text, created_at, ...}], updated_at}`。message type：`text / image / sticker / transfer / service / link / system`。`service` 用 `serviceType / platform / price / item / note` 表示礼物、外卖和打车；商品 `link` 额外带 `previewType: "product" / platform / price`。可选字段：`reply_to`（回复引用） / `favorited` / `persona`（发送时 user 人设快照） / `reply_group_id` / `reply_group_versions` / `reply_group_version_index`（同一次 AI 生成的多气泡 + 多版本）。
+**聊天记录 `data/chats/qq/<characterId>.json`**：`{characterId, messages:[{role, type, text, created_at, ...}], summaryLayerThreshold, updated_at}`。message type：`text / image / sticker / transfer / service / link / system`。`service` 用 `serviceType / platform / price / item / note` 表示礼物、外卖和打车；商品 `link` 额外带 `previewType: "product" / platform / price`。可选字段：`reply_to` / `favorited` / `persona` / `reply_group_id` / `reply_group_versions` / `reply_group_version_index`；已进入小总结的消息标记 `summary_archived:true`，界面仍显示，但不会再装入 AI prompt。
 
 **user 人设 `data/userpersonas/<名字>.json`**：`id / name / gender / birthday / status / customStatus / signature / note / prompt / avatar`。注入 AI 的字段：name / gender / birthday / prompt。
 
@@ -178,6 +181,7 @@ BunnyOS/
 - 美化字体推荐 `.woff2`；`beauty_fontUrl` 支持 `.woff2/.woff/.ttf/.css`
 - 全屏 App 控制热区：鼠标靠近顶部展开红黄绿控制栏
 - QQ「我」页：钱包下拉旁是 QQ 专属预设选择 + 提示词管理入口（在 QQ 内全屏打开 prompt-manager）
+- QQ PC 横屏输入快捷键：`Enter` 等同“输入”，`Ctrl+Enter` 等同“发送并请求回复”；`Shift/Alt/Meta+Enter` 保留 textarea 换行
 
 ## 规划
 
@@ -201,11 +205,10 @@ BunnyOS/
 - **图片缓存升级 IndexedDB**：发过的图片 dataURL 写到 IDB `bunnyos-qq/images`（旧 `localStorage qq:img:*` 启动时自动迁移）；后端 chat 文件不存 dataURL 但保留 `client_image_id`；AI prompt 只发最近一张
 - **存储管理**：设置 → 存储配置 → 缓存管理（IDB 图片库统计 + 清空 / 浏览器站点 caches 清空）；图床配置在同一页
 - **M8 对话框管理**：聊天页三个点面板"清空聊天记录 / 隐藏此聊天 / 删除聊天"三个操作；后端 `DELETE /api/qq/chats/:cid/messages` + chat 加 `hidden` 字段 `PATCH /api/qq/chats/:cid/hidden`；联系人列表过滤 `hidden`，顶栏"显示隐藏聊天"toggle；删除会级联清掉对应的 char-beauty/char-background
+- **分层总结记忆**：聊天页三个点把头像/头像框/气泡/背景收进默认折叠的“美化”，新增“总结”；默认每 100 层总结一次，第 101 层才触发。副 API 生成一张小总结卡写入指定总结世界书，未指定时自动新建“角色名的记忆”；旧层只从 prompt 隐藏，不删聊天记录。启用小总结满 5 张后询问是否生成大总结，用户阅览确认后保存并关闭对应 5 张小卡
 - **社交与商品链接解析**（详见 `bunnyos/references/xhs-link-preview.md`）：除小红书/抖音/微信公众号/微博外，识别淘宝、闲鱼、拼多多商品短链，追踪真实商品 URL，尽量提取标题、价格和主图并渲染商品卡；平台限制匿名抓取时使用分享文案/链接参数兜底，不伪造缺失字段。最近一张封面本地缓存后作为多模态附件发给 AI，6 组 user-char 对话后衰减为短标签
 
 ### 下一步
-
-**P0 总结模块**：自动给长对话生成摘要，写进角色绑定世界书的某本（"总结世界书"）。触发条件：消息数超阈值或 token 接近上下文上限。新增端点 `POST /api/qq/summarize`，由副 API 跑。
 
 **P1 美化教程一键复制**（§8 S38/S39）：每个美化模块 panel 加默认 CSS 一键复制 + 推荐提示词模板复制，让用户把模板扔给 AI 帮改。
 

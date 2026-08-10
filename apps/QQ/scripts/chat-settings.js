@@ -104,50 +104,77 @@ async function renderChatSettings() {
     body.innerHTML = `<div class="qq-beauty-loading">加载中...</div>`;
     const charId = state.chatSettingsCharId;
     try {
-        const [cbRes, beautyRes] = await Promise.all([
+        const [cbRes, beautyRes, worldbookRes, summaryRes] = await Promise.all([
             fetch(`/api/qq/char-beauty/${encodeURIComponent(charId)}`),
             fetch('/api/qq/beauties'),
+            fetch('/api/worldbooks'),
+            fetch(`/api/qq/summary-settings/${encodeURIComponent(charId)}`),
         ]);
-        if (!cbRes.ok || !beautyRes.ok) throw new Error('加载失败');
+        if (!cbRes.ok || !beautyRes.ok || !worldbookRes.ok || !summaryRes.ok) throw new Error('加载失败');
         const cb = await cbRes.json();
         const beauties = await beautyRes.json();
+        const worldbooks = (await worldbookRes.json()).books || [];
+        const summarySettings = await summaryRes.json();
         const frames = beauties.frames || [];
         const avatars = beauties.avatars || [];
         const bubbles = beauties.bubbles || [];
         const opt = (list, currentId) => list.map(it =>
             `<option value="${it.id}"${it.id === currentId ? ' selected' : ''}>${escapeHtmlText(it.name || it.id)}</option>`
         ).join('');
+        const summaryBookOptions = [
+            `<option value=""${summarySettings.summaryWorldbookId ? '' : ' selected'}>未指定（首次总结时自动创建）</option>`,
+            ...worldbooks.map(book => `<option value="${escapeAttr(book.id)}"${book.id === summarySettings.summaryWorldbookId ? ' selected' : ''}>${escapeHtmlText(book.name || book.id)}</option>`)
+        ].join('');
         body.innerHTML = `
             <button type="button" class="qq-chat-settings-tokens" id="chat-settings-tokens">当前 prompt ≈ — tk（估算中...）</button>
-            <div class="qq-chat-settings-row">
-                <label>头像（一对）</label>
-                <select id="chat-settings-avatar">${opt(avatars, cb.avatarId)}</select>
-            </div>
-            <div class="qq-chat-settings-row">
-                <label>char 头像框</label>
-                <select id="chat-settings-frame-char">${opt(frames, cb.frameCharId)}</select>
-            </div>
-            <div class="qq-chat-settings-row">
-                <label>user 头像框</label>
-                <select id="chat-settings-frame-user">${opt(frames, cb.frameUserId)}</select>
-            </div>
-            <div class="qq-chat-settings-row">
-                <label>气泡组</label>
-                <select id="chat-settings-bubble">${opt(bubbles, cb.bubbleId)}</select>
-            </div>
-            <div class="qq-chat-settings-bg-section">
-                <div class="qq-chat-settings-bg-label">聊天背景（此 char 专属，覆盖式）</div>
-                <button type="button"
-                        class="qq-beauty-bg-single${cb.customBackgroundUrl ? ' has-image' : ''}"
-                        id="chat-settings-bg-upload"
-                        ${cb.customBackgroundUrl ? `style="background-image:url('${cb.customBackgroundUrl.replace(/'/g, "\\'")}')"` : ''}>
-                    ${cb.customBackgroundUrl ? '' : `<div class="qq-beauty-bg-single-hint">
-                        <i class="bi bi-plus-lg"></i><div>点击上传聊天背景</div>
-                    </div>`}
-                </button>
-                <input type="file" id="chat-settings-bg-file" accept="image/*" style="display:none">
-                ${cb.customBackgroundUrl ? `<button type="button" class="qq-chat-settings-bg-clear" id="chat-settings-bg-clear">清除背景</button>` : ''}
-            </div>
+            <details class="qq-chat-settings-section">
+                <summary>美化 <i class="bi bi-chevron-down"></i></summary>
+                <div class="qq-chat-settings-section-body">
+                    <div class="qq-chat-settings-row">
+                        <label>头像（一对）</label>
+                        <select id="chat-settings-avatar">${opt(avatars, cb.avatarId)}</select>
+                    </div>
+                    <div class="qq-chat-settings-row">
+                        <label>char 头像框</label>
+                        <select id="chat-settings-frame-char">${opt(frames, cb.frameCharId)}</select>
+                    </div>
+                    <div class="qq-chat-settings-row">
+                        <label>user 头像框</label>
+                        <select id="chat-settings-frame-user">${opt(frames, cb.frameUserId)}</select>
+                    </div>
+                    <div class="qq-chat-settings-row">
+                        <label>气泡组</label>
+                        <select id="chat-settings-bubble">${opt(bubbles, cb.bubbleId)}</select>
+                    </div>
+                    <div class="qq-chat-settings-bg-section">
+                        <div class="qq-chat-settings-bg-label">聊天背景（此 char 专属，覆盖式）</div>
+                        <button type="button"
+                                class="qq-beauty-bg-single${cb.customBackgroundUrl ? ' has-image' : ''}"
+                                id="chat-settings-bg-upload"
+                                ${cb.customBackgroundUrl ? `style="background-image:url('${cb.customBackgroundUrl.replace(/'/g, "\\'")}')"` : ''}>
+                            ${cb.customBackgroundUrl ? '' : `<div class="qq-beauty-bg-single-hint">
+                                <i class="bi bi-plus-lg"></i><div>点击上传聊天背景</div>
+                            </div>`}
+                        </button>
+                        <input type="file" id="chat-settings-bg-file" accept="image/*" style="display:none">
+                        ${cb.customBackgroundUrl ? `<button type="button" class="qq-chat-settings-bg-clear" id="chat-settings-bg-clear">清除背景</button>` : ''}
+                    </div>
+                </div>
+            </details>
+            <details class="qq-chat-settings-section" open>
+                <summary>总结 <i class="bi bi-chevron-down"></i></summary>
+                <div class="qq-chat-settings-section-body">
+                    <div class="qq-chat-settings-row">
+                        <label>每次总结</label>
+                        <div class="qq-summary-threshold-control"><input id="chat-summary-threshold" type="number" min="1" max="5000" value="${summarySettings.layerThreshold || 100}"><span>层</span></div>
+                    </div>
+                    <div class="qq-chat-settings-row">
+                        <label>总结世界书</label>
+                        <select id="chat-summary-worldbook">${summaryBookOptions}</select>
+                    </div>
+                    <div class="qq-summary-status">当前尚未总结 ${summarySettings.unsummarizedLayers || 0} 层；达到 ${(summarySettings.layerThreshold || 100) + 1} 层时，总结前 ${summarySettings.layerThreshold || 100} 层。启用中的小总结 ${summarySettings.activeSmallCards || 0} 张。</div>
+                </div>
+            </details>
             <div class="qq-chat-settings-divider"></div>
             <div class="qq-chat-settings-actions">
                 <button type="button" class="qq-chat-settings-action" id="chat-settings-clear">清空聊天记录</button>
@@ -167,6 +194,8 @@ async function renderChatSettings() {
         body.querySelector('#chat-settings-bubble').addEventListener('change', e =>
             onChatSettingsBeautyChange('bubbleId', e.target.value)
         );
+        body.querySelector('#chat-summary-threshold')?.addEventListener('change', saveChatSummarySettings);
+        body.querySelector('#chat-summary-worldbook')?.addEventListener('change', saveChatSummarySettings);
         // 背景上传 / 清除（per-char）
         const bgUploadBtn = body.querySelector('#chat-settings-bg-upload');
         const bgFileInput = body.querySelector('#chat-settings-bg-file');
@@ -185,6 +214,35 @@ async function renderChatSettings() {
         loadChatTokens(charId);
     } catch (err) {
         body.innerHTML = `<div class="qq-beauty-empty">加载失败：${err.message}</div>`;
+    }
+}
+
+async function saveChatSummarySettings() {
+    const charId = state.chatSettingsCharId;
+    if (!charId) return;
+    const thresholdInput = $('#chat-summary-threshold');
+    const worldbookSelect = $('#chat-summary-worldbook');
+    const layerThreshold = Math.max(1, Math.min(parseInt(thresholdInput?.value, 10) || 100, 5000));
+    if (thresholdInput) thresholdInput.value = String(layerThreshold);
+    try {
+        const res = await fetch(`/api/qq/summary-settings/${encodeURIComponent(charId)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ layerThreshold, summaryWorldbookId: worldbookSelect?.value || '' })
+        });
+        const data = await readApiResponse(res);
+        if (!res.ok) {
+            await showBackendError(`保存总结设置失败 (HTTP ${res.status})`, data, res);
+            return;
+        }
+        const character = state.characters.find(item => item.id === charId);
+        if (character) character.summaryWorldbookId = data.summaryWorldbookId || '';
+        toast('总结设置已保存');
+        await renderChatSettings();
+    } catch (error) {
+        await showBackendError('保存总结设置失败', {
+            error: error.message, error_code: error.name || 'CLIENT_NETWORK_ERROR', operation: 'summary-settings'
+        });
     }
 }
 
@@ -362,5 +420,75 @@ async function onChatSettingsBeautyChange(field, value) {
         toast('已更新');
     } catch (err) {
         toast('保存失败：' + (err.message || '未知错误'));
+    }
+}
+
+async function offerBigSummary(characterId) {
+    if (!characterId || state.bigSummaryPreviewLoading) return;
+    const accepted = await askQqConfirm('总结世界书里已有至少 5 张启用的小总结。现在把最新 5 张整理成一张大总结吗？\n\n生成后会先让你阅览，确认保存后才会关闭原来的 5 张小总结。', '生成大总结');
+    if (!accepted) return;
+    state.bigSummaryPreviewLoading = true;
+    toast('正在生成大总结…');
+    try {
+        const res = await fetch('/api/qq/summarize/big/preview', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ characterId })
+        });
+        const data = await readApiResponse(res);
+        if (!res.ok) {
+            await showBackendError(`生成大总结失败 (HTTP ${res.status})`, data, res);
+            return;
+        }
+        state.bigSummaryDraft = {
+            characterId,
+            sourceEntryIds: Array.isArray(data.sourceEntryIds) ? data.sourceEntryIds : []
+        };
+        const textarea = $('#summary-review-text');
+        if (textarea) textarea.value = data.content || '';
+        $('#summary-review-modal')?.classList.remove('hidden');
+    } catch (error) {
+        await showBackendError('生成大总结失败', {
+            error: error.message, error_code: error.name || 'CLIENT_NETWORK_ERROR', operation: 'summarize-big-preview'
+        });
+    } finally {
+        state.bigSummaryPreviewLoading = false;
+    }
+}
+
+function closeSummaryReview() {
+    $('#summary-review-modal')?.classList.add('hidden');
+    state.bigSummaryDraft = null;
+}
+
+async function confirmBigSummary() {
+    const draft = state.bigSummaryDraft;
+    const content = $('#summary-review-text')?.value?.trim() || '';
+    if (!draft || !content) {
+        toast('大总结内容不能为空');
+        return;
+    }
+    const button = $('#summary-review-save');
+    if (button) button.disabled = true;
+    try {
+        const res = await fetch('/api/qq/summarize/big/confirm', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...draft, content })
+        });
+        const data = await readApiResponse(res);
+        if (!res.ok) {
+            await showBackendError(`保存大总结失败 (HTTP ${res.status})`, data, res);
+            return;
+        }
+        closeSummaryReview();
+        toast('大总结已保存，原来的 5 张小总结已关闭');
+        if (!$('#chat-settings-modal')?.classList.contains('hidden')) await renderChatSettings();
+    } catch (error) {
+        await showBackendError('保存大总结失败', {
+            error: error.message, error_code: error.name || 'CLIENT_NETWORK_ERROR', operation: 'summarize-big-confirm'
+        });
+    } finally {
+        if (button) button.disabled = false;
     }
 }

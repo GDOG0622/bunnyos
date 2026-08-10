@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>QQ - BunnyOS</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="styles.css?v=20260810.2">
+    <link rel="stylesheet" href="styles.css?v=20260810.4">
     <script>
         // 调试：父窗口 URL 带 ?debug=1 时，子 iframe 也加载 Eruda
         try {
@@ -483,6 +483,21 @@
         </div>
     </div>
 
+    <div class="qq-modal hidden" id="summary-review-modal" role="dialog" aria-modal="true">
+        <div class="qq-modal-mask" data-summary-review-close="1"></div>
+        <div class="qq-modal-card qq-summary-review-card">
+            <div class="qq-modal-header">
+                <button class="qq-modal-back" data-summary-review-close="1"><i class="bi bi-x-lg"></i></button>
+                <div class="qq-modal-title">阅览大总结</div>
+                <button type="button" class="qq-modal-action" id="summary-review-save">确认保存</button>
+            </div>
+            <div class="qq-modal-body qq-summary-review-body">
+                <p>可以直接修改。确认保存后，组成它的 5 张小总结才会被关闭。</p>
+                <textarea id="summary-review-text" spellcheck="false"></textarea>
+            </div>
+        </div>
+    </div>
+
     <!-- 美化编辑页（全屏覆盖式，盖在商城弹窗上） -->
     <div class="qq-modal hidden" id="beauty-editor" role="dialog" aria-modal="true">
         <div class="qq-modal-mask" data-beauty-editor-close="1"></div>
@@ -611,23 +626,23 @@
 </main>
 
 <!-- QQ 资源短期缓存；改动前端文件时同步更新此版本号，避免新旧脚本混载。 -->
-<script src="/assets/scripts/catbox-proxy.js?v=20260810.2"></script>
-<script src="scripts/state.js?v=20260810.2"></script>
-<script src="scripts/utils.js?v=20260810.2"></script>
-<script src="scripts/navigation.js?v=20260810.2"></script>
-<script src="scripts/api.js?v=20260810.2"></script>
-<script src="scripts/contacts.js?v=20260810.2"></script>
-<script src="scripts/personas.js?v=20260810.2"></script>
-<script src="scripts/prompt-settings.js?v=20260810.2"></script>
-<script src="scripts/chat-render.js?v=20260810.2"></script>
-<script src="scripts/message-actions.js?v=20260810.2"></script>
-<script src="scripts/image-cache.js?v=20260810.2"></script>
-<script src="scripts/media.js?v=20260810.2"></script>
-<script src="scripts/wallet.js?v=20260810.2"></script>
-<script src="scripts/beauty-defaults.js?v=20260810.2"></script>
-<script src="scripts/beauty.js?v=20260810.2"></script>
-<script src="scripts/chat-settings.js?v=20260810.2"></script>
-<script src="scripts/events.js?v=20260810.2"></script>
-<script src="QQ.js?v=20260810.2"></script>
+<script src="/assets/scripts/catbox-proxy.js?v=20260810.4"></script>
+<script src="scripts/state.js?v=20260810.4"></script>
+<script src="scripts/utils.js?v=20260810.4"></script>
+<script src="scripts/navigation.js?v=20260810.4"></script>
+<script src="scripts/api.js?v=20260810.4"></script>
+<script src="scripts/contacts.js?v=20260810.4"></script>
+<script src="scripts/personas.js?v=20260810.4"></script>
+<script src="scripts/prompt-settings.js?v=20260810.4"></script>
+<script src="scripts/chat-render.js?v=20260810.4"></script>
+<script src="scripts/message-actions.js?v=20260810.4"></script>
+<script src="scripts/image-cache.js?v=20260810.4"></script>
+<script src="scripts/media.js?v=20260810.4"></script>
+<script src="scripts/wallet.js?v=20260810.4"></script>
+<script src="scripts/beauty-defaults.js?v=20260810.4"></script>
+<script src="scripts/beauty.js?v=20260810.4"></script>
+<script src="scripts/chat-settings.js?v=20260810.4"></script>
+<script src="scripts/events.js?v=20260810.4"></script>
+<script src="QQ.js?v=20260810.4"></script>
 </body>
 </html>
