@@ -60,15 +60,11 @@ function openPromptManager() {
     if (!modal || !frame) return;
     if (!frame.src) frame.src = '/apps/prompt-manager/index.html?embedded=qq';
     modal.classList.remove('hidden');
-    state.pageHistory.push('prompt-manager');
-    notifyNavState();
+    pushNavigationLayer('prompt-manager');
 }
 
 function closePromptManager() {
     $('#prompt-manager-modal')?.classList.add('hidden');
-    if (state.pageHistory[state.pageHistory.length - 1] === 'prompt-manager') {
-        state.pageHistory.pop();
-    }
+    popNavigationLayer('prompt-manager');
     loadPromptPresetSetting();
-    notifyNavState();
 }

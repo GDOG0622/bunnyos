@@ -73,8 +73,7 @@ function openPersonaModal(id = '') {
     $('#persona-avatar-input').value = '';
     state.personaSnapshot = JSON.stringify(getPersonaDraft());
     $('#persona-modal').classList.remove('hidden');
-    state.pageHistory.push('persona');
-    notifyNavState();
+    pushNavigationLayer('persona');
 }
 
 function renderPersonaStatusOptions(persona = null) {
@@ -108,10 +107,7 @@ async function closePersonaModal(options = {}) {
     state.editingPersonaId = '';
     state.editingPersonaAvatarDataUrl = '';
     state.personaSnapshot = '';
-    if (state.pageHistory[state.pageHistory.length - 1] === 'persona') {
-        state.pageHistory.pop();
-        notifyNavState();
-    }
+    popNavigationLayer('persona');
     state.personaClosing = false;
 }
 
@@ -183,11 +179,13 @@ function openAccountModal() {
     state.accountDeleteMode = false;
     renderAccountList();
     $('#account-modal').classList.remove('hidden');
+    pushNavigationLayer('account');
 }
 
 function closeAccountModal() {
     state.accountDeleteMode = false;
     $('#account-modal').classList.add('hidden');
+    popNavigationLayer('account');
     renderAccountList();
 }
 

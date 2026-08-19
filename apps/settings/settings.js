@@ -1,6 +1,10 @@
 let settings = {};
         let settingsVersion = 0;
         let settingsReloading = false;
+        let settingsSaveTimer = null;
+        let settingsSaveInFlight = false;
+        let settingsSavePending = false;
+        let settingsSaveWaiters = [];
         let settingsApps = [];
         let presets = {};
         
@@ -31,6 +35,7 @@ let settings = {};
 
             // 获取当前页面并将其推到左侧隐藏
             const currentPageId = pageHistory[pageHistory.length - 1];
+            if (currentPageId === pageId) return;
             const currentPage = document.getElementById(currentPageId);
             
             currentPage.style.transform = 'translateX(-100%)';
@@ -86,6 +91,7 @@ let settings = {};
         }
 
         window.addEventListener('message', event => {
+            if (event.source !== window.parent) return;
             if (event.data?.type === 'bunnyos:navigate-back') {
                 navBack();
             }
@@ -179,6 +185,7 @@ let settings = {};
         }
 
         async function reloadSettingsIfChanged(force = false) {
+            if (!force && (settingsSaveInFlight || settingsSavePending || settingsSaveTimer)) return false;
             if (settingsReloading) return false;
             settingsReloading = true;
             try {
@@ -906,10 +913,9 @@ let settings = {};
             try {
                 // 1. 获取设置表单
                 const settingsRes = await fetch('/api/settings', { cache: 'no-store' });
-                if (settingsRes.ok) {
-                    settings = await settingsRes.json();
-                    settingsVersion = Number(settings._updatedAt || Date.now());
-                }
+                if (!settingsRes.ok) throw new Error(`设置加载失败：HTTP ${settingsRes.status}`);
+                settings = await settingsRes.json();
+                settingsVersion = Number(settings._updatedAt || Date.now());
 
                 // 2. 获取提示词预设
                 const presetsRes = await fetch('/api/presets');
@@ -925,33 +931,77 @@ let settings = {};
 
             } catch (e) {
                 console.error("加载设置失败: ", e);
+                setSettingsSaveStatus('error', `${e.message || '设置加载失败'}，请刷新重试`);
             }
         }
 
-        // 保存所有当前界面数据
-        async function saveData() {
+        function setSettingsSaveStatus(state, message) {
+            const el = document.getElementById('settings-save-status');
+            if (!el) return;
+            el.dataset.state = state;
+            el.textContent = message;
+            el.classList.toggle('hidden', !message);
+        }
+
+        function collectSettingsFromForm() {
             const elements = document.querySelectorAll('input:not(#preset_name):not([type="file"]), textarea, select');
             elements.forEach(el => {
                 settings[el.id] = el.type === 'checkbox' ? el.checked : el.value;
             });
-            
+        }
+
+        async function flushSettingsSave() {
+            if (settingsSaveInFlight || !settingsSavePending) return;
+            if (settingsSaveTimer) {
+                clearTimeout(settingsSaveTimer);
+                settingsSaveTimer = null;
+            }
+            settingsSaveInFlight = true;
+            settingsSavePending = false;
+            const waiters = settingsSaveWaiters.splice(0);
+            const payload = JSON.parse(JSON.stringify(settings));
+            setSettingsSaveStatus('saving', '正在保存…');
             try {
                 const res = await fetch('/api/settings', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(settings)
+                    body: JSON.stringify(payload),
+                    keepalive: true
                 });
-                if (res.ok) {
-                    const data = await res.json().catch(() => null);
-                    if (data?.settings) {
-                        settings = data.settings;
-                        settingsVersion = Number(settings._updatedAt || Date.now());
-                    }
+                const data = await res.json().catch(() => null);
+                if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+                if (data?.settings) {
+                    settings = data.settings;
+                    settingsVersion = Number(settings._updatedAt || Date.now());
                 }
                 notifyThemeUpdated();
+                setSettingsSaveStatus('saved', '已保存');
+                waiters.forEach(resolve => resolve(true));
             } catch (error) {
                 console.error("无法保存设置到服务器:", error);
+                setSettingsSaveStatus('error', `保存失败：${error.message || '请稍后重试'}`);
+                waiters.forEach(resolve => resolve(false));
+            } finally {
+                settingsSaveInFlight = false;
+                if (settingsSavePending) {
+                    settingsSaveTimer = setTimeout(flushSettingsSave, 0);
+                } else {
+                    setTimeout(() => {
+                        const el = document.getElementById('settings-save-status');
+                        if (el?.dataset.state === 'saved') el.classList.add('hidden');
+                    }, 1400);
+                }
             }
+        }
+
+        // 保存所有当前界面数据：输入事件合并为一次写入，避免每个按键都覆盖 settings.json。
+        function saveData() {
+            collectSettingsFromForm();
+            settingsSavePending = true;
+            setSettingsSaveStatus('saving', '等待保存…');
+            clearTimeout(settingsSaveTimer);
+            settingsSaveTimer = setTimeout(flushSettingsSave, 350);
+            return new Promise(resolve => settingsSaveWaiters.push(resolve));
         }
 
         // --- 预设逻辑 ---
@@ -1432,7 +1482,8 @@ let settings = {};
         window.onload = init;
         window.addEventListener('focus', () => reloadSettingsIfChanged());
         document.addEventListener('visibilitychange', () => {
-            if (!document.hidden) reloadSettingsIfChanged();
+            if (document.hidden) flushSettingsSave();
+            else reloadSettingsIfChanged();
         });
         setInterval(() => {
             if (!document.hidden) reloadSettingsIfChanged();

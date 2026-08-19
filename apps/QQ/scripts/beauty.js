@@ -35,8 +35,7 @@ const MOCKUP_HTML = `
 
 function openBeautyModal() {
     $('#beauty-modal')?.classList.remove('hidden');
-    state.pageHistory.push('beauty');
-    notifyNavState();
+    pushNavigationLayer('beauty');
     if (!state.beautyTab) state.beautyTab = 'skins';
     state.beautySelectMode = false;
     state.beautySelected = new Set();
@@ -48,10 +47,7 @@ function openBeautyModal() {
 function closeBeautyModal() {
     $('#beauty-modal')?.classList.add('hidden');
     closeBeautyEditor(true);
-    if (state.pageHistory[state.pageHistory.length - 1] === 'beauty') {
-        state.pageHistory.pop();
-        notifyNavState();
-    }
+    popNavigationLayer('beauty');
 }
 
 async function refreshBeautyBalance() {
@@ -579,8 +575,7 @@ function openBeautyEditor(type, id) {
     }
 
     editor.classList.remove('hidden');
-    state.pageHistory.push('beauty-editor');
-    notifyNavState();
+    pushNavigationLayer('beauty-editor');
 }
 
 function closeBeautyEditor(silent) {
@@ -594,10 +589,7 @@ function closeBeautyEditor(silent) {
         flushBeautyAutoSave();
     }
     editor.classList.add('hidden');
-    if (!silent && state.pageHistory[state.pageHistory.length - 1] === 'beauty-editor') {
-        state.pageHistory.pop();
-        notifyNavState();
-    }
+    popNavigationLayer('beauty-editor');
     state.beautyEditing = null;
     // 编辑完后刷新一下商城列表
     if (state.beautyTab) loadBeautyPanel(state.beautyTab);

@@ -263,7 +263,7 @@
     </div>
 
     <!-- 已收藏的对话 -->
-    <div class="qq-modal hidden" id="fav-list-modal" role="dialog" aria-modal="true">
+    <div class="qq-modal hidden" id="fav-list-modal" role="dialog" aria-modal="true" aria-label="已收藏的对话">
         <div class="qq-modal-mask" data-fav-close="1"></div>
         <div class="qq-modal-card">
             <div class="qq-modal-header">
@@ -284,7 +284,7 @@
     </div>
 
     <!-- QQ 内置提示词管理 -->
-    <div class="qq-modal hidden" id="prompt-manager-modal" role="dialog" aria-modal="true">
+    <div class="qq-modal hidden" id="prompt-manager-modal" role="dialog" aria-modal="true" aria-label="提示词管理">
         <div class="qq-modal-mask" data-prompt-manager-close="1"></div>
         <div class="qq-prompt-manager-card">
             <div class="qq-modal-header">
@@ -297,7 +297,7 @@
     </div>
 
     <!-- 好友创建 / 详情编辑 -->
-    <div class="qq-modal hidden" id="friend-modal" role="dialog" aria-modal="true">
+    <div class="qq-modal hidden" id="friend-modal" role="dialog" aria-modal="true" aria-labelledby="friend-modal-title">
         <div class="qq-modal-mask" data-close="1"></div>
         <div class="qq-modal-card">
             <div class="qq-modal-header">
@@ -358,7 +358,7 @@
     </div>
 
     <!-- User 人设编辑 -->
-    <div class="qq-modal hidden" id="persona-modal" role="dialog" aria-modal="true">
+    <div class="qq-modal hidden" id="persona-modal" role="dialog" aria-modal="true" aria-labelledby="persona-modal-title">
         <div class="qq-modal-mask" data-persona-close="1"></div>
         <div class="qq-modal-card">
             <div class="qq-modal-header">
@@ -409,7 +409,7 @@
     </div>
 
     <!-- 钱包 -->
-    <div class="qq-modal hidden" id="wallet-modal" role="dialog" aria-modal="true">
+    <div class="qq-modal hidden" id="wallet-modal" role="dialog" aria-modal="true" aria-label="钱包">
         <div class="qq-modal-mask" data-wallet-close="1"></div>
         <div class="qq-modal-card">
             <div class="qq-modal-header">
@@ -438,7 +438,7 @@
     </div>
 
     <!-- 美化商城 -->
-    <div class="qq-modal hidden" id="beauty-modal" role="dialog" aria-modal="true">
+    <div class="qq-modal hidden" id="beauty-modal" role="dialog" aria-modal="true" aria-label="美化商城">
         <div class="qq-modal-mask" data-beauty-close="1"></div>
         <div class="qq-modal-card qq-beauty-card">
             <div class="qq-modal-header">
@@ -459,7 +459,7 @@
     </div>
 
     <!-- 聊天设置面板（聊天页右上三个点） -->
-    <div class="qq-modal hidden" id="chat-settings-modal" role="dialog" aria-modal="true">
+    <div class="qq-modal hidden" id="chat-settings-modal" role="dialog" aria-modal="true" aria-label="聊天设置">
         <div class="qq-modal-mask" data-chat-settings-close="1"></div>
         <div class="qq-modal-card qq-chat-settings-card">
             <div class="qq-modal-header">
@@ -471,7 +471,7 @@
         </div>
     </div>
 
-    <div class="qq-modal hidden" id="prompt-preview-modal" role="dialog" aria-modal="true">
+    <div class="qq-modal hidden" id="prompt-preview-modal" role="dialog" aria-modal="true" aria-label="完整提示词">
         <div class="qq-modal-mask" data-prompt-preview-close="1"></div>
         <div class="qq-modal-card qq-prompt-preview-card">
             <div class="qq-modal-header">
@@ -483,7 +483,7 @@
         </div>
     </div>
 
-    <div class="qq-modal hidden" id="summary-review-modal" role="dialog" aria-modal="true">
+    <div class="qq-modal hidden" id="summary-review-modal" role="dialog" aria-modal="true" aria-label="阅览大总结">
         <div class="qq-modal-mask" data-summary-review-close="1"></div>
         <div class="qq-modal-card qq-summary-review-card">
             <div class="qq-modal-header">
@@ -499,7 +499,7 @@
     </div>
 
     <!-- 美化编辑页（全屏覆盖式，盖在商城弹窗上） -->
-    <div class="qq-modal hidden" id="beauty-editor" role="dialog" aria-modal="true">
+    <div class="qq-modal hidden" id="beauty-editor" role="dialog" aria-modal="true" aria-labelledby="beauty-editor-title">
         <div class="qq-modal-mask" data-beauty-editor-close="1"></div>
         <div class="qq-modal-card qq-beauty-editor-card">
             <div class="qq-modal-header">
@@ -522,7 +522,7 @@
     </div>
 
     <!-- 切换账号 -->
-    <div class="qq-account-modal hidden" id="account-modal" role="dialog" aria-modal="true">
+    <div class="qq-account-modal hidden" id="account-modal" role="dialog" aria-modal="true" aria-label="切换账号">
         <div class="qq-modal-mask" data-account-close="1"></div>
         <div class="qq-account-card">
             <div class="qq-account-title">切换账号</div>
@@ -535,7 +535,7 @@
     </div>
 
     <!-- 新建表情包 -->
-    <div class="qq-pop-modal hidden" id="sticker-modal" role="dialog" aria-modal="true">
+    <div class="qq-pop-modal hidden" id="sticker-modal" role="dialog" aria-modal="true" aria-label="新建表情包">
         <div class="qq-pop-card">
             <div class="qq-pop-title">新建表情包</div>
             <input type="text" id="sticker-pack-name" placeholder="合集名称">
@@ -548,7 +548,7 @@
     </div>
 
     <!-- BUNNY 系统信息 -->
-    <div class="qq-pop-modal hidden" id="system-msg-modal" role="dialog" aria-modal="true">
+    <div class="qq-pop-modal hidden" id="system-msg-modal" role="dialog" aria-modal="true" aria-label="BUNNY 系统信息">
         <div class="qq-pop-card">
             <div class="qq-pop-title">BUNNY 系统信息</div>
             <div class="qq-pop-hint">user 与 BUNNY 元层交流，char 不可见、不会反应。会作为 +content+ 同步给 AI。</div>
@@ -561,7 +561,7 @@
     </div>
 
     <!-- 转账 -->
-    <div class="qq-pop-modal hidden" id="transfer-modal" role="dialog" aria-modal="true">
+    <div class="qq-pop-modal hidden" id="transfer-modal" role="dialog" aria-modal="true" aria-label="转账">
         <div class="qq-pop-card">
             <div class="qq-pop-title">转账</div>
             <input type="number" min="0" step="0.01" id="transfer-amount" placeholder="金额">
@@ -583,7 +583,7 @@
     </div>
 
     <!-- 礼物 / 外卖 / 打车 -->
-    <div class="qq-pop-modal hidden" id="service-modal" role="dialog" aria-modal="true">
+    <div class="qq-pop-modal hidden" id="service-modal" role="dialog" aria-modal="true" aria-label="送点什么">
         <div class="qq-pop-card">
             <div class="qq-pop-title">送点什么</div>
             <select id="service-kind" aria-label="选择类型">
@@ -605,7 +605,7 @@
         </div>
     </div>
 
-    <div class="qq-dialog hidden" id="qq-dialog" role="dialog" aria-modal="true">
+    <div class="qq-dialog hidden" id="qq-dialog" role="dialog" aria-modal="true" aria-labelledby="qq-dialog-title">
         <div class="qq-dialog-mask"></div>
         <div class="qq-dialog-card">
             <div class="qq-dialog-title" id="qq-dialog-title">确认</div>
@@ -628,22 +628,22 @@
 <!-- QQ 资源短期缓存；改动前端文件时同步更新此版本号，避免新旧脚本混载。 -->
 <script src="/assets/scripts/catbox-proxy.js?v=20260810.4"></script>
 <script src="scripts/state.js?v=20260810.4"></script>
-<script src="scripts/utils.js?v=20260810.4"></script>
+<script src="scripts/utils.js?v=20260819.1"></script>
 <script src="scripts/navigation.js?v=20260810.4"></script>
-<script src="scripts/api.js?v=20260810.4"></script>
-<script src="scripts/contacts.js?v=20260810.4"></script>
-<script src="scripts/personas.js?v=20260810.4"></script>
-<script src="scripts/prompt-settings.js?v=20260810.4"></script>
-<script src="scripts/chat-render.js?v=20260810.4"></script>
-<script src="scripts/message-actions.js?v=20260810.5"></script>
+<script src="scripts/api.js?v=20260819.1"></script>
+<script src="scripts/contacts.js?v=20260819.1"></script>
+<script src="scripts/personas.js?v=20260819.1"></script>
+<script src="scripts/prompt-settings.js?v=20260819.1"></script>
+<script src="scripts/chat-render.js?v=20260819.1"></script>
+<script src="scripts/message-actions.js?v=20260819.1"></script>
 <script src="scripts/image-cache.js?v=20260810.4"></script>
-<script src="scripts/media.js?v=20260810.4"></script>
-<script src="scripts/wallet.js?v=20260810.4"></script>
+<script src="scripts/media.js?v=20260819.1"></script>
+<script src="scripts/wallet.js?v=20260819.1"></script>
 <script src="scripts/beauty-defaults.js?v=20260810.4"></script>
-<script src="scripts/beauty.js?v=20260810.4"></script>
-<script src="scripts/summary.js?v=20260810.5"></script>
-<script src="scripts/chat-settings.js?v=20260810.5"></script>
-<script src="scripts/events.js?v=20260810.4"></script>
+<script src="scripts/beauty.js?v=20260819.1"></script>
+<script src="scripts/summary.js?v=20260819.1"></script>
+<script src="scripts/chat-settings.js?v=20260819.1"></script>
+<script src="scripts/events.js?v=20260819.1"></script>
 <script src="QQ.js?v=20260810.4"></script>
 </body>
 </html>

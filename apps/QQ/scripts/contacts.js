@@ -107,8 +107,7 @@ async function openFriendModal(id = '') {
     renderFriendWorldbookChips();
     state.friendSnapshot = JSON.stringify(getFriendDraft());
     $('#friend-modal').classList.remove('hidden');
-    state.pageHistory.push('friend');
-    notifyNavState();
+    pushNavigationLayer('friend');
 }
 
 async function loadFriendWorldbookOptions() {
@@ -207,10 +206,7 @@ async function closeFriendModal(options = {}) {
     state.editingId = '';
     state.editingAvatarDataUrl = '';
     state.friendSnapshot = '';
-    if (state.pageHistory[state.pageHistory.length - 1] === 'friend') {
-        state.pageHistory.pop();
-        notifyNavState();
-    }
+    popNavigationLayer('friend');
     state.friendClosing = false;
 }
 

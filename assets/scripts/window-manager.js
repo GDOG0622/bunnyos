@@ -10,11 +10,18 @@
         const iframeThemeFrames = new WeakMap();
         // appId → iframe element（DOM 中持久存在；关闭/切换只切显示）
         const iframes = new Map();
-        // App iframe 常驻。生成任务可能属于后台 QQ，不能因打开第三个 App 而销毁。
+        // QQ 生成任务允许后台继续；普通 App 超出上限后按最近使用顺序释放。
         const openOrder = [];
-        const MAX_OPEN = Number.POSITIVE_INFINITY;
+        const MAX_OPEN = 4;
+        const PERSISTENT_APP_IDS = new Set(['QQ']);
+        const minimizedApps = new Set();
+        window.bunnyosMinimizedApps = minimizedApps;
         let activeAppId = '';
         let activeApp = null;
+
+        function getAppItem(appId) {
+            return [...document.querySelectorAll('.app-item')].find(item => item.dataset.appId === appId) || null;
+        }
 
         function getActiveIframe() {
             return activeAppId ? iframes.get(activeAppId) : null;
@@ -47,12 +54,9 @@
 
         function evictOldestIfNeeded(except) {
             while (openOrder.length > MAX_OPEN) {
-                const oldest = openOrder.shift();
-                if (oldest === except) {
-                    // 当前要保留的，放回队首，继续看下一个
-                    openOrder.unshift(oldest);
-                    break;
-                }
+                const oldestIndex = openOrder.findIndex(appId => appId !== except && !PERSISTENT_APP_IDS.has(appId));
+                if (oldestIndex < 0) break;
+                const [oldest] = openOrder.splice(oldestIndex, 1);
                 const ifr = iframes.get(oldest);
                 if (ifr) ifr.remove();
                 iframes.delete(oldest);
@@ -114,12 +118,14 @@
             }
 
             appWindow.classList.add('active');
+            minimizedApps.delete(app.id);
+            getAppItem(app.id)?.classList.remove('minimized');
             requestAnimationFrame(updateAppLayoutMode);
             const active = getActiveIframe();
             if (active) scheduleIframeThemeSync(active);
         }
 
-        function closeApp() {
+        function hideAppWindow() {
             appWindow.classList.remove('active');
             appWindow.classList.remove('fullscreen');
             appWindow.classList.remove('show-controls');
@@ -128,6 +134,24 @@
             activeAppState = { canGoBack: false };
             // 不卸载 iframe：让后台任务（如 AI 生成）跑完
             resetWindowInlineStyles();
+        }
+
+        function closeApp() {
+            const appId = activeAppId || activeApp?.id || '';
+            hideAppWindow();
+            if (appId) {
+                minimizedApps.delete(appId);
+                getAppItem(appId)?.classList.remove('minimized');
+            }
+        }
+
+        function minimizeApp() {
+            const appId = activeAppId || activeApp?.id || '';
+            hideAppWindow();
+            if (appId) {
+                minimizedApps.add(appId);
+                getAppItem(appId)?.classList.add('minimized');
+            }
         }
 
         function handleMobileBack() {

@@ -223,14 +223,78 @@ async function onChatImagePicked(e) {
 
 function openPopModal(id) {
     $(`#${id}`).classList.remove('hidden');
+    pushNavigationLayer(`pop:${id}`);
 }
 
 function closePopModal(id) {
     $(`#${id}`).classList.add('hidden');
+    popNavigationLayer(`pop:${id}`);
+}
+
+async function sendPaidChatMessage({ characterId, cost, message, reason, button }) {
+    if (!characterId) throw new Error('请先打开一个对话');
+    if (activeGenerationTask?.()) throw new Error('请先等待当前回复完成或停止生成');
+    const requestSignature = JSON.stringify({ characterId, cost, type: message?.type, text: message?.text });
+    const requestId = button?.dataset.paidRequestSignature === requestSignature && button.dataset.paidRequestId
+        ? button.dataset.paidRequestId
+        : makeClientMessageId('paid');
+    if (button) {
+        button.dataset.paidRequestId = requestId;
+        button.dataset.paidRequestSignature = requestSignature;
+    }
+    const paidMessage = { ...message, id: requestId, client_request_id: requestId };
+    let outcomeKnown = false;
+    if (button) button.disabled = true;
+    try {
+        const data = await queueChatOperation(characterId, async () => {
+            const res = await fetch(`/api/qq/chats/${encodeURIComponent(characterId)}/paid-message`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ cost, reason, requestId, message: paidMessage })
+            });
+            const payload = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                outcomeKnown = true;
+                const error = new Error(payload?.error || `HTTP ${res.status}`);
+                error.status = res.status;
+                error.balance = payload?.balance;
+                throw error;
+            }
+            if (!payload?.message) throw new Error('服务器返回不完整，请安全重试');
+            outcomeKnown = true;
+            return payload;
+        });
+        let chat = state.chats.find(item => item.characterId === characterId);
+        if (!chat) {
+            chat = { characterId, messages: [], _messagesLoaded: true };
+            state.chats.unshift(chat);
+        }
+        chat.messages = Array.isArray(chat.messages) ? chat.messages : [];
+        if (!chat.messages.some(item => item?.client_request_id === requestId || item?.id === requestId)) {
+            chat.messages.push(data.message || paidMessage);
+        }
+        chat.updated_at = data.chat?.updated_at || Date.now();
+        chat.lastMessage = chat.messages[chat.messages.length - 1] || null;
+        chat.messageCount = chat.messages.length;
+        chat._messagesLoaded = true;
+        if (typeof data.balance === 'number') state.walletBalance = data.balance;
+        renderChats();
+        if (state.activeChatId === characterId) renderActiveChat();
+        return data;
+    } finally {
+        if (button) {
+            button.disabled = false;
+            if (outcomeKnown) {
+                delete button.dataset.paidRequestId;
+                delete button.dataset.paidRequestSignature;
+            }
+        }
+    }
 }
 
 async function sendTransfer() {
-    if (!state.activeChatId) return;
+    const characterId = state.activeChatId;
+    if (!characterId) return;
     const amountStr = $('#transfer-amount').value.trim();
     if (!amountStr) {
         toast('请填写金额');
@@ -243,17 +307,7 @@ async function sendTransfer() {
     }
     const currency = $('#transfer-currency').value;
     const note = $('#transfer-note').value.trim();
-    try {
-        await adjustWallet(-amountNum, `transfer to ${state.activeChatId}`);
-    } catch (err) {
-        if (err.status === 402) {
-            toast(`余额不足，当前 ${formatCC(err.balance)} cc`);
-        } else {
-            toast('扣款失败：' + (err.message || '未知错误'));
-        }
-        return;
-    }
-    await appendChatMessage({
+    const message = {
         role: 'user',
         type: 'transfer',
         text: `转账 ${currency}${amountStr}${note ? ` ${note}` : ''}`,
@@ -263,7 +317,23 @@ async function sendTransfer() {
         status: 'pending',
         settled_at: null,
         created_at: Date.now()
-    });
+    };
+    try {
+        await sendPaidChatMessage({
+            characterId,
+            cost: amountNum,
+            message,
+            reason: `transfer to ${characterId}`,
+            button: $('#transfer-send')
+        });
+    } catch (err) {
+        if (err.status === 402) {
+            toast(`余额不足，当前 ${formatCC(err.balance)} cc`);
+        } else {
+            toast(`${err.status ? '发送失败' : '网络状态未知，可再次点击安全重试'}：${err.message || '未知错误'}`);
+        }
+        return;
+    }
     $('#transfer-amount').value = '';
     $('#transfer-note').value = '';
     closePopModal('transfer-modal');
@@ -290,7 +360,8 @@ function openServiceComposer() {
 }
 
 async function sendServiceCard() {
-    if (!state.activeChatId) return;
+    const characterId = state.activeChatId;
+    if (!characterId) return;
     const kind = $('#service-kind')?.value || 'gift';
     const def = SERVICE_CARD_DEFS[kind] || SERVICE_CARD_DEFS.gift;
     const priceText = $('#service-price')?.value.trim() || '';
@@ -305,14 +376,7 @@ async function sendServiceCard() {
         toast(`请填写${def.itemPlaceholder}`);
         return;
     }
-    try {
-        await adjustWallet(-price, `${kind} to ${state.activeChatId}`);
-    } catch (err) {
-        if (err.status === 402) toast(`余额不足，当前 ${formatCC(err.balance)} cc`);
-        else toast('扣款失败：' + (err.message || '未知错误'));
-        return;
-    }
-    await appendChatMessage({
+    const message = {
         role: 'user',
         type: 'service',
         serviceType: kind,
@@ -323,7 +387,20 @@ async function sendServiceCard() {
         note,
         text: `${def.label} ${def.platform} ¥${priceText} ${item}${note ? ` ${note}` : ''}`,
         created_at: Date.now(),
-    });
+    };
+    try {
+        await sendPaidChatMessage({
+            characterId,
+            cost: price,
+            message,
+            reason: `${kind} to ${characterId}`,
+            button: $('#service-send')
+        });
+    } catch (err) {
+        if (err.status === 402) toast(`余额不足，当前 ${formatCC(err.balance)} cc`);
+        else toast(`${err.status ? '发送失败' : '网络状态未知，可再次点击安全重试'}：${err.message || '未知错误'}`);
+        return;
+    }
     $('#service-price').value = '';
     $('#service-item').value = '';
     $('#service-note').value = '';
@@ -594,28 +671,31 @@ function toggleVoiceInput() {
 }
 
 
-async function saveChat(chat) {
-    const persistMessages = (chat.messages || []).map(message => {
-        if (message?.type !== 'image') return message;
-        // 只剥 dataURL，保留 client_image_id 让 localStorage 缓存可找回
-        const clean = { ...message, text: message.text || '[图片]' };
-        delete clean.image;
-        return clean;
+const chatSaveQueues = new Map();
+
+function queueChatOperation(characterId, operation) {
+    const previous = chatSaveQueues.get(characterId) || Promise.resolve();
+    const task = previous.catch(() => {}).then(operation);
+    let queued;
+    queued = task.finally(() => {
+        if (chatSaveQueues.get(characterId) === queued) chatSaveQueues.delete(characterId);
     });
-    const res = await fetch(`/api/qq/chats/${encodeURIComponent(chat.characterId)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: persistMessages }),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const saved = await res.json();
-    // 同步 server 端做的 transfer 状态更新（自动退回等），同时保留本地的 image dataURL
-    const localMessages = chat.messages || [];
+    chatSaveQueues.set(characterId, queued);
+    return queued;
+}
+
+function mergeSavedChat(saved, chat, expectedRevision) {
+    const currentChat = state.chats.find(item => item.characterId === saved.characterId) || chat;
+    // 请求发送后若又有本地修改，旧响应只作为落盘确认，不能覆盖更新后的界面。
+    if (currentChat && currentChat._localRevision !== expectedRevision) return saved;
+    const localMessages = currentChat?.messages || [];
+    const localById = new Map(localMessages
+        .map(message => [message?.id || message?.client_request_id, message])
+        .filter(([id]) => id));
     let walletNeedsRefresh = false;
-    const mergedMessages = (saved.messages || []).map((srvMsg, i) => {
-        const local = localMessages[i] || {};
-        if (srvMsg && srvMsg.type === 'transfer'
-            && srvMsg.status === 'returned' && local.status === 'pending') {
+    const mergedMessages = (saved.messages || []).map((srvMsg, index) => {
+        const local = localById.get(srvMsg?.id || srvMsg?.client_request_id) || localMessages[index] || {};
+        if (srvMsg && srvMsg.type === 'transfer' && srvMsg.status === 'returned' && local.status === 'pending') {
             walletNeedsRefresh = true;
         }
         if (srvMsg?.type === 'image' && local.type === 'image' && local.image) {
@@ -623,19 +703,44 @@ async function saveChat(chat) {
         }
         return srvMsg;
     });
-    chat.messages = mergedMessages;
-    const idx = state.chats.findIndex(item => item.characterId === saved.characterId);
     const localChat = {
         ...saved,
+        _localRevision: expectedRevision,
         messages: mergedMessages,
         lastMessage: mergedMessages[mergedMessages.length - 1] || null,
         messageCount: mergedMessages.length,
         _messagesLoaded: true,
     };
-    if (idx >= 0) state.chats[idx] = localChat;
+    const index = state.chats.findIndex(item => item.characterId === saved.characterId);
+    if (index >= 0) state.chats[index] = localChat;
     else state.chats.unshift(localChat);
-    if (walletNeedsRefresh) {
-        loadWalletBalance().catch(() => {});
-        renderActiveChat();
-    }
+    if (walletNeedsRefresh) loadWalletBalance().catch(() => {});
+    return localChat;
+}
+
+async function saveChat(chat) {
+    if (!chat?.characterId) throw new Error('缺少聊天 ID');
+    const revision = (Number(chat._localRevision) || 0) + 1;
+    chat._localRevision = revision;
+    const persistMessages = (chat.messages || []).map(message => {
+        if (message?.type !== 'image') return message;
+        // 只剥 dataURL，保留 client_image_id 让 localStorage 缓存可找回
+        const clean = { ...message, text: message.text || '[图片]' };
+        delete clean.image;
+        return clean;
+    });
+    const requestBody = JSON.stringify({ messages: persistMessages });
+    const characterId = chat.characterId;
+    return queueChatOperation(characterId, async () => {
+        const res = await fetch(`/api/qq/chats/${encodeURIComponent(characterId)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: requestBody,
+        });
+        const saved = await res.json().catch(() => null);
+        if (!res.ok || !saved) throw new Error(saved?.error || `HTTP ${res.status}`);
+        const merged = mergeSavedChat(saved, chat, revision);
+        if (state.activeChatId === characterId && merged !== saved) renderActiveChat();
+        return merged;
+    });
 }

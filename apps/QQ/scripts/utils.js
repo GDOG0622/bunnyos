@@ -11,26 +11,94 @@
     }, '*');
 }
 
+const navigationFocusOrigins = new Map();
+
+function pushNavigationLayer(key) {
+    if (!key || state.pageHistory[state.pageHistory.length - 1] === key) return;
+    navigationFocusOrigins.set(key, document.activeElement);
+    state.pageHistory.push(key);
+    notifyNavState();
+    requestAnimationFrame(() => {
+        const visibleDialog = [...document.querySelectorAll('[role="dialog"]:not(.hidden)')].pop();
+        const focusable = visibleDialog?.querySelector('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])');
+        focusable?.focus({ preventScroll: true });
+    });
+}
+
+function popNavigationLayer(key) {
+    const index = state.pageHistory.lastIndexOf(key);
+    if (index > 0) state.pageHistory.splice(index, 1);
+    notifyNavState();
+    const origin = navigationFocusOrigins.get(key);
+    navigationFocusOrigins.delete(key);
+    requestAnimationFrame(() => {
+        if (origin?.isConnected) origin.focus({ preventScroll: true });
+    });
+}
+
+function isLayerVisible(id) {
+    const element = $(`#${id}`);
+    return Boolean(element && !element.classList.contains('hidden'));
+}
+
 function handleNavigateBack() {
-    if (!$('#prompt-manager-modal')?.classList.contains('hidden')) {
+    if (isLayerVisible('qq-dialog')) {
+        $('#qq-dialog-cancel')?.click();
+        return;
+    }
+    if (isLayerVisible('beauty-editor')) {
+        closeBeautyEditor(false);
+        return;
+    }
+    if (isLayerVisible('prompt-preview-modal')) {
+        closePromptPreview();
+        return;
+    }
+    if (isLayerVisible('summary-review-modal')) {
+        closeSummaryReview();
+        return;
+    }
+    for (const id of ['service-modal', 'transfer-modal', 'system-msg-modal', 'sticker-modal']) {
+        if (isLayerVisible(id)) {
+            closePopModal(id);
+            return;
+        }
+    }
+    if (isLayerVisible('fav-list-modal')) {
+        setFavSelectMode(false);
+        $('#fav-list-modal')?.classList.add('hidden');
+        popNavigationLayer('favorites');
+        return;
+    }
+    if (isLayerVisible('chat-settings-modal')) {
+        closeChatSettings();
+        return;
+    }
+    if (isLayerVisible('wallet-modal')) {
+        closeWalletModal();
+        return;
+    }
+    if (isLayerVisible('beauty-modal')) {
+        closeBeautyModal();
+        return;
+    }
+    if (isLayerVisible('prompt-manager-modal')) {
         closePromptManager();
         return;
     }
-    if (!$('#persona-modal')?.classList.contains('hidden')) {
+    if (isLayerVisible('persona-modal')) {
         closePersonaModal();
         return;
     }
-    if (!$('#account-modal')?.classList.contains('hidden')) {
+    if (isLayerVisible('account-modal')) {
         closeAccountModal();
         return;
     }
-    if (!$('#friend-modal').classList.contains('hidden')) {
+    if (isLayerVisible('friend-modal')) {
         closeFriendModal();
         return;
     }
-    if (!$('#add-menu').classList.contains('hidden')) {
-        hideAddMenu();
-    }
+    if (isLayerVisible('add-menu')) hideAddMenu();
 }
 
 function messageSummaryText(msg) {
@@ -158,7 +226,21 @@ function loadEarlierChatLayers() {
 function renderChatLoadError(error) {
     const box = $('#chat-messages');
     if (!box) return;
-    box.innerHTML = `<div class="qq-empty qq-empty-inline"><div class="qq-empty-title">聊天记录加载失败</div><div class="qq-empty-sub">${escapeHtml(error?.message || '请稍后重试')}</div></div>`;
+    const characterId = state.activeChatId;
+    box.innerHTML = `<div class="qq-empty qq-empty-inline"><div class="qq-empty-title">聊天记录加载失败</div><div class="qq-empty-sub">${escapeHtml(error?.message || '请稍后重试')}</div><button type="button" class="qq-retry-btn">重新加载</button></div>`;
+    box.querySelector('.qq-retry-btn')?.addEventListener('click', () => activateChat(characterId));
+}
+
+function renderQqCoreLoadError(error) {
+    const list = $('#chat-list');
+    if (!list) return;
+    list.querySelector('.qq-core-load-error')?.remove();
+    $('#empty-chats')?.classList.add('hidden');
+    const panel = document.createElement('div');
+    panel.className = 'qq-empty qq-empty-inline qq-core-load-error';
+    panel.innerHTML = `<div class="qq-empty-title">QQ 数据加载失败</div><div class="qq-empty-sub">${escapeHtml(error?.message || '请检查本地服务后重试')}</div><button type="button" class="qq-retry-btn">重新加载</button>`;
+    panel.querySelector('.qq-retry-btn')?.addEventListener('click', () => loadData());
+    list.appendChild(panel);
 }
 
 function openQqDialog({ title = '确认', message = '', input = false, value = '', copyText = '' } = {}) {
@@ -176,6 +258,7 @@ function openQqDialog({ title = '确认', message = '', input = false, value = '
         inputEl.value = value;
         copy?.classList.toggle('hidden', !copyText);
         dialog.classList.remove('hidden');
+        pushNavigationLayer('qq-dialog');
         setTimeout(() => {
             if (input) {
                 inputEl.focus();
@@ -187,6 +270,7 @@ function openQqDialog({ title = '确认', message = '', input = false, value = '
 
         const cleanup = (result) => {
             dialog.classList.add('hidden');
+            popNavigationLayer('qq-dialog');
             ok.removeEventListener('click', onOk);
             cancel.removeEventListener('click', onCancel);
             copy?.removeEventListener('click', onCopy);
@@ -204,8 +288,16 @@ function openQqDialog({ title = '确认', message = '', input = false, value = '
             }
         };
         const onKeydown = (event) => {
-            if (event.key === 'Enter' && (!input || document.activeElement === inputEl)) onOk();
-            if (event.key === 'Escape') onCancel();
+            if (event.key === 'Enter' && (!input || document.activeElement === inputEl)) {
+                event.preventDefault();
+                event.stopPropagation();
+                onOk();
+            }
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+                onCancel();
+            }
         };
 
         ok.addEventListener('click', onOk);

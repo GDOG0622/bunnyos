@@ -8,36 +8,37 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+    <div id="settings-save-status" class="settings-save-status hidden" role="status" aria-live="polite"></div>
 
     <!-- 主菜单 -->
     <div id="page-main" class="page active">
         <div class="header"><span class="breadcrumb-title">设置</span></div>
         <div class="section">
             <div class="list">
-                <div class="item" data-action="nav" onclick="navTo('page-api')">
-                    <label>通用 API</label>
-                    <div class="flex-row"><i class="bi bi-chevron-right chevron"></i></div>
-                </div>
-                <div class="item" data-action="nav" onclick="navTo('page-beauty')">
-                    <label>美化</label>
-                    <div class="flex-row"><i class="bi bi-chevron-right chevron"></i></div>
-                </div>
-                <div class="item" data-action="nav" onclick="navTo('page-image')">
-                    <label>生图功能</label>
-                    <div class="flex-row"><i class="bi bi-chevron-right chevron"></i></div>
-                </div>
-                <div class="item" data-action="nav" onclick="navTo('page-voice')">
-                    <label>语音功能</label>
-                    <div class="flex-row"><i class="bi bi-chevron-right chevron"></i></div>
-                </div>
-                <div class="item" data-action="nav" onclick="navTo('page-storage')">
-                    <label>存储配置</label>
-                    <div class="flex-row"><i class="bi bi-chevron-right chevron"></i></div>
-                </div>
-                <div class="item" data-action="nav" onclick="navTo('page-about')">
-                    <label>关于系统</label>
-                    <div class="flex-row"><i class="bi bi-chevron-right chevron"></i></div>
-                </div>
+                <button type="button" class="item" data-action="nav" onclick="navTo('page-api')">
+                    <span>通用 API</span>
+                    <span class="flex-row"><i class="bi bi-chevron-right chevron"></i></span>
+                </button>
+                <button type="button" class="item" data-action="nav" onclick="navTo('page-beauty')">
+                    <span>美化</span>
+                    <span class="flex-row"><i class="bi bi-chevron-right chevron"></i></span>
+                </button>
+                <button type="button" class="item" data-action="nav" onclick="navTo('page-image')">
+                    <span>生图功能</span>
+                    <span class="flex-row"><i class="bi bi-chevron-right chevron"></i></span>
+                </button>
+                <button type="button" class="item" data-action="nav" onclick="navTo('page-voice')">
+                    <span>语音功能</span>
+                    <span class="flex-row"><i class="bi bi-chevron-right chevron"></i></span>
+                </button>
+                <button type="button" class="item" data-action="nav" onclick="navTo('page-storage')">
+                    <span>存储配置</span>
+                    <span class="flex-row"><i class="bi bi-chevron-right chevron"></i></span>
+                </button>
+                <button type="button" class="item" data-action="nav" onclick="navTo('page-about')">
+                    <span>关于系统</span>
+                    <span class="flex-row"><i class="bi bi-chevron-right chevron"></i></span>
+                </button>
             </div>
         </div>
     </div>
@@ -45,7 +46,7 @@
     <!-- 通用 API 页面 -->
     <div id="page-api" class="page">
         <div class="header">
-            <div class="back-btn" onclick="navBack()"><i class="bi bi-chevron-left"></i>返回</div>
+            <button type="button" class="back-btn" onclick="navBack()"><i class="bi bi-chevron-left"></i>返回</button>
             <span class="breadcrumb-title">设置 / 通用 API</span>
         </div>
 
@@ -198,7 +199,7 @@
     <!-- 语音功能 页面 -->
     <div id="page-voice" class="page">
         <div class="header">
-            <div class="back-btn" onclick="navBack()"><i class="bi bi-chevron-left"></i>返回</div>
+            <button type="button" class="back-btn" onclick="navBack()"><i class="bi bi-chevron-left"></i>返回</button>
             <span class="breadcrumb-title">设置 / 语音功能</span>
         </div>
         <div class="section">
@@ -322,7 +323,7 @@
     <!-- 生图功能 页面 -->
     <div id="page-image" class="page">
         <div class="header">
-            <div class="back-btn" onclick="navBack()"><i class="bi bi-chevron-left"></i>返回</div>
+            <button type="button" class="back-btn" onclick="navBack()"><i class="bi bi-chevron-left"></i>返回</button>
             <span class="breadcrumb-title">设置 / 生图功能</span>
         </div>
         <div class="section">
@@ -432,7 +433,7 @@
     <!-- 占位页面：美化 -->
     <div id="page-beauty" class="page">
         <div class="header">
-            <div class="back-btn" onclick="navBack()"><i class="bi bi-chevron-left"></i>返回</div>
+            <button type="button" class="back-btn" onclick="navBack()"><i class="bi bi-chevron-left"></i>返回</button>
             <span class="breadcrumb-title">设置 / 美化</span>
         </div>
 
@@ -622,7 +623,7 @@
     <!-- 占位页面：存储 -->
     <div id="page-storage" class="page">
         <div class="header">
-            <div class="back-btn" onclick="navBack()"><i class="bi bi-chevron-left"></i>返回</div>
+            <button type="button" class="back-btn" onclick="navBack()"><i class="bi bi-chevron-left"></i>返回</button>
             <span class="breadcrumb-title">设置 / 存储配置</span>
         </div>
         <div class="section" id="cloud-storage-section">
@@ -734,7 +735,7 @@
     <!-- 占位页面：关于 -->
     <div id="page-about" class="page">
         <div class="header">
-            <div class="back-btn" onclick="navBack()"><i class="bi bi-chevron-left"></i>返回</div>
+            <button type="button" class="back-btn" onclick="navBack()"><i class="bi bi-chevron-left"></i>返回</button>
             <span class="breadcrumb-title">设置 / 关于系统</span>
         </div>
         <div class="section" style="text-align: center; color: var(--text-sub); margin-top: 50px;">
@@ -758,7 +759,7 @@
     <script src="storage-providers/base.js"></script>
     <script src="storage-providers/github.js"></script>
     <script src="storage-providers/supabase.js"></script>
-    <script src="settings.js"></script>
+    <script src="settings.js?v=20260819.1"></script>
     <script src="storage-providers/controller.js"></script>
 </body>
 </html>

@@ -1,7 +1,7 @@
 ﻿function renderChats() {
     const list = $('#chat-list');
     const empty = $('#empty-chats');
-    list.querySelectorAll('.qq-chat-row, .qq-chat-hidden-toggle').forEach(el => el.remove());
+    list.querySelectorAll('.qq-chat-row, .qq-chat-hidden-toggle, .qq-core-load-error').forEach(el => el.remove());
     // M8：默认过滤 hidden；state.showHiddenChats=true 时全显
     const visibleChats = state.showHiddenChats
         ? state.chats

@@ -4,6 +4,8 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const crypto = require('crypto');
+const dns = require('dns').promises;
+const net = require('net');
 const webpush = require('web-push');
 const { spawn } = require('child_process');
 const { createQqSummaryFeature } = require('./modules/qq-summary');
@@ -366,6 +368,50 @@ function readJsonFile(filePath, fallback) {
 function writeJsonFile(filePath, data) {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+}
+
+function isPrivateNetworkAddress(address) {
+    let value = String(address || '').trim().toLowerCase().replace(/^\[|\]$/g, '');
+    if (value.startsWith('::ffff:')) value = value.slice(7);
+    const family = net.isIP(value);
+    if (family === 4) {
+        const parts = value.split('.').map(Number);
+        const [a, b] = parts;
+        return a === 0 || a === 10 || a === 127 || a >= 224
+            || (a === 100 && b >= 64 && b <= 127)
+            || (a === 169 && b === 254)
+            || (a === 172 && b >= 16 && b <= 31)
+            || (a === 192 && b === 168)
+            || (a === 198 && (b === 18 || b === 19));
+    }
+    if (family === 6) {
+        return value === '::' || value === '::1' || /^f[cd]/.test(value)
+            || /^fe[89ab]/.test(value) || /^ff/.test(value);
+    }
+    return false;
+}
+
+async function assertPublicRemoteUrl(rawUrl) {
+    const parsed = rawUrl instanceof URL ? rawUrl : new URL(String(rawUrl));
+    if (!/^https?:$/.test(parsed.protocol)) throw new Error('仅支持 http/https');
+    if (isPrivateNetworkAddress(parsed.hostname)) throw new Error('禁止访问内网地址');
+    const addresses = await dns.lookup(parsed.hostname, { all: true, verbatim: true });
+    if (!addresses.length || addresses.some(item => isPrivateNetworkAddress(item.address))) {
+        throw new Error('禁止访问内网地址');
+    }
+    return parsed;
+}
+
+async function fetchPublicRemote(rawUrl, options = {}, maxRedirects = 5) {
+    let current = String(rawUrl);
+    for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount += 1) {
+        const parsed = await assertPublicRemoteUrl(current);
+        const response = await fetch(parsed, { ...options, redirect: 'manual' });
+        if (response.status < 300 || response.status >= 400 || !response.headers.get('location')) return response;
+        if (redirectCount === maxRedirects) throw new Error('重定向次数过多');
+        current = new URL(response.headers.get('location'), parsed).toString();
+    }
+    throw new Error('无法获取远程资源');
 }
 
 function isSillyTavernPreset(data) {
@@ -1049,9 +1095,9 @@ app.get('/api/settings/events', (req, res) => {
 // 2. 保存设置
 app.post('/api/settings', (req, res) => {
     try {
-        const data = { ...(req.body || {}), _updatedAt: Date.now() };
-        // 覆盖写入设置文件
-        fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2), 'utf-8');
+        const current = readJsonFile(SETTINGS_FILE, {});
+        const data = { ...current, ...(req.body || {}), _updatedAt: Date.now() };
+        writeJsonFile(SETTINGS_FILE, data);
         broadcastSettingsUpdated(data);
         res.json({ success: true, message: "设置已保存", settings: data, updatedAt: data._updatedAt });
     } catch (e) {
@@ -2177,6 +2223,11 @@ app.post('/api/qq/link-preview', async (req, res) => {
         if (isBlockedHost(host)) {
             return res.status(400).json({ error: '禁止访问内网地址' });
         }
+        try {
+            await assertPublicRemoteUrl(u);
+        } catch (error) {
+            return res.status(400).json({ error: error.message || '目标地址不可访问' });
+        }
         const isXhsHost = (hostname) => /(^|\.)xhslink\.com$|(^|\.)xiaohongshu\.com$|(^|\.)xhscdn\.com$/i.test(hostname || '');
         const isDouyinHost = (hostname) => /(^|\.)douyin\.com$|(^|\.)iesdouyin\.com$|(^|\.)douyinpic\.com$|(^|\.)amemv\.com$/i.test(hostname || '');
         const isWechatHost = (hostname) => /(^|\.)mp\.weixin\.qq\.com$|(^|\.)weixin\.qq\.com$/i.test(hostname || '');
@@ -2289,7 +2340,7 @@ app.post('/api/qq/link-preview', async (req, res) => {
                     const timer = setTimeout(() => ctrl.abort(), 12000);
                     let imgResp;
                     try {
-                        imgResp = await fetch(candidate, {
+                        imgResp = await fetchPublicRemote(candidate, {
                             signal: ctrl.signal,
                             headers: {
                                 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
@@ -2493,7 +2544,7 @@ app.post('/api/qq/link-preview', async (req, res) => {
             const t = setTimeout(() => ctrl.abort(), timeout);
             let resp;
             try {
-                resp = await fetch(targetUrl, { redirect: 'follow', signal: ctrl.signal, headers: hdrs });
+                resp = await fetchPublicRemote(targetUrl, { signal: ctrl.signal, headers: hdrs });
             } finally { clearTimeout(t); }
             const finalU = resp.url || targetUrl;
             const ctype = resp.headers.get('content-type') || '';
@@ -3662,6 +3713,69 @@ function scanAndScheduleExpiredUserTransfers() {
     armTransferSettlement(earliestExpiry);
     return settled;
 }
+
+// 付费聊天卡片：扣款、消息落盘与幂等校验在同一个服务端操作内完成。
+app.post('/api/qq/chats/:characterId/paid-message', (req, res) => {
+    const characterId = String(req.params.characterId || '');
+    const requestId = String(req.body?.requestId || '').trim().slice(0, 160);
+    const cost = Number(req.body?.cost);
+    const reason = String(req.body?.reason || '').slice(0, 200);
+    const chatPath = path.join(CHATS_DIR, `${characterId}.json`);
+    let walletBefore = null;
+    let chatBefore = null;
+    let chatExisted = false;
+    try {
+        if (!characterId || !requestId) return res.status(400).json({ error: '缺少聊天或请求 ID' });
+        if (!Number.isFinite(cost) || cost <= 0) return res.status(400).json({ error: '金额必须是正数' });
+        const message = sanitizeChatMessagesForStorage([{ ...(req.body?.message || {}) }])[0];
+        if (!message || message.role !== 'user' || !['transfer', 'service'].includes(message.type)) {
+            return res.status(400).json({ error: '仅支持转账或服务卡片' });
+        }
+        const declaredCost = Number(message.type === 'transfer' ? message.amount : message.price);
+        if (!Number.isFinite(declaredCost) || Math.abs(declaredCost - cost) > 0.000001) {
+            return res.status(400).json({ error: '卡片金额与扣款金额不一致' });
+        }
+        message.id = requestId;
+        message.client_request_id = requestId;
+        message.created_at = Number(message.created_at) || Date.now();
+
+        chatExisted = fs.existsSync(chatPath);
+        chatBefore = chatExisted ? fs.readFileSync(chatPath, 'utf-8') : null;
+        const chat = chatExisted ? sanitizeChatForStorage(JSON.parse(chatBefore)) : { characterId, messages: [] };
+        chat.messages = Array.isArray(chat.messages) ? chat.messages : [];
+        const existing = chat.messages.find(item => item?.client_request_id === requestId || item?.id === requestId);
+        if (existing) {
+            const wallet = readWallet();
+            return res.json({ success: true, idempotent: true, balance: wallet.balance, message: existing, chat });
+        }
+
+        walletBefore = readWallet();
+        const nextBalance = walletBefore.balance - cost;
+        if (nextBalance < 0) {
+            return res.status(402).json({ error: '余额不足', balance: walletBefore.balance, cost });
+        }
+        const now = Date.now();
+        chat.messages.push(message);
+        chat.characterId = characterId;
+        chat.updated_at = now;
+        writeJsonFile(WALLET_FILE, { balance: nextBalance, updated_at: now });
+        fs.writeFileSync(chatPath, JSON.stringify(chat, null, 2), 'utf-8');
+        armTransferSettlement(findEarliestPendingTransferExpiry(chat.messages));
+        console.log(`[WALLET] -${cost} → ${nextBalance}${reason ? ` (${reason})` : ''}`);
+        res.json({ success: true, balance: nextBalance, message, chat });
+    } catch (error) {
+        // 两个文件无法依靠文件系统实现真正的跨文件事务；同步失败时立即恢复旧快照。
+        try {
+            if (walletBefore) writeJsonFile(WALLET_FILE, walletBefore);
+            if (chatBefore !== null) fs.writeFileSync(chatPath, chatBefore, 'utf-8');
+            else if (!chatExisted && fs.existsSync(chatPath)) fs.rmSync(chatPath, { force: true });
+        } catch (rollbackError) {
+            console.error('[paid-message rollback failed]', rollbackError);
+        }
+        console.error('[paid-message]', error);
+        res.status(500).json({ error: '付费消息发送失败，未完成的扣款已回滚' });
+    }
+});
 
 // 启动时补结算停机期间已过期的红包；之后只在最近一个红包到期时唤醒。
 const transferSettlementStartupTimer = setTimeout(scanAndScheduleExpiredUserTransfers, 1000);

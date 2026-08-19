@@ -24,6 +24,7 @@
     --qq-topbar-h: 36px;
     --qq-radius: 14px;
     --qq-row-h: 64px;
+    --qq-focus: rgba(51, 144, 236, 0.72);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -60,6 +61,16 @@ body {
     font-size: 15px;
     -webkit-tap-highlight-color: transparent;
     overflow: hidden;
+}
+
+button,
+[role="button"] {
+    touch-action: manipulation;
+}
+
+button:disabled {
+    opacity: 0.55;
+    cursor: progress;
 }
 
 html[data-app-layout="desktop"],
@@ -188,6 +199,26 @@ html[data-app-layout="desktop"] .qq-topbar {
     cursor: pointer;
 }
 .qq-icon-btn:active { opacity: 0.5; }
+
+.qq-retry-btn {
+    margin-top: 12px;
+    min-height: 34px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--qq-blue);
+    color: #fff;
+    cursor: pointer;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+    outline: 3px solid var(--qq-focus);
+    outline-offset: 2px;
+}
 
 /* ===== Avatar ===== */
 .qq-avatar {
@@ -1280,6 +1311,7 @@ html[data-app-layout="desktop"] .qq-me-page {
     cursor: pointer;
     padding: 4px 0;
     font-size: 14px !important; /* 覆盖 theme.js 的全局 !important */
+    transition: color 0.16s ease, background-color 0.16s ease, transform 0.16s ease;
 }
 .qq-tab i { font-size: 20px; line-height: 1; }
 .qq-tab span { font-size: 11px; line-height: 1.2; }
@@ -1306,10 +1338,10 @@ html[data-app-layout="desktop"] .qq-tabbar {
     height: auto;
     width: 50px;
     border-top: none;
-    border-right: none;
-    background: var(--qq-glass-body);
-    backdrop-filter: blur(28px) saturate(1.7);
-    -webkit-backdrop-filter: blur(28px) saturate(1.7);
+    border-right: 0.5px solid var(--qq-divider);
+    background: var(--qq-glass-rail);
+    backdrop-filter: blur(18px) saturate(1.35);
+    -webkit-backdrop-filter: blur(18px) saturate(1.35);
     padding-top: 8px;
     padding-bottom: 10px;
     gap: 2px;
@@ -1362,9 +1394,18 @@ html[data-app-layout="desktop"] .qq-root {
 
 html[data-app-layout="desktop"] .qq-main,
 html[data-app-layout="desktop"] .qq-panel {
-    background: var(--qq-glass-body);
-    backdrop-filter: blur(28px) saturate(1.7);
-    -webkit-backdrop-filter: blur(28px) saturate(1.7);
+    background: color-mix(in srgb, var(--qq-bg) 96%, transparent);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+
+html[data-app-layout="desktop"] .qq-tab:hover {
+    background: rgba(51, 144, 236, 0.07);
+    border-radius: 10px;
+}
+
+html[data-app-layout="desktop"] .qq-tab:active {
+    transform: scale(0.94);
 }
 
 html[data-app-layout="desktop"] .qq-contact-add {
@@ -3103,5 +3144,22 @@ html:not([data-app-layout="desktop"]) #qq-root.chat-open .qq-tabbar {
 @media (prefers-color-scheme: dark) {
     .qq-account-card {
         background: rgba(23, 33, 43, 0.96);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        scroll-behavior: auto !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+    html[data-app-layout="desktop"] .qq-tabbar {
+        background: var(--qq-bg);
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
     }
 }

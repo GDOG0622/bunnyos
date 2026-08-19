@@ -25,6 +25,24 @@ const samplingFields = ['temperature', 'top_p', 'frequency_penalty', 'presence_p
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+const persistenceQueues = new Map();
+
+window.addEventListener('beforeunload', event => {
+    if (!state.dirty) return;
+    event.preventDefault();
+    event.returnValue = '';
+});
+
+function queuePersistence(key, operation) {
+    const previous = persistenceQueues.get(key) || Promise.resolve();
+    const task = previous.catch(() => {}).then(operation);
+    let queued;
+    queued = task.finally(() => {
+        if (persistenceQueues.get(key) === queued) persistenceQueues.delete(key);
+    });
+    persistenceQueues.set(key, queued);
+    return queued;
+}
 
 const markerLabels = {
     bunnyosRealtime: '这里会插入实时变量，例如当前日期、时间、星期、时区。',
@@ -1202,12 +1220,23 @@ async function removeGlobalChip(bookId) {
 }
 
 async function saveGlobalChips() {
-    await fetch('/api/qq/global-worldbooks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ globalWorldbookIds: state.qqGlobalWorldbookIds, worldInfoSettings: state.worldInfoSettings })
-    });
-    state.markerPreviewCache = null;
+    const body = JSON.stringify({ globalWorldbookIds: state.qqGlobalWorldbookIds, worldInfoSettings: state.worldInfoSettings });
+    try {
+        await queuePersistence('global-worldbooks', async () => {
+            const res = await fetch('/api/qq/global-worldbooks', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        });
+        state.markerPreviewCache = null;
+        return true;
+    } catch (error) {
+        console.warn('[prompt-manager] save global worldbooks failed', error);
+        toast('全局世界书保存失败');
+        return false;
+    }
 }
 
 function fillWorldInfoSettings() {
@@ -1393,11 +1422,22 @@ function saveWorldbookDraft(draft) {
 }
 
 async function saveWorldbooks() {
-    await fetch('/api/worldbooks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ books: state.worldbookBooks })
-    });
+    const body = JSON.stringify({ books: state.worldbookBooks });
+    try {
+        await queuePersistence('worldbooks', async () => {
+            const res = await fetch('/api/worldbooks', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        });
+        return true;
+    } catch (error) {
+        console.warn('[prompt-manager] save worldbooks failed', error);
+        toast('世界书保存失败');
+        return false;
+    }
 }
 
 function copyWorldbookEntry(entryId) {

@@ -1,7 +1,8 @@
 ﻿async function inputMessage() {
+    const characterId = state.activeChatId;
     const input = $('#chat-input');
     const rawText = input.value.trim();
-    if (!rawText || !state.activeChatId) return;
+    if (!rawText || !characterId) return false;
     input.value = '';
 
     // 自动检测 URL → 解析链接卡片，失败则降级发纯文本
@@ -12,8 +13,8 @@
         try {
             const frontData = await tryFrontendLinkPreview(url, rawText);
             if (isUsefulLinkPreview(frontData)) {
-                await appendLinkPreviewMessage(frontData, url);
-                return;
+                await appendLinkPreviewMessage(frontData, url, characterId);
+                return true;
             }
 
             const res = await fetch('/api/qq/link-preview', {
@@ -23,14 +24,20 @@
             });
             if (res.ok) {
                 const data = await res.json();
-                await appendLinkPreviewMessage(data, url);
-                return;
+                await appendLinkPreviewMessage(data, url, characterId);
+                return true;
             }
         } catch {}
         // 解析失败：静默降级为普通文本
     }
 
-    await appendChatMessage({ role: 'user', type: parseVoiceText(rawText) ? 'voice' : 'text', text: rawText, created_at: Date.now() });
+    await appendChatMessage({ role: 'user', type: parseVoiceText(rawText) ? 'voice' : 'text', text: rawText, created_at: Date.now() }, characterId);
+    return true;
+}
+
+function makeClientMessageId(prefix = 'msg') {
+    if (globalThis.crypto?.randomUUID) return `${prefix}_${crypto.randomUUID()}`;
+    return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function extractFirstLink(text) {
@@ -44,7 +51,7 @@ function normalizeInputLink(url) {
     return /^https?:\/\//i.test(value) ? value : `https://${value}`;
 }
 
-async function appendLinkPreviewMessage(data, fallbackUrl) {
+async function appendLinkPreviewMessage(data, fallbackUrl, characterId = state.activeChatId) {
     const cleanTitle = String(data?.title || '').trim();
     const cleanDesc = String(data?.description || '').trim().replace(/^预览受限：.*/, '');
     const limitedReason = String(data?.limitedReason || '').trim();
@@ -68,7 +75,7 @@ async function appendLinkPreviewMessage(data, fallbackUrl) {
         limitedReason,
         text: `[链接] ${parts.join('：') || data?.siteName || fallbackUrl}`,
         created_at: Date.now()
-    });
+    }, characterId);
     if (limitedReason && data?.previewType !== 'product') toast(limitedReason);
 }
 
@@ -123,7 +130,8 @@ async function fetchFrontendHtml(url) {
         const resp = await fetch(url, {
             method: 'GET',
             redirect: 'follow',
-            credentials: 'include',
+            credentials: 'omit',
+            referrerPolicy: 'no-referrer',
             signal: ctrl.signal,
             headers: { 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' }
         });
@@ -248,10 +256,11 @@ async function generateReply(e) {
     }
     const input = $('#chat-input');
     const hasNew = input.value.trim().length > 0;
+    const characterId = state.activeChatId;
     if (hasNew) await inputMessage();
 
-    const chat = state.chats.find(item => item.characterId === state.activeChatId);
-    if (!state.activeChatId || !chat || !chat.messages?.length) return;
+    const chat = state.chats.find(item => item.characterId === characterId);
+    if (!characterId || !chat || !chat.messages?.length) return;
     // 空输入时：若末尾已是 AI 回复，提示用「重新生成」；若末尾是 user 则直接用最新预设/世界书发
     if (!hasNew) {
         const last = chat.messages[chat.messages.length - 1];
@@ -706,6 +715,7 @@ function renderFavList() {
                 return;
             }
             $('#fav-list-modal')?.classList.add('hidden');
+            popNavigationLayer('favorites');
             await activateChat(it.chat.characterId);
         });
         list.appendChild(row);
@@ -767,6 +777,7 @@ async function openFavListModal() {
     favState.selected = new Set();
     updateFavHeader();
     modal.classList.remove('hidden');
+    pushNavigationLayer('favorites');
     const list = $('#fav-list');
     if (list) list.innerHTML = '<div class="qq-empty qq-empty-inline"><div class="qq-empty-title">正在加载收藏…</div></div>';
     await ensureAllChatsLoaded();
@@ -1231,14 +1242,16 @@ function setTyping(on) {
     }
 }
 
-async function appendChatMessage(message) {
-    let chat = state.chats.find(item => item.characterId === state.activeChatId);
+async function appendChatMessage(message, characterId = state.activeChatId) {
+    if (!characterId) return null;
+    let chat = state.chats.find(item => item.characterId === characterId);
     if (!chat) {
-        chat = { characterId: state.activeChatId, messages: [] };
+        chat = { characterId, messages: [] };
         state.chats.unshift(chat);
     }
     chat.messages = Array.isArray(chat.messages) ? chat.messages : [];
-    if (state.replyDraft && state.replyDraft.characterId === state.activeChatId && !message.reply_to) {
+    if (!message.id) message.id = makeClientMessageId();
+    if (state.replyDraft && state.replyDraft.characterId === characterId && !message.reply_to) {
         message.reply_to = { ...state.replyDraft };
     }
     if (message.role === 'user' && !message.persona) {
@@ -1246,8 +1259,9 @@ async function appendChatMessage(message) {
     }
     chat.messages.push(message);
     chat.updated_at = Date.now();
-    if (message.role === 'user' && state.replyDraft) clearReplyDraft();
+    if (message.role === 'user' && state.replyDraft?.characterId === characterId) clearReplyDraft();
     renderChats();
-    renderActiveChat();
+    if (state.activeChatId === characterId) renderActiveChat();
     await saveChat(chat);
+    return message;
 }

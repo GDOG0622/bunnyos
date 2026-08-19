@@ -1,9 +1,12 @@
 /* ================= 基础重置与系统变量 ================= */
 :root {
-    --glass-bg: rgba(255, 255, 255, 0.25);
-    --glass-border: rgba(255, 255, 255, 0.3);
-    --window-bg: rgba(250, 250, 250, 0.75);
-    --blur: blur(25px);
+    --glass-bg: rgba(248, 248, 252, 0.62);
+    --glass-border: rgba(255, 255, 255, 0.52);
+    --window-bg: rgba(250, 250, 252, 0.94);
+    --blur: blur(18px) saturate(1.28);
+    --system-accent: #0a84ff;
+    --system-focus: rgba(10, 132, 255, 0.72);
+    --shadow-soft: 0 16px 42px rgba(22, 25, 33, 0.16);
 }
 
 * {
@@ -22,5 +25,45 @@ body {
     background: url('https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=2564&auto=format&fit=crop') center/cover no-repeat;
     background-color: #a8edea;
     color: #333;
+}
+
+button,
+input,
+select,
+textarea {
+    font: inherit;
+}
+
+button,
+[role="button"] {
+    touch-action: manipulation;
+}
+
+button:focus-visible,
+[tabindex]:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+    outline: 3px solid var(--system-focus);
+    outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        scroll-behavior: auto !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+    :root {
+        --glass-bg: rgba(248, 248, 252, 0.96);
+        --window-bg: #fafafc;
+        --blur: none;
+    }
 }
 ﻿

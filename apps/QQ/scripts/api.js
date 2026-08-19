@@ -36,11 +36,13 @@ async function loadData() {
         ]);
         state.characters = Array.isArray(chars) ? chars : [];
         state.chats = Array.isArray(chats) ? chats.map(markChatSummary) : [];
+        $('#chat-list')?.querySelector('.qq-core-load-error')?.remove();
         renderContacts();
         renderChats();
         loadSecondaryQqData().catch(error => console.warn('[QQ] secondary data load failed', error));
     } catch (err) {
         console.warn('[QQ] load core data failed', err);
+        renderQqCoreLoadError(err);
     }
 }
 

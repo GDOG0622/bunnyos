@@ -119,6 +119,7 @@ async function offerBigSummary(characterId) {
         const textarea = $('#summary-review-text');
         if (textarea) textarea.value = data.content || '';
         $('#summary-review-modal')?.classList.remove('hidden');
+        pushNavigationLayer('summary-review');
     } catch (error) {
         await showBackendError('生成大总结失败', {
             error: error.message, error_code: error.name || 'CLIENT_NETWORK_ERROR', operation: 'summarize-big-preview'
@@ -130,6 +131,7 @@ async function offerBigSummary(characterId) {
 
 function closeSummaryReview() {
     $('#summary-review-modal')?.classList.add('hidden');
+    popNavigationLayer('summary-review');
     state.bigSummaryDraft = null;
 }
 

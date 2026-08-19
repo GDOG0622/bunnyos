@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>BunnyOS</title>
     <link rel="icon" href="/app-icon">
     <link rel="apple-touch-icon" href="/app-icon">
@@ -55,14 +55,14 @@
 
     <div class="app-window" id="app-window">
         <div class="window-header">
-            <div class="mac-controls">
-                <div class="mac-btn mac-close" onclick="closeApp()"></div>
-                <div class="mac-btn mac-min" onclick="closeApp()"></div>
-                <div class="mac-btn mac-max" onclick="toggleFullscreen()"></div>
+            <div class="mac-controls" aria-label="窗口控制">
+                <button type="button" class="mac-btn mac-close" onclick="closeApp()" aria-label="关闭窗口"></button>
+                <button type="button" class="mac-btn mac-min" onclick="minimizeApp()" aria-label="最小化窗口"></button>
+                <button type="button" class="mac-btn mac-max" onclick="toggleFullscreen()" aria-label="切换全屏"></button>
             </div>
-            <div class="mobile-back" onclick="handleMobileBack()">
+            <button type="button" class="mobile-back" onclick="handleMobileBack()">
                 <i class="bi bi-chevron-left"></i><span>返回</span>
-            </div>
+            </button>
             <div class="window-title" id="window-title">Loading...</div>
         </div>
         
@@ -121,8 +121,8 @@
 
     <script src="assets/scripts/catbox-proxy.js"></script>
     <script src="assets/scripts/theme.js"></script>
-    <script src="assets/scripts/apps.js"></script>
-    <script src="assets/scripts/window-manager.js"></script>
+    <script src="assets/scripts/apps.js?v=20260819.1"></script>
+    <script src="assets/scripts/window-manager.js?v=20260819.2"></script>
     <script src="assets/scripts/notify.js"></script>
     <script src="assets/scripts/announcement.js"></script>
     <script src="assets/scripts/clock.js"></script>

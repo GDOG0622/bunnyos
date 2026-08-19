@@ -12,8 +12,12 @@
         window.installedApps = installedApps;
 
         function createAppItem(app) {
-            const item = document.createElement('div');
+            const item = document.createElement('button');
+            item.type = 'button';
             item.className = 'app-item';
+            item.dataset.appId = app.id;
+            item.classList.toggle('minimized', window.bunnyosMinimizedApps?.has(app.id));
+            item.setAttribute('aria-label', `打开${app.name || app.id}`);
             item.addEventListener('click', () => openApp(app));
 
             const icon = document.createElement('div');

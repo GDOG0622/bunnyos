@@ -253,6 +253,7 @@
         el.addEventListener('click', () => {
             setFavSelectMode(false);
             $('#fav-list-modal')?.classList.add('hidden');
+            popNavigationLayer('favorites');
         });
     });
     $('#fav-select-toggle')?.addEventListener('click', () => setFavSelectMode(true));
@@ -260,7 +261,36 @@
     $('#fav-delete-confirm')?.addEventListener('click', batchUnfavorite);
 
     window.addEventListener('message', (e) => {
+        if (e.source !== window.parent) return;
         if (e.data?.type === 'bunnyos:navigate-back') handleNavigateBack();
+    });
+    document.addEventListener('keydown', event => {
+        const dialogs = [...document.querySelectorAll('[role="dialog"]:not(.hidden)')];
+        const dialog = dialogs[dialogs.length - 1];
+        if (!dialog) return;
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
+            handleNavigateBack();
+            return;
+        }
+        if (event.key !== 'Tab') return;
+        const focusable = [...dialog.querySelectorAll('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])')]
+            .filter(element => !element.classList.contains('hidden') && element.getClientRects().length > 0);
+        if (!focusable.length) {
+            event.preventDefault();
+            dialog.focus();
+            return;
+        }
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+        }
     });
     // 横竖屏切换时，重新评估是否隐藏外层栏
     window.addEventListener('resize', () => notifyNavState());

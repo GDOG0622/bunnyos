@@ -41,17 +41,13 @@ async function adjustWallet(delta, reason = '') {
 
 function openWalletModal() {
     $('#wallet-modal')?.classList.remove('hidden');
-    state.pageHistory.push('wallet');
-    notifyNavState();
+    pushNavigationLayer('wallet');
     loadWalletBalance();
 }
 
 function closeWalletModal() {
     $('#wallet-modal')?.classList.add('hidden');
-    if (state.pageHistory[state.pageHistory.length - 1] === 'wallet') {
-        state.pageHistory.pop();
-        notifyNavState();
-    }
+    popNavigationLayer('wallet');
 }
 
 // 点击 char→user 红包 → 走服务端领取（验证 + 加钱 + 落盘）

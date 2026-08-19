@@ -84,17 +84,13 @@ function openChatSettings() {
     if (!modal) return;
     state.chatSettingsCharId = characterId;
     modal.classList.remove('hidden');
-    state.pageHistory.push('chat-settings');
-    notifyNavState();
+    pushNavigationLayer('chat-settings');
     renderChatSettings();
 }
 
 function closeChatSettings() {
     $('#chat-settings-modal')?.classList.add('hidden');
-    if (state.pageHistory[state.pageHistory.length - 1] === 'chat-settings') {
-        state.pageHistory.pop();
-        notifyNavState();
-    }
+    popNavigationLayer('chat-settings');
     state.chatSettingsCharId = null;
 }
 
@@ -285,6 +281,7 @@ async function openPromptPreview(charId) {
     const textEl = $('#prompt-preview-text');
     if (!modal || !textEl || !charId) return;
     modal.classList.remove('hidden');
+    pushNavigationLayer('prompt-preview');
     textEl.textContent = '加载中...';
     try {
         const res = await fetch(`/api/qq/chat-tokens/${encodeURIComponent(charId)}`);
@@ -298,6 +295,7 @@ async function openPromptPreview(charId) {
 
 function closePromptPreview() {
     $('#prompt-preview-modal')?.classList.add('hidden');
+    popNavigationLayer('prompt-preview');
 }
 
 async function copyPromptPreview() {
