@@ -123,9 +123,22 @@ function buildStContext(options = {}) {
     const tailMessage = String(tailPrompt || '').trim() ? { role: 'system', content: String(tailPrompt).trim() } : null;
     const fixedTokens = countMessages([...fixedMessages, ...historyTags, ...(tailMessage ? [tailMessage] : [])], counter);
     const remaining = Math.max(0, maxPromptTokens - fixedTokens);
-    const historyTrim = hasChatHistoryMarker
+    let historyTrim = hasChatHistoryMarker
         ? trimHistoryToBudget(injectedHistory, remaining, counter)
         : { messages: [], usedTokens: 0, dropped: injectedHistory.length };
+    // Some upstreams reject a request made entirely of system messages. If fixed
+    // prompts exhaust the configured budget, keep the latest real user turn.
+    const hasUserTurn = historyTrim.messages.some(message => message.role === 'user' && message.content);
+    const latestUserTurn = !hasUserTurn && hasChatHistoryMarker
+        ? [...injectedHistory].reverse().find(message => message.role === 'user' && message.content)
+        : null;
+    if (latestUserTurn) {
+        historyTrim = {
+            messages: [latestUserTurn],
+            usedTokens: Math.max(0, Number(counter(latestUserTurn)) || 0),
+            dropped: injectedHistory.length - 1
+        };
+    }
     const exampleMessages = optionalExamplePrompts.map(prompt => ({ role: prompt.role, content: prompt.content }));
     const exampleTokens = optionalExamplePrompts.length ? countMessages(exampleMessages, counter) - 3 : 0;
     const includeOptionalExamples = !optionalExamplePrompts.length || historyTrim.usedTokens + exampleTokens <= remaining;
@@ -190,7 +203,8 @@ function buildStContext(options = {}) {
         })))
     };
     const warnings = [];
-    if (fixedTokens > maxPromptTokens) warnings.push('固定提示词已超过可用上下文预算，聊天记录无法加入。');
+    if (fixedTokens > maxPromptTokens) warnings.push('固定提示词已超过可用上下文预算，聊天记录将被裁剪。');
+    if (latestUserTurn) warnings.push('固定提示词占满上下文预算，已优先保留最近一条用户消息；请提高上下文长度或精简固定内容。');
     if (worldInfo.budget.overflowed) warnings.push('世界书已达到独立预算上限，部分命中条目未注入。');
     return { messages, itemization, warnings, worldInfo };
 }
