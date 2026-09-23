@@ -50,7 +50,10 @@ async function saveChatSummarySettings() {
             return;
         }
         const character = state.characters.find(item => item.id === charId);
-        if (character) character.summaryWorldbookId = data.summaryWorldbookId || '';
+        if (character) {
+            character.memory = { ...(character.memory || {}), summaryWorldbookId: data.summaryWorldbookId || '' };
+            delete character.summaryWorldbookId;
+        }
         toast('总结设置已保存');
         await renderChatSettings();
     } catch (error) {
@@ -79,7 +82,10 @@ async function maybeRunLayerSummary(chat, signal) {
             if (archived.has(index)) message.summary_archived = true;
         });
         const character = state.characters.find(item => item.id === chat.characterId);
-        if (character && data.summaryWorldbookId) character.summaryWorldbookId = data.summaryWorldbookId;
+        if (character && data.summaryWorldbookId) {
+            character.memory = { ...(character.memory || {}), summaryWorldbookId: data.summaryWorldbookId };
+            delete character.summaryWorldbookId;
+        }
         toast(`已生成小总结，前 ${data.entry?.sourceLayerCount || ''} 层不再发送给 AI`);
         return data;
     } catch (error) {

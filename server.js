@@ -12,6 +12,7 @@ const { createQqSummaryFeature } = require('./modules/qq-summary');
 const { buildStContext } = require('./modules/st-context');
 const { createModelTokenCounter } = require('./modules/st-context/tokenizer');
 const { createPortableBackupFeature } = require('./modules/portable-backup');
+const { createWorldbookStore } = require('./modules/worldbook-store');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -127,8 +128,9 @@ const SETTINGS_FILE = path.join(__dirname, 'settings.json');
 const PRESETS_FILE = path.join(DATA_DIR, 'presets', 'image-prompts.json');
 const ST_PRESETS_DIR = path.join(DATA_DIR, 'presets', 'st-presets');
 const ST_PRESETS_SETTINGS_FILE = path.join(DATA_DIR, 'presets', 'st-presets-settings.json');
-const DEFAULT_ST_PRESET_FILE = path.join(APPS_DIR, 'prompt-manager', 'Liminal_online.json');
 const WORLDBOOK_FILE = path.join(DATA_DIR, 'worlds', 'worldbooks.json');
+const WORLDBOOKS_DIR = path.join(DATA_DIR, 'worldbooks');
+const worldbookStore = createWorldbookStore({ directory: WORLDBOOKS_DIR, legacyFile: WORLDBOOK_FILE });
 const CHARACTERS_DIR = path.join(DATA_DIR, 'characters');
 const CHATS_DIR = path.join(DATA_DIR, 'chats', 'qq');
 const QQ_DIR = path.join(DATA_DIR, 'qq');
@@ -208,14 +210,7 @@ function ensureFileExist(filePath, defaultData = {}) {
 ensureFileExist(SETTINGS_FILE, {});
 ensureFileExist(PRESETS_FILE, {});
 ensureFileExist(ST_PRESETS_SETTINGS_FILE, {});
-ensureFileExist(WORLDBOOK_FILE, { books: [] });
-// 老格式（扁平条目数组）一律重置
-{
-    const raw = readJsonFile(WORLDBOOK_FILE, null);
-    if (!raw || Array.isArray(raw) || !Array.isArray(raw.books)) {
-        writeJsonFile(WORLDBOOK_FILE, { books: [] });
-    }
-}
+worldbookStore.read();
 fs.mkdirSync(ST_PRESETS_DIR, { recursive: true });
 fs.mkdirSync(BACKGROUNDS_DIR, { recursive: true });
 fs.mkdirSync(APP_ICONS_DIR, { recursive: true });
@@ -425,18 +420,21 @@ function stPresetIdFromName(name) {
 }
 
 function uniqueStPresetId(name, currentId = '') {
-    const base = stPresetIdFromName(name);
-    let candidate = base;
-    let index = 2;
-    const currentLower = currentId.toLowerCase();
-    while (
-        fs.existsSync(path.join(ST_PRESETS_DIR, `${candidate}.json`)) &&
-        candidate.toLowerCase() !== currentLower
-    ) {
-        candidate = `${base}-${index}`;
-        index += 1;
+    const requested = String(name || '').trim();
+    if (!requested || requested.length > 80 || /[<>:"/\\|?*\x00-\x1f]/.test(requested)
+        || /[. ]$/.test(requested) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(requested)) {
+        const error = new Error('预设名称不能为空、超过 80 字，或包含文件名禁用字符');
+        error.statusCode = 400;
+        throw error;
     }
-    return candidate;
+    const base = stPresetIdFromName(requested);
+    if (base.toLocaleLowerCase('zh-CN') !== String(currentId).toLocaleLowerCase('zh-CN')
+        && fs.readdirSync(ST_PRESETS_DIR).some(file => file.toLocaleLowerCase('zh-CN') === `${base}.json`.toLocaleLowerCase('zh-CN'))) {
+        const error = new Error(`预设名称不能重复：${base}`);
+        error.statusCode = 409;
+        throw error;
+    }
+    return base;
 }
 
 function stPresetFile(id) {
@@ -447,12 +445,10 @@ function ensureDefaultStPreset() {
     const files = fs.existsSync(ST_PRESETS_DIR)
         ? fs.readdirSync(ST_PRESETS_DIR).filter(file => file.endsWith('.json'))
         : [];
-    if (!files.length && fs.existsSync(DEFAULT_ST_PRESET_FILE)) {
-        const preset = readJsonFile(DEFAULT_ST_PRESET_FILE, null);
-        if (isSillyTavernPreset(preset)) {
-            writeJsonFile(path.join(ST_PRESETS_DIR, 'Liminal_online.json'), preset);
-            writeJsonFile(ST_PRESETS_SETTINGS_FILE, { currentPresetId: 'Liminal_online' });
-        }
+    if (!files.length) {
+        const id = stPresetIdFromName('空白预设');
+        writeJsonFile(stPresetFile(id), buildBlankStPreset('空白预设'));
+        writeJsonFile(ST_PRESETS_SETTINGS_FILE, { currentPresetId: id });
     }
 }
 
@@ -577,38 +573,31 @@ function buildUserInfoPrompt(persona) {
 function buildCharacterInfoPrompt(character) {
     if (!character) return '';
     const lines = [
-        '<character_info>',
+        '<char_info>',
         `角色名：${character.name || ''}`,
-        '角色设定：',
-        character.role_setting || character.description || '',
-        `其它设定：${character.other_setting || character.nsfw_setting || ''}`,
-        '</character_info>'
+        character.char_info || character.role_setting || character.description || '',
+        '</char_info>'
     ];
     return lines.join('\n');
 }
 
-function injectCharRulesAtDepth(history, character, variables = {}) {
-    const rawRules = (character?.rp_rules || character?.personality || '').trim();
-    if (!rawRules) return history;
-    // 宏渲染：否则 {{user}}/{{char}} 等占位符会原样发给模型
-    const rules = renderPromptTemplate(rawRules, variables).trim();
-    if (!rules) return history;
-    const depth = Math.max(0, Math.min(parseInt(character?.rp_rules_depth, 10) || 0, history.length));
-    const insertIndex = history.length - depth;
-    const next = [...history];
-    next.splice(insertIndex, 0, { role: 'system', content: rules });
-    return next;
+function getSummaryWorldbookId(character) {
+    return String(character?.memory?.summaryWorldbookId || character?.summaryWorldbookId || '');
+}
+
+function setSummaryWorldbookId(character, id) {
+    character.memory = { ...(character.memory && typeof character.memory === 'object' ? character.memory : {}), summaryWorldbookId: String(id || '') };
+    delete character.summaryWorldbookId;
 }
 
 function buildBlankStPreset(name) {
     const builtinMarkers = [
         { identifier: 'bunnyosRealtime', name: '实时模式' },
+        { identifier: 'worldInfoBefore', name: '世界书·角色前' },
         { identifier: 'charDescription', name: 'CHAR人设' },
+        { identifier: 'worldInfoAfter', name: '世界书·角色后' },
         { identifier: 'personaDescription', name: 'USER人设' },
-        { identifier: 'worldInfoAfter', name: '世界书' },
-        { identifier: 'worldInfoBefore', name: '总结内容' },
-        { identifier: 'scenario', name: '场景信息' },
-        { identifier: 'dialogueExamples', name: '示例聊天' },
+        { identifier: 'memory', name: '记忆' },
         { identifier: 'onlinePrivateChat', name: '线上·私聊' },
         { identifier: 'onlineGroupChat', name: '线上·群聊' },
         { identifier: 'chatHistory', name: '聊天记录' }
@@ -642,23 +631,20 @@ function buildBlankStPreset(name) {
 function buildRpRulesTailPrompt(character) {
     const rpRules = character?.rp_rules || character?.personality || '';
     if (!rpRules.trim()) return '';
-    return [
-        '必须严格遵守以下角色语气 / RP规则。这是最高优先级的角色输出约束，尤其是在生成最终回复时仍须反复检查：',
-        rpRules.trim()
-    ].join('\n');
+    return `<rp_rules>\n${rpRules.trim()}\n</rp_rules>`;
 }
 
 function buildScenarioPrompt(character) {
     const scenario = String(character?.scenario || '').trim();
     if (!scenario) return '';
-    return `在回复时须严格基于以下背景设定下回复:\n${scenario}`;
+    return `<scenario>\n${scenario}\n</scenario>`;
 }
 
 function buildDialogueExamplesPrompt(character, variables = {}) {
     const examples = String(character?.mes_example || '').trim();
     if (!examples) return '';
     const charName = variables.char || character?.name || '{{char}}';
-    return `在回复时${charName}语气可以以下对话为参考:\n${examples}`;
+    return `<dialogue_examples>\n在回复时${charName}语气可以以下对话为参考：\n${examples}\n</dialogue_examples>`;
 }
 
 function buildChatHistoryPrompt(variables = {}) {
@@ -667,13 +653,11 @@ function buildChatHistoryPrompt(variables = {}) {
 
 // ========== 世界书（按「本」粒度） ==========
 function readWorldbooks() {
-    const data = readJsonFile(WORLDBOOK_FILE, null);
-    if (data && Array.isArray(data.books)) return data.books;
-    return [];
+    return worldbookStore.read();
 }
 
 function writeWorldbooks(books) {
-    writeJsonFile(WORLDBOOK_FILE, { books });
+    worldbookStore.write(books);
 }
 
 function summarizeWorldbook(book) {
@@ -701,20 +685,28 @@ function buildWorldbooksContent(bookIds, wrapTag) {
         if (text) blocks.push(text);
     }
     if (!blocks.length) return '';
-    return `<${wrapTag}>\n${blocks.join('\n\n')}\n</${wrapTag}>`;
+    const content = blocks.join('\n\n');
+    return wrapTag ? `<${wrapTag}>\n${content}\n</${wrapTag}>` : content;
 }
 
-function getQqWorldbookGroups(character) {
+function getQqWorldbookGroups(character, includeLegacyMemory = false) {
     const books = readWorldbooks();
     const bookMap = new Map(books.map(book => [book.id, book]));
     const qqSettings = readJsonFile(QQ_SETTINGS_FILE, {});
-    const summaryId = String(character?.summaryWorldbookId || '');
+    const summaryId = getSummaryWorldbookId(character);
     const pick = ids => [...new Set(Array.isArray(ids) ? ids : [])].map(id => bookMap.get(id)).filter(Boolean);
     return {
         character: pick((character?.worldbookIds || []).filter(id => String(id) !== summaryId)),
         global: pick((qqSettings.globalWorldbookIds || []).filter(id => String(id) !== summaryId)),
-        memory: summaryId && bookMap.has(summaryId) ? [bookMap.get(summaryId)] : []
+        memory: includeLegacyMemory && summaryId && bookMap.has(summaryId) ? [bookMap.get(summaryId)] : []
     };
+}
+
+function buildMemoryPrompt(character) {
+    const id = getSummaryWorldbookId(character);
+    if (!id) return '';
+    const content = buildWorldbooksContent([id], 'memory');
+    return content;
 }
 
 function importStWorldbookData(stData, fallbackName) {
@@ -806,27 +798,26 @@ const ONLINE_GROUP_CHAT_PROTOCOL = `<Group_Chat_Protocol>
 function buildBuiltinPromptContent(identifier, character, userPersona, variables, chatType) {
     switch (identifier) {
         case 'bunnyosRealtime':
-            return '当前现实时间：{{now}}（{{timezone}}）\n今天是{{date}}，{{weekday}}，现在{{time}}。\n你必须以此时间为锚回复：作息、用餐、是否在上班/睡觉、能否立刻响应等都基于上述真实时间和星期判断，不要凭空假设当前是别的时段。';
+            return '<realtime>\n当前现实时间：{{now}}（{{timezone}}）\n今天是{{date}}，{{weekday}}，现在{{time}}。\n你必须以此时间为锚回复：作息、用餐、是否在上班/睡觉、能否立刻响应等都基于上述真实时间和星期判断，不要凭空假设当前是别的时段。\n</realtime>';
         case 'charDescription':
             return buildCharacterInfoPrompt(character);
         case 'personaDescription':
             return buildUserInfoPrompt(userPersona);
         case 'worldInfoAfter': {
             const qqSettings = readJsonFile(QQ_SETTINGS_FILE, {});
-            const summaryWorldbookId = String(character?.summaryWorldbookId || '');
+            const summaryWorldbookId = getSummaryWorldbookId(character);
             return buildWorldbooksContent(
                 [...new Set([
                     ...(Array.isArray(character?.worldbookIds) ? character.worldbookIds : []),
                     ...(Array.isArray(qqSettings.globalWorldbookIds) ? qqSettings.globalWorldbookIds : []),
                 ].filter(id => id && id !== summaryWorldbookId))],
-                'world_info'
+                ''
             );
         }
         case 'worldInfoBefore':
-            return buildWorldbooksContent(
-                character?.summaryWorldbookId ? [character.summaryWorldbookId] : [],
-                'memories'
-            );
+            return '';
+        case 'memory':
+            return buildMemoryPrompt(character);
         case 'scenario':
             return buildScenarioPrompt(character);
         case 'dialogueExamples':
@@ -834,9 +825,9 @@ function buildBuiltinPromptContent(identifier, character, userPersona, variables
         case 'chatHistory':
             return buildChatHistoryPrompt(variables);
         case 'onlinePrivateChat':
-            return chatType === 'group' ? '' : ONLINE_PRIVATE_CHAT_PROTOCOL;
+            return chatType === 'group' ? '' : `<private_chat_protocol>\n${ONLINE_PRIVATE_CHAT_PROTOCOL}\n</private_chat_protocol>`;
         case 'onlineGroupChat':
-            return chatType === 'group' ? ONLINE_GROUP_CHAT_PROTOCOL : '';
+            return chatType === 'group' ? `<group_chat_protocol>\n${ONLINE_GROUP_CHAT_PROTOCOL}\n</group_chat_protocol>` : '';
         default:
             return '';
     }
@@ -855,20 +846,15 @@ function getCurrentQqPromptPresetId() {
 
 async function buildQqPresetPrompt(character, variables, userPersona, history = [], chatType = 'private', options = {}) {
     const presetId = getCurrentQqPromptPresetId();
-    const preset = presetId ? readJsonFile(stPresetFile(presetId), null) : null;
-    if (!isSillyTavernPreset(preset)) return null;
+    const storedPreset = presetId ? readJsonFile(stPresetFile(presetId), null) : null;
+    const preset = isSillyTavernPreset(storedPreset) ? storedPreset : buildBlankStPreset('空白预设');
 
     const qqSettings = readJsonFile(QQ_SETTINGS_FILE, {});
     const responseTokens = Math.min(Math.max(parseInt(options.responseTokens ?? preset.openai_max_tokens, 10) || 2048, 1), 200000);
     const contextTokens = Math.min(Math.max(parseInt(options.contextTokens, 10) || 8192, 1), 200000);
+    const hasMemoryMarker = preset.prompts.some(prompt => prompt.identifier === 'memory');
     const rawRules = String(character?.rp_rules || character?.personality || '').trim();
-    const additionalInChat = rawRules ? [{
-        identifier: 'characterDepthPrompt',
-        role: 'system',
-        content: renderPromptTemplate(rawRules, variables),
-        injection_depth: Math.max(0, parseInt(character?.rp_rules_depth, 10) || 0),
-        injection_order: 100
-    }] : [];
+    const tailPrompt = rawRules ? buildRpRulesTailPrompt({ rp_rules: renderPromptTemplate(rawRules, variables) }) : '';
     const configuredModel = String(options.model || readJsonFile(SETTINGS_FILE, {}).mainApi_model || '');
     const tokenizer = await createModelTokenCounter({ model: configuredModel });
     const built = buildStContext({
@@ -877,6 +863,7 @@ async function buildQqPresetPrompt(character, variables, userPersona, history = 
         persona: userPersona,
         history,
         books: getQqWorldbookGroups(character),
+        legacyMemoryContent: hasMemoryMarker ? '' : buildMemoryPrompt(character),
         generationType: options.generationType || 'normal',
         contextTokens,
         responseTokens,
@@ -884,7 +871,7 @@ async function buildQqPresetPrompt(character, variables, userPersona, history = 
         render: value => renderPromptTemplate(value, variables),
         resolveBuiltin: identifier => buildBuiltinPromptContent(identifier, character, userPersona, variables, chatType),
         pinExamples: preset.pin_examples === true,
-        additionalInChat,
+        tailPrompt,
         tokenCounter: tokenizer.messageCounter,
         textTokenCounter: tokenizer.textCounter,
         tokenizerInfo: {
@@ -973,8 +960,11 @@ function buildPromptVariables({ characterId = '', userName = '', messages = [] }
         timestamp: String(Math.floor(Date.now() / 1000)),
         char: resolvedCharName,
         user: resolvedUserName,
-        char_role_setting: character?.role_setting || character?.description || '',
+        char_info: character?.char_info || character?.role_setting || character?.description || '',
+        char_role_setting: character?.char_info || character?.role_setting || character?.description || '',
         char_rp_rules: character?.rp_rules || character?.personality || '',
+        rp_rules: character?.rp_rules || character?.personality || '',
+        summary: buildWorldbooksContent(getSummaryWorldbookId(character) ? [getSummaryWorldbookId(character)] : [], ''),
         char_other_setting: character?.other_setting || character?.nsfw_setting || '',
         char_scenario: character?.scenario || '',
         char_dialogue_examples: character?.mes_example || '',
@@ -2058,7 +2048,7 @@ app.post('/api/st-presets/current', (req, res) => {
     }
 });
 
-// 新建空白预设（含 8 个内置 marker 和默认采样）
+// 新建空白预设（仅含固定 marker 和默认采样）
 app.post('/api/st-presets/new', (req, res) => {
     try {
         const name = String(req.body?.name || '空白预设').trim() || '空白预设';
@@ -2069,7 +2059,7 @@ app.post('/api/st-presets/new', (req, res) => {
         writeJsonFile(ST_PRESETS_SETTINGS_FILE, { ...settings, currentPresetId: id });
         res.json({ success: true, id });
     } catch (e) {
-        res.status(500).json({ error: '新建预设失败' });
+        res.status(e.statusCode || 500).json({ error: e.statusCode ? e.message : '新建预设失败' });
     }
 });
 
@@ -2100,16 +2090,19 @@ app.post('/api/st-presets/:id', (req, res) => {
 app.post('/api/st-presets/:id/rename', (req, res) => {
     try {
         const id = stPresetIdFromName(req.params.id);
-        const nextId = uniqueStPresetId(req.body?.name || id, id);
+        const name = String(req.body?.name || id).trim();
+        const nextId = uniqueStPresetId(name, id);
         const oldFile = stPresetFile(id);
         const nextFile = stPresetFile(nextId);
         if (!fs.existsSync(oldFile)) return res.status(404).json({ error: '未找到酒馆预设' });
         if (id !== nextId) fs.renameSync(oldFile, nextFile);
+        const preset = readJsonFile(nextFile, null);
+        if (isSillyTavernPreset(preset)) writeJsonFile(nextFile, { ...preset, name });
         const settings = readJsonFile(ST_PRESETS_SETTINGS_FILE, {});
         if (settings.currentPresetId === id) writeJsonFile(ST_PRESETS_SETTINGS_FILE, { ...settings, currentPresetId: nextId });
         res.json({ success: true, id: nextId });
     } catch (e) {
-        res.status(500).json({ error: '重命名酒馆预设失败' });
+        res.status(e.statusCode || 500).json({ error: e.statusCode ? e.message : '重命名酒馆预设失败' });
     }
 });
 
@@ -2119,18 +2112,19 @@ app.post('/api/st-presets/:id/copy', (req, res) => {
         const preset = readJsonFile(stPresetFile(id), null);
         if (!isSillyTavernPreset(preset)) return res.status(404).json({ error: '未找到酒馆预设' });
         const nextId = uniqueStPresetId(req.body?.name || `${id} 副本`);
-        writeJsonFile(stPresetFile(nextId), preset);
+        writeJsonFile(stPresetFile(nextId), { ...preset, name: nextId });
         res.json({ success: true, id: nextId });
     } catch (e) {
-        res.status(500).json({ error: '复制酒馆预设失败' });
+        res.status(e.statusCode || 500).json({ error: e.statusCode ? e.message : '复制酒馆预设失败' });
     }
 });
 
 app.post('/api/st-presets/:id/refresh-default', (req, res) => {
     try {
         const id = stPresetIdFromName(req.params.id);
-        const preset = readJsonFile(DEFAULT_ST_PRESET_FILE, null);
-        if (!isSillyTavernPreset(preset)) return res.status(404).json({ error: '未找到默认 Liminal_online.json' });
+        const current = readJsonFile(stPresetFile(id), null);
+        if (!isSillyTavernPreset(current)) return res.status(404).json({ error: '未找到预设' });
+        const preset = buildBlankStPreset(current.name || id);
         writeJsonFile(stPresetFile(id), preset);
         const settings = readJsonFile(ST_PRESETS_SETTINGS_FILE, {});
         writeJsonFile(ST_PRESETS_SETTINGS_FILE, { ...settings, currentPresetId: id });
@@ -2161,15 +2155,14 @@ app.delete('/api/st-presets/:id', (req, res) => {
 
 app.post('/api/st-presets/import-default', (req, res) => {
     try {
-        const preset = readJsonFile(DEFAULT_ST_PRESET_FILE, null);
-        if (!isSillyTavernPreset(preset)) return res.status(404).json({ error: '未找到默认 Liminal_online.json' });
-        const id = uniqueStPresetId('Liminal_online');
+        const id = uniqueStPresetId('空白预设');
+        const preset = buildBlankStPreset('空白预设');
         writeJsonFile(stPresetFile(id), preset);
         const settings = readJsonFile(ST_PRESETS_SETTINGS_FILE, {});
         writeJsonFile(ST_PRESETS_SETTINGS_FILE, { ...settings, currentPresetId: id });
         res.json({ success: true, id });
     } catch (e) {
-        res.status(500).json({ error: '导入默认酒馆预设失败' });
+        res.status(e.statusCode || 500).json({ error: e.statusCode ? e.message : '导入默认预设失败' });
     }
 });
 
@@ -3137,14 +3130,17 @@ app.get('/api/worldbooks', (req, res) => {
     }
 });
 
-// 整体覆盖（前端编辑后一次写回）
+// 前端保存已加载的书；保留保存期间由总结等流程新增的书
 app.post('/api/worldbooks', (req, res) => {
     try {
-        const books = Array.isArray(req.body?.books) ? req.body.books : [];
+        if (!Array.isArray(req.body?.books)) return res.status(400).json({ error: '世界书数据必须是数组' });
+        const byId = new Map(readWorldbooks().map(book => [book.id, book]));
+        for (const book of req.body.books) byId.set(book.id, book);
+        const books = [...byId.values()];
         writeWorldbooks(books);
         res.json({ success: true });
     } catch (e) {
-        res.status(500).json({ error: '保存世界书失败' });
+        res.status(e.statusCode || 500).json({ error: e.statusCode ? e.message : '保存世界书失败' });
     }
 });
 
@@ -3159,7 +3155,7 @@ app.post('/api/worldbooks/books', (req, res) => {
         writeWorldbooks(books);
         res.json({ success: true, book: summarizeWorldbook(book) });
     } catch (e) {
-        res.status(500).json({ error: '新建世界书失败' });
+        res.status(e.statusCode || 500).json({ error: e.statusCode ? e.message : '新建世界书失败' });
     }
 });
 
@@ -3183,7 +3179,7 @@ app.delete('/api/worldbooks/books/:id', (req, res) => {
                 if (c && Array.isArray(c.worldbookIds) && c.worldbookIds.includes(id)) {
                     c.worldbookIds = c.worldbookIds.filter(item => item !== id);
                 }
-                if (c?.summaryWorldbookId === id) c.summaryWorldbookId = '';
+                if (getSummaryWorldbookId(c) === id) setSummaryWorldbookId(c, '');
                 if (c) writeJsonFile(file, c);
             });
         }
@@ -3206,7 +3202,7 @@ app.post('/api/worldbooks/import-st', (req, res) => {
         res.json({ success: true, book: summarizeWorldbook(book) });
     } catch (e) {
         console.error(e);
-        res.status(500).json({ error: '导入失败' });
+        res.status(e.statusCode || 500).json({ error: e.statusCode ? e.message : '导入失败' });
     }
 });
 
@@ -3255,18 +3251,18 @@ app.get('/api/qq/preset-marker-preview', (req, res) => {
             ? readJsonFile(path.join(CHARACTERS_DIR, `${cleanName(characterId)}.json`), null)
             : null;
         const qqSettings = readJsonFile(QQ_SETTINGS_FILE, {});
-        const summaryWorldbookId = String(character?.summaryWorldbookId || '');
+        const summaryWorldbookId = getSummaryWorldbookId(character);
         res.json({
             world_info: buildWorldbooksContent(
                 [...new Set([
                     ...(Array.isArray(character?.worldbookIds) ? character.worldbookIds : []),
                     ...(Array.isArray(qqSettings.globalWorldbookIds) ? qqSettings.globalWorldbookIds : []),
                 ].filter(id => id && id !== summaryWorldbookId))],
-                'world_info'
+                ''
             ),
             memories: buildWorldbooksContent(
-                character?.summaryWorldbookId ? [character.summaryWorldbookId] : [],
-                'memories'
+                summaryWorldbookId ? [summaryWorldbookId] : [],
+                'memory'
             )
         });
     } catch (e) {
@@ -3446,11 +3442,12 @@ app.get('/api/qq/characters', (req, res) => {
         const files = fs.readdirSync(CHARACTERS_DIR).filter(f => f.endsWith('.json'));
         const list = files.map(f => {
             try {
-                return JSON.parse(fs.readFileSync(path.join(CHARACTERS_DIR, f), 'utf-8'));
+                const file = path.join(CHARACTERS_DIR, f);
+                return { record: JSON.parse(fs.readFileSync(file, 'utf-8')), updatedAt: fs.statSync(file).mtimeMs };
             } catch { return null; }
         }).filter(Boolean);
-        list.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
-        res.json(list);
+        list.sort((a, b) => (b.record.created_at || b.updatedAt) - (a.record.created_at || a.updatedAt));
+        res.json(list.map(item => item.record));
     } catch (e) {
         res.status(500).json({ error: '读取角色失败' });
     }
@@ -3476,28 +3473,10 @@ app.post('/api/qq/characters', (req, res) => {
             id,
             name: body.name || '未命名',
             avatar: avatarPath,
-            description: body.description || '',
-            personality: body.personality || '',
-            scenario: body.scenario || '',
-            first_mes: body.first_mes || '',
-            mes_example: body.mes_example || '',
-            system_prompt: body.system_prompt || '',
-            post_history_instructions: body.post_history_instructions || '',
-            role_setting: body.role_setting || body.description || '',
+            char_info: body.char_info || body.role_setting || body.description || '',
             rp_rules: body.rp_rules || body.personality || '',
-            other_setting: body.other_setting || body.nsfw_setting || '',
-            nsfw_setting: body.nsfw_setting || '',
-            alternate_greetings: Array.isArray(body.alternate_greetings) ? body.alternate_greetings : [],
-            tags: Array.isArray(body.tags) ? body.tags : [],
             worldbookIds: Array.isArray(body.worldbookIds) ? body.worldbookIds : [],
-            summaryWorldbookId: String(body.summaryWorldbookId || ''),
-            rp_rules_depth: Math.max(0, Math.min(parseInt(body.rp_rules_depth, 10) || 0, 4)),
-            creator: body.creator || '',
-            character_version: body.character_version || '',
-            group: body.group || '',
-            starred: !!body.starred,
-            remark: body.remark || '',
-            created_at: Date.now(),
+            memory: { ...(body.memory && typeof body.memory === 'object' ? body.memory : {}), summaryWorldbookId: String(body.memory?.summaryWorldbookId || body.summaryWorldbookId || '') }
         };
         fs.writeFileSync(path.join(CHARACTERS_DIR, `${id}.json`), JSON.stringify(record, null, 2), 'utf-8');
         res.json(record);
@@ -3532,6 +3511,10 @@ app.put('/api/qq/characters/:id', (req, res) => {
         }
         const { avatarDataUrl, ...patch } = body;
         const next = { ...cur, ...patch, avatar, id: cur.id };
+        next.memory = { ...(cur.memory && typeof cur.memory === 'object' ? cur.memory : {}),
+            ...(body.memory && typeof body.memory === 'object' ? body.memory : {}),
+            summaryWorldbookId: String(body.memory?.summaryWorldbookId ?? body.summaryWorldbookId ?? getSummaryWorldbookId(cur)) };
+        delete next.summaryWorldbookId;
         fs.writeFileSync(file, JSON.stringify(next, null, 2), 'utf-8');
         res.json(next);
     } catch (e) {
@@ -3542,6 +3525,7 @@ app.put('/api/qq/characters/:id', (req, res) => {
 const qqSummaryFeature = createQqSummaryFeature({
     app, SETTINGS_FILE, CHARACTERS_DIR, CHATS_DIR,
     cleanName, shortId, readJsonFile, writeJsonFile, readWorldbooks, writeWorldbooks,
+    getSummaryWorldbookId, setSummaryWorldbookId,
     getCurrentUserPersona, qqMessageToPromptText, stripThinkingTags, sanitizeErrorDetail,
     buildUpstreamErrorPayload, buildInternalErrorPayload,
 });

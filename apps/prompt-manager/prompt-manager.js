@@ -46,43 +46,45 @@ function queuePersistence(key, operation) {
 
 const markerLabels = {
     bunnyosRealtime: '这里会插入实时变量，例如当前日期、时间、星期、时区。',
-    charDescription: '这里会插入当前角色卡里填写的所有 char 人设信息。',
+    charDescription: '这里会插入当前角色卡的名字和 char_info。',
     personaDescription: '这里会插入当前 user 人设：名字、性别、生日、用户人设提示词。',
     scenario: '这里会插入角色场景 scenario。',
-    worldInfoAfter: '这里会插入当前命中的世界书条目。',
+    worldInfoAfter: '这里会插入角色定义后命中的世界书条目。',
     dialogueExamples: '这里会插入示例聊天 mes_example。',
-    worldInfoBefore: '这里会插入总结内容。总结内容本质上也是世界书，后续总结模块会细化。',
+    worldInfoBefore: '这里会插入角色定义前命中的世界书条目。',
+    memory: '这里会插入当前角色的分层总结和后续记忆内容。',
     onlinePrivateChat: '【私聊场景才注入】BunnyOS 线上私聊协议（短碎、不待命、抓重量、统一 wrap 格式）。',
     onlineGroupChat: '【群聊场景才注入】BunnyOS 线上群聊协议（子集响应、原子输出、[Sender/Payload/Time] 结构）。',
     chatHistory: '这里会插入聊天记录。'
 };
 
 const markerTemplates = {
-    bunnyosRealtime: '当前现实时间：{{now}}（{{timezone}}）\n今天是{{date}}，{{weekday}}，现在{{time}}。',
-    charDescription: '<character_info>\n角色名：{{char}}\n角色设定：\n{{char_role_setting}}\n其它设定：{{char_other_setting}}\n</character_info>',
+    bunnyosRealtime: '<realtime>\n当前现实时间：{{now}}（{{timezone}}）\n今天是{{date}}，{{weekday}}，现在{{time}}。\n</realtime>',
+    charDescription: '<char_info>\n角色名：{{char}}\n{{char_info}}\n</char_info>',
     personaDescription: '<user_info>\n名字：{{user}}\n性别：{{user_gender}}\n生日：{{user_birthday}}\n用户人设：{{user_persona}}\n</user_info>',
-    worldInfoAfter: '<world_info>\n[点击上方按钮展开当前 QQ 全局世界书的实际内容]\n</world_info>',
-    worldInfoBefore: '<memories>\n[点击上方按钮展开当前角色绑定世界书的实际内容]\n</memories>',
+    worldInfoAfter: '[点击上方按钮展开角色定义后命中的世界书条目]',
+    worldInfoBefore: '[点击上方按钮展开角色定义前命中的世界书条目]',
+    memory: '<memory>\n{{summary}}\n</memory>',
     scenario: '在回复时须严格基于以下背景设定下回复:\n{{char_scenario}}',
     dialogueExamples: '在回复时{{char}}语气可以以下对话为参考:\n{{char_dialogue_examples}}',
-    onlinePrivateChat: '[私聊协议占位 —— 当 chatType=private 时由 BunnyOS 注入完整文本]',
-    onlineGroupChat: '[群聊协议占位 —— 当 chatType=group 时由 BunnyOS 注入完整文本]',
+    onlinePrivateChat: '<private_chat_protocol>\n[私聊协议占位 —— 当 chatType=private 时由 BunnyOS 注入完整文本]\n</private_chat_protocol>',
+    onlineGroupChat: '<group_chat_protocol>\n[群聊协议占位 —— 当 chatType=group 时由 BunnyOS 注入完整文本]\n</group_chat_protocol>',
     chatHistory: '<chat_history>\n{{chat_history}}\n</chat_history>'
 };
 
 const markerSlotByIdentifier = {
     worldInfoAfter: 'world_info',
-    worldInfoBefore: 'memories'
+    worldInfoBefore: 'world_info',
+    memory: 'memories'
 };
 
 const builtinPrompts = [
     { identifier: 'bunnyosRealtime', name: '实时模式', content: '', role: 'system' },
+    { identifier: 'worldInfoBefore', name: '世界书·角色前', content: '', role: 'system' },
     { identifier: 'charDescription', name: 'CHAR人设', content: '', role: 'system' },
+    { identifier: 'worldInfoAfter', name: '世界书·角色后', content: '', role: 'system' },
     { identifier: 'personaDescription', name: 'USER人设', content: '', role: 'system' },
-    { identifier: 'worldInfoAfter', name: '世界书', content: '', role: 'system' },
-    { identifier: 'worldInfoBefore', name: '总结内容', content: '', role: 'system' },
-    { identifier: 'scenario', name: '场景信息', content: '', role: 'system' },
-    { identifier: 'dialogueExamples', name: '示例聊天', content: '', role: 'system' },
+    { identifier: 'memory', name: '记忆', content: '', role: 'system' },
     { identifier: 'onlinePrivateChat', name: '线上·私聊', content: '', role: 'system' },
     { identifier: 'onlineGroupChat', name: '线上·群聊', content: '', role: 'system' },
     { identifier: 'chatHistory', name: '聊天记录', content: '', role: 'system' }
@@ -101,6 +103,9 @@ const variableDocs = [
     ['{{char}}', '<char>', '当前角色名'],
     ['{{user}}', '<user>', '当前用户名字'],
     ['{{char_role_setting}}', '<char_role_setting>', '角色卡里的「角色设定」字段'],
+    ['{{char_info}}', '<char_info>', '角色卡里的 char_info 正文'],
+    ['{{summary}}', '<summary>', '角色记忆引用的总结世界书正文'],
+    ['{{rp_rules}}', '<rp_rules>', '角色卡里的 RP 规则正文'],
     ['{{char_rp_rules}}', '<char_rp_rules>', '角色卡里的「角色语气 / RP规则」字段'],
     ['{{char_other_setting}}', '<char_other_setting>', '角色卡里的「其它设定」字段'],
     ['{{char_scenario}}', '<char_scenario>', '角色卡里的「场景信息」字段'],
@@ -275,6 +280,7 @@ function normalizeCurrentPreset() {
                 forbid_overrides: true,
                 injection_trigger: ''
             });
+            state.dirty = true;
         } else {
             const prompt = promptMap.get(item.identifier);
             if (prompt.name !== item.name) state.dirty = true;
@@ -714,7 +720,8 @@ async function renameCurrentPreset() {
         body: JSON.stringify({ name })
     });
     if (!res.ok) {
-        toast('重命名失败');
+        const data = await res.json().catch(() => ({}));
+        toast(data.error || '重命名失败');
         return;
     }
     const data = await res.json();
@@ -738,7 +745,7 @@ async function createBlankPreset() {
     const data = await res.json();
     await loadStPresets();
     await setCurrentPreset(data.id);
-    toast('已新建（仅含 8 个内置 marker + 默认采样）');
+    toast('已新建（仅含固定条目和默认采样）');
 }
 
 async function copyCurrentPreset() {
@@ -751,7 +758,8 @@ async function copyCurrentPreset() {
         body: JSON.stringify({ name })
     });
     if (!res.ok) {
-        toast('复制失败');
+        const data = await res.json().catch(() => ({}));
+        toast(data.error || '复制失败');
         return;
     }
     const data = await res.json();
@@ -761,7 +769,7 @@ async function copyCurrentPreset() {
 
 async function refreshCurrentFromSource() {
     if (!state.currentPresetId) return;
-    if (!await askConfirm('从 apps/prompt-manager/Liminal_online.json 重新读取并覆盖当前工作副本吗？当前预设里的本地修改会被替换。')) return;
+    if (!await askConfirm('将当前预设重置为只含固定条目的空白预设吗？当前预设里的自定义条目会被移除。')) return;
     const res = await fetch(`/api/st-presets/${encodeURIComponent(state.currentPresetId)}/refresh-default`, {
         method: 'POST'
     });
@@ -773,7 +781,7 @@ async function refreshCurrentFromSource() {
     await loadPresetDetail(state.currentPresetId);
     if (state.dirty) await saveCurrentPreset();
     await loadStPresets();
-    toast('已重新读取 Liminal_online');
+    toast('已重置为空白预设');
 }
 
 async function deleteCurrentPreset() {
@@ -1422,7 +1430,9 @@ function saveWorldbookDraft(draft) {
 }
 
 async function saveWorldbooks() {
-    const body = JSON.stringify({ books: state.worldbookBooks });
+    const current = getCurrentBook();
+    if (!current) return false;
+    const body = JSON.stringify({ books: [current] });
     try {
         await queuePersistence('worldbooks', async () => {
             const res = await fetch('/api/worldbooks', {
@@ -1430,12 +1440,15 @@ async function saveWorldbooks() {
                 headers: { 'Content-Type': 'application/json' },
                 body
             });
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                throw new Error(data.error || `HTTP ${res.status}`);
+            }
         });
         return true;
     } catch (error) {
         console.warn('[prompt-manager] save worldbooks failed', error);
-        toast('世界书保存失败');
+        toast(`世界书保存失败：${error.message}`);
         return false;
     }
 }
@@ -1556,7 +1569,8 @@ async function createNewBook() {
         body: JSON.stringify({ name })
     });
     if (!res.ok) {
-        toast('新建失败');
+        const data = await res.json().catch(() => ({}));
+        toast(data.error || '新建失败');
         return;
     }
     const data = await res.json();
@@ -1570,9 +1584,14 @@ async function renameCurrentBook() {
     if (!book) return;
     const name = await askText('重命名世界书', book.name || '');
     if (!name) return;
+    if (state.worldbookBooks.some(item => item.id !== book.id && item.name.toLocaleLowerCase('zh-CN') === name.trim().toLocaleLowerCase('zh-CN'))) {
+        toast('世界书名称不能重复');
+        return;
+    }
+    const oldName = book.name;
     book.name = name.trim();
     book.updated_at = Date.now();
-    await saveWorldbooks();
+    if (!await saveWorldbooks()) book.name = oldName;
     renderWorldbookBookSelect();
     renderWorldbookMeta();
     renderGlobalChips();

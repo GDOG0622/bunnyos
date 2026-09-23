@@ -156,7 +156,7 @@
 
 .bunnyos-announcement-actions {
     display: grid;
-    grid-template-columns: 1.15fr .85fr;
+    grid-template-columns: 1.05fr .75fr 1.45fr;
     gap: 12px;
     margin-top: 9px;
 }

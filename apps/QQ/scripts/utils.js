@@ -126,7 +126,7 @@ function messageSummaryText(msg) {
 }
 
 function summaryForCharacter(c) {
-    return (c.role_setting || c.description || '').slice(0, 40);
+    return (c.char_info || c.role_setting || c.description || '').slice(0, 40);
 }
 
 function avatarHtml(src) {

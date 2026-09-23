@@ -4,6 +4,7 @@ function createQqSummaryFeature(dependencies) {
     const {
         app, SETTINGS_FILE, CHARACTERS_DIR, CHATS_DIR,
         cleanName, shortId, readJsonFile, writeJsonFile, readWorldbooks, writeWorldbooks,
+        getSummaryWorldbookId, setSummaryWorldbookId,
         getCurrentUserPersona, qqMessageToPromptText, stripThinkingTags, sanitizeErrorDetail,
         buildUpstreamErrorPayload, buildInternalErrorPayload,
     } = dependencies;
@@ -191,18 +192,25 @@ async function requestSummaryFromSecondaryApi(context, instruction = '') {
 
 function ensureSummaryWorldbook(character, characterFile) {
     const books = readWorldbooks();
-    let book = character?.summaryWorldbookId
-        ? books.find(item => item.id === character.summaryWorldbookId)
+    const currentId = getSummaryWorldbookId(character);
+    let book = currentId
+        ? books.find(item => item.id === currentId)
         : null;
     if (!book) {
         const now = Date.now();
+        const baseName = `${character?.name || '角色'}的记忆`.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').slice(0, 90).replace(/[. ]+$/g, '') || '角色的记忆';
+        let name = baseName;
+        let suffix = 2;
+        while (books.some(item => String(item.name).toLocaleLowerCase('zh-CN') === name.toLocaleLowerCase('zh-CN'))) {
+            name = `${baseName} (${suffix++})`;
+        }
         book = {
             id: `book_${shortId()}`,
-            name: `${character?.name || '角色'}的记忆`,
+            name,
             entries: [], created_at: now, updated_at: now
         };
         books.unshift(book);
-        character.summaryWorldbookId = book.id;
+        setSummaryWorldbookId(character, book.id);
         writeWorldbooks(books);
         writeJsonFile(characterFile, character);
     }
@@ -221,10 +229,11 @@ app.get('/api/qq/summary-settings/:characterId', (req, res) => {
         const character = readJsonFile(path.join(CHARACTERS_DIR, `${characterId}.json`), null);
         if (!character) return res.status(404).json({ error: '未找到角色', error_code: 'CHARACTER_NOT_FOUND' });
         const chat = readJsonFile(path.join(CHATS_DIR, `${characterId}.json`), { messages: [] });
-        const book = readWorldbooks().find(item => item.id === character.summaryWorldbookId);
+        const summaryWorldbookId = getSummaryWorldbookId(character);
+        const book = readWorldbooks().find(item => item.id === summaryWorldbookId);
         res.json({
             layerThreshold: clampSummaryThreshold(chat.summaryLayerThreshold),
-            summaryWorldbookId: character.summaryWorldbookId || '',
+            summaryWorldbookId,
             unsummarizedLayers: qqSummaryLayers(chat.messages).length,
             activeSmallCards: activeSmallSummaryEntries(book, characterId).length,
         });
@@ -243,7 +252,7 @@ app.put('/api/qq/summary-settings/:characterId', (req, res) => {
         if (summaryWorldbookId && !readWorldbooks().some(book => book.id === summaryWorldbookId)) {
             return res.status(400).json({ error: '选择的总结世界书不存在', error_code: 'SUMMARY_WORLDBOOK_NOT_FOUND' });
         }
-        character.summaryWorldbookId = summaryWorldbookId;
+        setSummaryWorldbookId(character, summaryWorldbookId);
         writeJsonFile(characterFile, character);
         const chatFile = path.join(CHATS_DIR, `${characterId}.json`);
         const chat = readJsonFile(chatFile, { characterId, messages: [] });
@@ -321,7 +330,7 @@ app.post('/api/qq/summarize/big/preview', async (req, res) => {
         const characterId = cleanName(req.body?.characterId || '');
         const character = readJsonFile(path.join(CHARACTERS_DIR, `${characterId}.json`), null);
         const books = readWorldbooks();
-        const book = books.find(item => item.id === character?.summaryWorldbookId);
+        const book = books.find(item => item.id === getSummaryWorldbookId(character));
         if (!book) return res.status(400).json({ error: '尚未绑定总结世界书', error_code: 'SUMMARY_WORLDBOOK_NOT_BOUND' });
         const entries = activeSmallSummaryEntries(book, characterId).slice(-SUMMARY_BATCH_CARD_COUNT);
         if (entries.length < SUMMARY_BATCH_CARD_COUNT) {
@@ -350,7 +359,7 @@ app.post('/api/qq/summarize/big/confirm', (req, res) => {
         }
         const character = readJsonFile(path.join(CHARACTERS_DIR, `${characterId}.json`), null);
         const books = readWorldbooks();
-        const book = books.find(item => item.id === character?.summaryWorldbookId);
+        const book = books.find(item => item.id === getSummaryWorldbookId(character));
         if (!book) return res.status(400).json({ error: '尚未绑定总结世界书', error_code: 'SUMMARY_WORLDBOOK_NOT_BOUND' });
         const selected = (book.entries || []).filter(entry => sourceEntryIds.includes(String(entry.id)));
         if (selected.length !== SUMMARY_BATCH_CARD_COUNT || selected.some(entry => entry.enabled === false || entry.summaryType !== 'small' || entry.summaryCharacterId !== characterId)) {

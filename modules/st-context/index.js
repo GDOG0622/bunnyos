@@ -21,7 +21,7 @@ function joinBlocks(blocks, wrapper = '') {
 function getGlobalScanData(character, persona, generationType) {
     return {
         personaDescription: persona?.prompt || '',
-        characterDescription: character?.role_setting || character?.description || '',
+        characterDescription: character?.char_info || character?.role_setting || character?.description || '',
         characterPersonality: character?.other_setting || character?.nsfw_setting || '',
         characterDepthPrompt: character?.rp_rules || character?.personality || '',
         scenario: character?.scenario || '',
@@ -47,7 +47,9 @@ function buildStContext(options = {}) {
         textTokenCounter,
         tokenizerInfo = null,
         pinExamples = false,
-        additionalInChat = []
+        additionalInChat = [],
+        tailPrompt = '',
+        legacyMemoryContent = ''
     } = options;
     const counter = createTokenCounter(tokenCounter);
     const maxPromptTokens = Math.max(1, Math.trunc(Number(contextTokens) || 8192) - Math.max(1, Math.trunc(Number(responseTokens) || 2048)));
@@ -68,8 +70,8 @@ function buildStContext(options = {}) {
     });
 
     const markerValues = {
-        worldInfoBefore: joinBlocks(worldInfo.before, 'world_info_before'),
-        worldInfoAfter: joinBlocks(worldInfo.after, 'world_info_after')
+        worldInfoBefore: [joinBlocks(worldInfo.before), String(legacyMemoryContent || '').trim()].filter(Boolean).join('\n\n'),
+        worldInfoAfter: joinBlocks(worldInfo.after)
     };
     const renderWithOutlets = value => render(String(value || '').replace(/\{\{\s*outlet::([^}]+)\}\}/gi, (_match, name) => {
         return joinBlocks(worldInfo.outlets[String(name).trim()] || []);
@@ -113,9 +115,14 @@ function buildStContext(options = {}) {
         content: prompt.content,
         meta: [{ type: 'prompt', identifier: prompt.identifier, position: 'relative', sequence: prompt.sequence }]
     }));
-    const fixedTokens = countMessages(fixedMessages, counter);
-    const remaining = Math.max(0, maxPromptTokens - fixedTokens);
     const hasChatHistoryMarker = prepared.relative.some(prompt => prompt.identifier === 'chatHistory');
+    const historyTags = hasChatHistoryMarker ? [
+        { role: 'system', content: '<chat_history>' },
+        { role: 'system', content: '</chat_history>' }
+    ] : [];
+    const tailMessage = String(tailPrompt || '').trim() ? { role: 'system', content: String(tailPrompt).trim() } : null;
+    const fixedTokens = countMessages([...fixedMessages, ...historyTags, ...(tailMessage ? [tailMessage] : [])], counter);
+    const remaining = Math.max(0, maxPromptTokens - fixedTokens);
     const historyTrim = hasChatHistoryMarker
         ? trimHistoryToBudget(injectedHistory, remaining, counter)
         : { messages: [], usedTokens: 0, dropped: injectedHistory.length };
@@ -130,7 +137,7 @@ function buildStContext(options = {}) {
         if (includeOptionalExamples) assembled.push(...exampleMessages);
     } else {
         for (const prompt of prepared.relative) {
-            if (prompt.identifier === 'chatHistory') assembled.push(...historyTrim.messages);
+            if (prompt.identifier === 'chatHistory') assembled.push(historyTags[0], ...historyTrim.messages, historyTags[1]);
             else if (prompt.identifier === 'dialogueExamples' && !pinExamples && !includeOptionalExamples) continue;
             else assembled.push({
                 role: prompt.role,
@@ -141,6 +148,7 @@ function buildStContext(options = {}) {
     }
 
     const messages = mergeAdjacentSystemMessages(assembled).map(({ meta, ...message }) => message);
+    if (tailMessage) messages.push(tailMessage);
     const itemization = {
         contextTokens: Math.max(1, Number(contextTokens) || 8192),
         responseTokens: Math.max(1, Number(responseTokens) || 2048),

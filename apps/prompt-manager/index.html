@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>提示词管理 - BunnyOS</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.css?v=20260923.1">
 </head>
 <body>
 <main class="pm-root">
@@ -22,7 +22,7 @@
                 <button class="pm-icon-btn" id="preset-save" type="button" title="保存"><i class="bi bi-save"></i></button>
                 <button class="pm-icon-btn" id="preset-rename" type="button" title="编辑预设名"><i class="bi bi-pencil-square"></i></button>
                 <button class="pm-icon-btn" id="preset-groups" type="button" title="编辑条目分组"><i class="bi bi-collection"></i></button>
-                <button class="pm-icon-btn" id="preset-refresh-source" type="button" title="从 Liminal_online.json 重新读取"><i class="bi bi-arrow-clockwise"></i></button>
+                <button class="pm-icon-btn" id="preset-refresh-source" type="button" title="重置为空白预设"><i class="bi bi-arrow-clockwise"></i></button>
                 <button class="pm-icon-btn" id="preset-export" type="button" title="导出 JSON"><i class="bi bi-download"></i></button>
                 <button class="pm-icon-btn" id="preset-copy" type="button" title="复制预设"><i class="bi bi-files"></i></button>
                 <button class="pm-icon-btn danger" id="preset-delete" type="button" title="删除预设"><i class="bi bi-trash"></i></button>
@@ -30,6 +30,7 @@
             </div>
         </div>
         <div class="preset-meta" id="preset-meta"></div>
+        <p class="preset-tail-note">RP 规则固定作为聊天记录后的最后一条消息，不参与预设排序。</p>
         <details class="sampling-fold" id="sampling-fold">
             <summary>采样参数</summary>
             <div class="sampling-grid">
@@ -205,6 +206,6 @@
 <div class="pm-toast hidden" id="pm-toast"></div>
 
 <script src="/assets/scripts/catbox-proxy.js"></script>
-<script src="prompt-manager.js?v=20260819.1"></script>
+<script src="prompt-manager.js?v=20260923.1"></script>
 </body>
 </html>

@@ -95,12 +95,8 @@ async function openFriendModal(id = '') {
     $('#friend-delete').classList.toggle('hidden', !c);
     $('#friend-start-chat').classList.toggle('hidden', !c);
     $('#friend-name').value = c?.name || '';
-    $('#friend-role-setting').value = c?.role_setting || c?.description || '';
+    $('#friend-role-setting').value = c?.char_info || c?.role_setting || c?.description || '';
     $('#friend-rp-rules').value = c?.rp_rules || c?.personality || '';
-    $('#friend-rp-rules-depth').value = String(Math.max(0, Math.min(parseInt(c?.rp_rules_depth, 10) || 0, 4)));
-    $('#friend-other-setting').value = c?.other_setting || c?.nsfw_setting || '';
-    $('#friend-scenario').value = c?.scenario || '';
-    $('#friend-mes-example').value = c?.mes_example || '';
     $('#friend-avatar-img').src = c?.avatar || DEFAULT_AVATAR_URL;
     $('#friend-avatar-input').value = '';
     await loadFriendWorldbookOptions();
@@ -226,12 +222,8 @@ function getFriendDraft() {
     const roleSetting = $('#friend-role-setting').value.trim();
     return {
         name,
-        role_setting: roleSetting,
+        char_info: roleSetting,
         rp_rules: $('#friend-rp-rules').value.trim(),
-        rp_rules_depth: parseInt($('#friend-rp-rules-depth').value, 10) || 0,
-        other_setting: $('#friend-other-setting').value.trim(),
-        scenario: $('#friend-scenario').value.trim(),
-        mes_example: $('#friend-mes-example').value.trim(),
         worldbookIds: [...state.editingWorldbookIds],
         avatarDataUrl: state.editingAvatarDataUrl
     };
@@ -240,10 +232,10 @@ function getFriendDraft() {
 async function autoSaveFriendDraft() {
     const draft = getFriendDraft();
     if (JSON.stringify(draft) === state.friendSnapshot) return null;
-    if (!draft.name && !draft.role_setting && !draft.rp_rules && !draft.other_setting && !draft.scenario && !draft.mes_example && !draft.avatarDataUrl) {
+    if (!draft.name && !draft.char_info && !draft.rp_rules && !draft.avatarDataUrl) {
         return null;
     }
-    if (!draft.name || !draft.role_setting) {
+    if (!draft.name || !draft.char_info) {
         toast('名字和角色设定完整后才会保存');
         return null;
     }
@@ -252,7 +244,7 @@ async function autoSaveFriendDraft() {
 
 async function saveFriendDraft(draft, { quiet = false } = {}) {
     const name = draft.name;
-    const roleSetting = draft.role_setting;
+    const roleSetting = draft.char_info;
     if (!name) {
         toast('请填写名字');
         return null;
@@ -263,16 +255,9 @@ async function saveFriendDraft(draft, { quiet = false } = {}) {
     }
     const body = {
         name,
-        role_setting: roleSetting,
+        char_info: roleSetting,
         rp_rules: draft.rp_rules,
-        rp_rules_depth: draft.rp_rules_depth,
-        other_setting: draft.other_setting,
-        nsfw_setting: draft.other_setting,
-        scenario: draft.scenario,
-        mes_example: draft.mes_example,
         worldbookIds: Array.isArray(draft.worldbookIds) ? draft.worldbookIds : [],
-        description: roleSetting,
-        personality: draft.rp_rules,
     };
     if (draft.avatarDataUrl) body.avatarDataUrl = draft.avatarDataUrl;
 

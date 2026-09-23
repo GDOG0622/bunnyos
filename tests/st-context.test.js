@@ -48,7 +48,9 @@ test('generation triggers and in-chat injection are respected', () => {
         ] }]
     };
     const result = buildStContext({ preset, character: { id: 1 }, history: [{ role: 'user', content: 'hello' }], generationType: 'regenerate', contextTokens: 500, responseTokens: 50 });
-    assert.deepEqual(result.messages.map(item => item.content), ['main', 'hello', 'regen only']);
+    assert.ok(result.messages[0].content.includes('main\n<chat_history>'));
+    assert.equal(result.messages[1].content, 'hello');
+    assert.ok(result.messages[2].content.includes('regen only\n</chat_history>'));
     assert.equal(result.itemization.generationType, 'regenerate');
 });
 
@@ -60,7 +62,8 @@ test('oldest history is removed first when the context budget is full', () => {
     const history = Array.from({ length: 10 }, (_, index) => ({ role: index % 2 ? 'assistant' : 'user', content: `message ${index} xxxxxxxxxx` }));
     const result = buildStContext({ preset, character: { id: 1 }, history, contextTokens: 80, responseTokens: 20 });
     assert.ok(result.itemization.historyDropped > 0);
-    assert.equal(result.messages.at(-1).content, history.at(-1).content);
+    assert.equal(result.messages.at(-2).content, history.at(-1).content);
+    assert.equal(result.messages.at(-1).content, '</chat_history>');
 });
 
 test('world-info outlet content replaces outlet macros', () => {
@@ -79,7 +82,40 @@ test('world-info outlet content replaces outlet macros', () => {
         contextTokens: 500,
         responseTokens: 50
     });
-    assert.equal(result.messages[0].content, 'Lore: blue');
+    assert.ok(result.messages[0].content.startsWith('Lore: blue\n<chat_history>'));
+});
+
+test('rp rules remain the final independent system message', () => {
+    const preset = {
+        prompts: [
+            { identifier: 'chatHistory', role: 'system', marker: true, injection_position: 0 },
+            { identifier: 'after', role: 'system', content: 'later fixed prompt', injection_position: 0 }
+        ],
+        prompt_order: [{ character_id: 1, order: [
+            { identifier: 'chatHistory', enabled: true }, { identifier: 'after', enabled: true }
+        ] }]
+    };
+    const result = buildStContext({
+        preset, character: { id: 1 }, history: [{ role: 'user', content: 'hello' }],
+        tailPrompt: '<rp_rules>\nStay in character\n</rp_rules>', contextTokens: 500, responseTokens: 50
+    });
+    assert.deepEqual(result.messages.at(-1), { role: 'system', content: '<rp_rules>\nStay in character\n</rp_rules>' });
+    assert.ok(result.messages.at(-2).content.includes('later fixed prompt'));
+});
+
+test('legacy memory uses its old marker without duplicating worldbook tags', () => {
+    const preset = {
+        prompts: [{ identifier: 'worldInfoBefore', role: 'system', marker: true, injection_position: 0 }],
+        prompt_order: [{ character_id: 1, order: [{ identifier: 'worldInfoBefore', enabled: true }] }]
+    };
+    const result = buildStContext({
+        preset, character: { id: 1 }, history: [],
+        books: { character: [{ id: 'book', name: 'Book', entries: [{ id: 'one', content: 'world raw', position: 0, constant: true }] }] },
+        legacyMemoryContent: '<memory>\nsummary\n</memory>', contextTokens: 500, responseTokens: 50
+    });
+    assert.ok(result.messages[0].content.includes('world raw'));
+    assert.ok(result.messages[0].content.includes('<memory>\nsummary\n</memory>'));
+    assert.ok(!result.messages[0].content.includes('<world_info'));
 });
 
 test('ST-compatible tokenizer selection recognizes common model families', () => {

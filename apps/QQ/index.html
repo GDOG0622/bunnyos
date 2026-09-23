@@ -314,42 +314,18 @@
                     <input type="text" id="friend-name" class="qq-friend-name-input" placeholder="名字">
                 </div>
                 <div class="qq-worldbook-binding">
-                    <div class="qq-worldbook-binding-label">绑定世界书（作为角色记忆注入 &lt;memories&gt;）</div>
+                    <div class="qq-worldbook-binding-label">绑定世界书</div>
                     <div class="qq-chips" id="friend-worldbook-chips"></div>
                     <div class="qq-chip-menu hidden" id="friend-worldbook-menu"></div>
                 </div>
                 <div class="qq-import-fields qq-friend-fields">
                     <div class="qq-field">
-                        <label>角色设定</label>
-                        <textarea id="friend-role-setting" placeholder="必填。最主要的角色设定，会处于提示词体系靠近头部的位置。"></textarea>
+                        <label>角色设定（char_info）</label>
+                        <textarea id="friend-role-setting" placeholder="必填。角色设定会放入 <char_info> 标签。"></textarea>
                     </div>
                     <div class="qq-field">
-                        <div class="qq-field-label-row">
-                            <label>角色语气 / RP 规则</label>
-                            <label class="qq-depth-inline">
-                                <span>插入深度</span>
-                                <select id="friend-rp-rules-depth">
-                                    <option value="0">0（聊天末尾）</option>
-                                    <option value="1">1</option>
-                                    <option value="2">2</option>
-                                    <option value="3">3</option>
-                                    <option value="4">4</option>
-                                </select>
-                            </label>
-                        </div>
-                        <textarea id="friend-rp-rules" placeholder="可不填。角色语气、互动边界和 RP 规则，以 system 消息按上方深度插入聊天历史。"></textarea>
-                    </div>
-                    <div class="qq-field">
-                        <label>其它设定</label>
-                        <textarea id="friend-other-setting" placeholder="可不填。补充设定、禁忌、偏好或特殊规则。"></textarea>
-                    </div>
-                    <div class="qq-field">
-                        <label>场景信息</label>
-                        <textarea id="friend-scenario" placeholder="可不填。世界观、meta 设定、时代背景或故事边界；AI 应在这个设定范围内构建对话。"></textarea>
-                    </div>
-                    <div class="qq-field">
-                        <label>示例聊天</label>
-                        <textarea id="friend-mes-example" placeholder="可不填。填入 {{char}} 与 {{user}} 的示例对话，用作语气参考。"></textarea>
+                        <label>RP 规则</label>
+                        <textarea id="friend-rp-rules" placeholder="可不填。作为聊天记录之后的最后一条 system 消息。"></textarea>
                     </div>
                 </div>
                 <button class="qq-start-chat hidden" id="friend-start-chat">开始聊天</button>
@@ -628,10 +604,10 @@
 <!-- QQ 资源短期缓存；改动前端文件时同步更新此版本号，避免新旧脚本混载。 -->
 <script src="/assets/scripts/catbox-proxy.js?v=20260810.4"></script>
 <script src="scripts/state.js?v=20260810.4"></script>
-<script src="scripts/utils.js?v=20260819.1"></script>
+<script src="scripts/utils.js?v=20260923.1"></script>
 <script src="scripts/navigation.js?v=20260810.4"></script>
 <script src="scripts/api.js?v=20260819.1"></script>
-<script src="scripts/contacts.js?v=20260819.1"></script>
+<script src="scripts/contacts.js?v=20260923.1"></script>
 <script src="scripts/personas.js?v=20260819.1"></script>
 <script src="scripts/prompt-settings.js?v=20260819.1"></script>
 <script src="scripts/chat-render.js?v=20260819.1"></script>
@@ -641,7 +617,7 @@
 <script src="scripts/wallet.js?v=20260819.1"></script>
 <script src="scripts/beauty-defaults.js?v=20260810.4"></script>
 <script src="scripts/beauty.js?v=20260819.1"></script>
-<script src="scripts/summary.js?v=20260819.1"></script>
+<script src="scripts/summary.js?v=20260923.1"></script>
 <script src="scripts/chat-settings.js?v=20260819.1"></script>
 <script src="scripts/events.js?v=20260819.1"></script>
 <script src="QQ.js?v=20260810.4"></script>

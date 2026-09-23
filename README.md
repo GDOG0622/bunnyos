@@ -49,11 +49,12 @@ BunnyOS/
    ├─ chats/qq/            单人聊天 <characterId>.json
    ├─ presets/
    │  ├─ image-prompts.json     生图提示词预设
-   │  ├─ st-presets/            酒馆兼容预设工作副本
+   │  ├─ st-presets/            每份酒馆兼容预设一个「预设名.json」
    │  └─ st-presets-settings.json
    ├─ qq/                  QQ App 自身的 settings/groups/sticker-packs
    ├─ userpersonas/        user 人设，按名字命名
-   ├─ worlds/worldbooks.json   { books: [{id,name,entries:[{id,name,content}]}] }
+   ├─ worldbooks/             每本世界书一个「世界书名.json」
+   ├─ worlds/worldbooks.json   旧版合集，首次迁移后保留作回退副本
    ├─ assets/              头像、背景、生图、音频、贴纸池
    ├─ vapid.json           Web Push VAPID 密钥对（自动生成，勿提交）
    ├─ push-subscriptions.json  已订阅推送的设备列表
@@ -76,10 +77,10 @@ BunnyOS/
 | POST | `/api/assets/upload` | 上传壁纸 / App 图标 |
 | GET / POST | `/api/presets` | 生图提示词预设 |
 | GET | `/api/st-presets` | 酒馆预设列表 + 当前 id |
-| POST | `/api/st-presets/new` | 新建空白预设（10 个 builtin marker + 默认采样） |
+| POST | `/api/st-presets/new` | 新建仅含 9 个固定 marker 的空白预设 |
 | POST | `/api/st-presets/current` | 切换当前 |
 | GET / POST / DELETE | `/api/st-presets/:id` | 读 / 覆盖 / 删 |
-| POST | `/api/st-presets/:id/rename` `/copy` `/refresh-default` | 改名 / 复制 / 从 Liminal_online.json 重读 |
+| POST | `/api/st-presets/:id/rename` `/copy` `/refresh-default` | 改名 / 复制 / 重置为仅含固定条目的空白预设 |
 | POST | `/api/st-presets/import-default` | 重新导入默认预设 |
 | GET / POST | `/api/worldbooks` | 全部世界书读 / 覆盖 |
 | POST | `/api/worldbooks/books` | 新建空白本 |
@@ -124,7 +125,7 @@ BunnyOS/
 
 `POST /api/qq/reply` 接收 `{characterId, messages, chatType, generationType}`；`generationType` 支持 normal / continue / swipe / regenerate / quiet：
 
-1. `buildPromptVariables` 算 18 个变量（{{now}} {{char}} {{user}} {{char_role_setting}} {{chat_history}} 等）
+1. `buildPromptVariables` 生成时间、角色、用户、总结与聊天变量（如 `{{now}}`、`{{char_info}}`、`{{summary}}`、`{{chat_history}}`）
 2. `qqMessageToText` 把每条 QQ 消息映射为 AI 文本：
    - text → 裸文本
    - sticker → `[name]`
@@ -146,7 +147,7 @@ BunnyOS/
 - 设置 → 存储配置提供 GitHub 私有仓库和 Supabase Storage 两种手动云端备份；两者分别由独立 provider 类实现。
 - “云端备份”覆盖约定路径的上一份备份；“加载备份”恢复前先在 `data/backups/` 创建本机回滚快照。
 - 备份包含 `settings.json`、`data/` 和用户上传的桌面资源，但排除运行缓存、Web Push 设备密钥与历史回滚快照。
-- OS 公告栏每日首次进入时提醒备份；公告版本变化时同日也会再次显示更新内容，点击“备份 BunnyOS 数据”直达存储配置。
+- OS 公告栏每日首次进入时提醒备份；可选择关闭提醒直到下次公告版本更新，点击“去备份”直达存储配置。
 - QQ 生成任务按角色隔离，不同角色可以并行；App iframe 常驻，因此回到桌面或切换设置、Suki 时生成继续，完成后走 OS 信息条提醒。
 
 ### 模板渲染 renderPromptTemplate
@@ -157,32 +158,31 @@ BunnyOS/
 3. `{{roll::XdY}}` / `{{roll::Y}}` 骰点求和
 4. `{{name}}` / `<name>` 变量替换
 
-### 内置 marker（10 个，UI 锁死 / 内容由 server.js 决定）
+### 新建预设的固定 marker（9 个，UI 锁定 / 内容由后端决定）
 
 | identifier | 名称 | 内容来源 |
 | --- | --- | --- |
 | `bunnyosRealtime` | 实时模式 | 时间变量 |
-| `charDescription` | CHAR人设 | `<character_info>` 包角色卡 role_setting / other_setting（不含 rp_rules） |
+| `worldInfoBefore` | 世界书·角色前 | 扫描后命中“角色定义前”的世界书条目，正文不加标签 |
+| `charDescription` | CHAR人设 | `<char_info>` 包角色名和角色卡 char_info |
+| `worldInfoAfter` | 世界书·角色后 | 扫描后命中“角色定义后”的世界书条目，正文不加标签 |
 | `personaDescription` | USER人设 | `<user_info>` 包当前 user 人设 |
-| `worldInfoAfter` | 世界书 | 世界书扫描后命中“角色定义后”的条目；角色书优先于全局书 |
-| `worldInfoBefore` | 总结内容 | 总结世界书，以及扫描后命中“角色定义前”的条目 |
-| `scenario` | 场景信息 | 角色卡 scenario |
-| `dialogueExamples` | 示例聊天 | 角色卡 mes_example |
+| `memory` | 记忆 | `<memory>` 包角色总结世界书中启用的内容 |
 | `onlinePrivateChat` | 线上·私聊 | chatType=private 时注入 `ONLINE_PRIVATE_CHAT_PROTOCOL` 常量 |
 | `onlineGroupChat` | 线上·群聊 | chatType=group 时注入 `ONLINE_GROUP_CHAT_PROTOCOL` 常量 |
-| `chatHistory` | 聊天记录 | 展开为真实多条 user/assistant |
+| `chatHistory` | 聊天记录 | `<chat_history>` 包真实多条 user/assistant 消息；其后追加独立的 `<rp_rules>` system 消息 |
 
 私聊/群聊 marker 内容在 server.js 顶部两个 const 定义，按 Liminal_online 原文精简到 1/3。
 
 ## 关键数据模型
 
-**角色卡 `data/characters/<id>.json`**：核心字段 `name / avatar / role_setting / rp_rules / rp_rules_depth(0-4) / other_setting / scenario / mes_example / worldbookIds:[] / summaryWorldbookId`。`worldbookIds` 是角色专属世界书；`summaryWorldbookId` 是独立的总结世界书。`description / personality / nsfw_setting` 是旧兼容字段，分别映射 role_setting / rp_rules / other_setting。
+**角色卡 `data/characters/<id>.json`**：新建角色只存 `id / name / avatar / char_info / rp_rules / worldbookIds:[] / memory:{summaryWorldbookId}`。`worldbookIds` 绑定角色世界书；`memory.summaryWorldbookId` 引用独立的总结世界书。已有角色的 `role_setting / description / personality / summaryWorldbookId` 保留读取兼容。`rp_rules` 固定作为模型回复前最后一条 system 消息，不再设置插入深度。
 
 **聊天记录 `data/chats/qq/<characterId>.json`**：`{characterId, messages:[{role, type, text, created_at, ...}], summaryLayerThreshold, updated_at}`。message type：`text / image / sticker / transfer / service / link / system`。`service` 用 `serviceType / platform / price / item / note` 表示礼物、外卖和打车；商品 `link` 额外带 `previewType: "product" / platform / price`。可选字段：`reply_to` / `favorited` / `persona` / `reply_group_id` / `reply_group_versions` / `reply_group_version_index`；已进入小总结的消息标记 `summary_archived:true`，界面仍显示，但不会再装入 AI prompt。
 
 **user 人设 `data/userpersonas/<名字>.json`**：`id / name / gender / birthday / status / customStatus / signature / note / prompt / avatar`。注入 AI 的字段：name / gender / birthday / prompt。
 
-**世界书 `data/worlds/worldbooks.json`**：`{books: [{id, name, entries: [...]}]}`。基础字段为 `id / name / content / enabled`；ST 兼容字段包括 `key / keysecondary / constant / selectiveLogic / position / order / depth / probability / useProbability / scanDepth / caseSensitive / matchWholeWords / excludeRecursion / preventRecursion / triggers / outletName / group` 等。导入 ST JSON 时保留原字段；旧条目没有激活字段时按常驻处理。
+**世界书 `data/worldbooks/<世界书名>.json`**：每本一个文件，书内保留稳定的 `id` 和 `entries`。名称不能重复；旧版 `data/worlds/worldbooks.json` 首次启动时迁移并保留原文件。条目支持 ST 的关键词、概率、递归、位置和触发字段；旧条目没有激活字段时按常驻处理。
 
 **酒馆预设**：标准 ST 结构。BunnyOS 在 `extensions.bunnyosPromptGroups` 存自定义分组，`extensions.bunnyosBuiltinArranged` 标记 builtin marker 已排序。
 
