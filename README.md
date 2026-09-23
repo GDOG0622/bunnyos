@@ -135,7 +135,7 @@ BunnyOS/
 3. `modules/st-context` 按 ST Chat Completion 语义装配：相对条目遵循 `prompt_order`；聊天内条目按 `injection_depth / injection_order / role` 插入；`injection_trigger` 按生成类型过滤
 4. 世界书先扫描再注入：角色书优先于全局书，总结书独立；支持主/次关键词、四种次关键词逻辑、常驻、概率、递归、独立预算、位置、depth、Outlet、触发类型和包含组；旧条目无激活字段时继续视为常驻
 5. `modules/st-context/tokenizer.js` 按模型自动选择 tokenizer：OpenAI/o 系列用 tiktoken；Gemini 用 ST 同路线的 Gemma SentencePiece；Claude、Llama、Qwen、DeepSeek 等按家族加载本地模型并缓存到 `data/_cache/tokenizers/`；加载失败才按 ST 的 UTF-8 字节估算回退
-6. 用 `mainApi_context - openai_max_tokens` 得到提示词预算；固定提示词先占预算，聊天历史从最新一条向前装入，超出时只丢最旧历史；未固定示例在历史之后竞争剩余预算
+6. 用 `mainApi_context - openai_max_tokens` 得到提示词预算；固定提示词先占预算，聊天历史从最新一条向前装入，超出时丢最旧历史；若固定内容占满预算，仍保留最近一条有效 user 消息并报告警告；未固定示例在历史之后竞争剩余预算
 7. 采样参数从预设 JSON 顶层读：temperature / top_p / frequency_penalty / presence_penalty / openai_max_tokens
 8. **抗截断循环**（开关 `mainApi_antiCutoffEnabled` + 次数 `mainApi_antiCutoffMaxRetries`）：调主 API 后，若 finish_reason=length 或 strip 思维链后为空 → 把已生成内容当 assistant 消息 + 追 user「续写」再调，最多 N 次
 9. **关键**：每个 chunk 单独剥 `<think>...</think>`（含未闭合的）再累加。不能整体累加再 strip——多 chunk 间未闭合的 `<think>` 会让兜底正则吃掉后续好内容
@@ -158,21 +158,21 @@ BunnyOS/
 3. `{{roll::XdY}}` / `{{roll::Y}}` 骰点求和
 4. `{{name}}` / `<name>` 变量替换
 
-### 新建预设的固定 marker（9 个，UI 锁定 / 内容由后端决定）
+### 新建预设的固定 marker（9 个，不可删除）
 
 | identifier | 名称 | 内容来源 |
 | --- | --- | --- |
-| `bunnyosRealtime` | 实时模式 | 时间变量 |
+| `bunnyosRealtime` | 实时模式 | 预设中可编辑正文，发送时渲染时间变量并自动包 `<realtime>` |
 | `worldInfoBefore` | 世界书·角色前 | 扫描后命中“角色定义前”的世界书条目，正文不加标签 |
 | `charDescription` | CHAR人设 | `<char_info>` 包角色名和角色卡 char_info |
 | `worldInfoAfter` | 世界书·角色后 | 扫描后命中“角色定义后”的世界书条目，正文不加标签 |
 | `personaDescription` | USER人设 | `<user_info>` 包当前 user 人设 |
 | `memory` | 记忆 | `<memory>` 包角色总结世界书中启用的内容 |
-| `onlinePrivateChat` | 线上·私聊 | chatType=private 时注入 `ONLINE_PRIVATE_CHAT_PROTOCOL` 常量 |
-| `onlineGroupChat` | 线上·群聊 | chatType=group 时注入 `ONLINE_GROUP_CHAT_PROTOCOL` 常量 |
+| `onlinePrivateChat` | 线上·私聊 | 预设中可编辑正文，仅在 chatType=private 时注入并自动包 `<private_chat_protocol>` |
+| `onlineGroupChat` | 线上·群聊 | 预设中可编辑正文，仅在 chatType=group 时注入并自动包 `<group_chat_protocol>` |
 | `chatHistory` | 聊天记录 | `<chat_history>` 包真实多条 user/assistant 消息；其后追加独立的 `<rp_rules>` system 消息 |
 
-私聊/群聊 marker 内容在 server.js 顶部两个 const 定义，按 Liminal_online 原文精简到 1/3。
+这三个可编辑 marker 仅允许修改正文，名称、标识和外层标签固定。新预设写入默认正文；旧预设原先为空的正文首次读取时补入原有默认内容，之后每份预设独立保存修改。私聊/群聊默认正文保留在 server.js 的协议常量中。
 
 ## 关键数据模型
 

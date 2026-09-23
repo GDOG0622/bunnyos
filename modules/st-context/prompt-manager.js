@@ -82,7 +82,7 @@ function preparePrompts({ preset, characterId, generationType = 'normal', resolv
         if (!orderEntry?.enabled) continue;
         const source = promptMap.get(orderEntry.identifier);
         if (!source || !isPromptTriggered(source, generationType)) continue;
-        const raw = source.marker ? resolveMarker(source.identifier) : source.content;
+        const raw = source.marker ? resolveMarker(source.identifier, source) : source.content;
         const content = String(render(raw || '') || '').trim();
         if (!content && source.identifier !== 'chatHistory') continue;
         const prompt = { ...source, role: safeRole(source.role), content, sequence };

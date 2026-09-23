@@ -76,9 +76,9 @@ function buildStContext(options = {}) {
     const renderWithOutlets = value => render(String(value || '').replace(/\{\{\s*outlet::([^}]+)\}\}/gi, (_match, name) => {
         return joinBlocks(worldInfo.outlets[String(name).trim()] || []);
     }));
-    const resolveMarker = identifier => {
+    const resolveMarker = (identifier, sourcePrompt) => {
         if (Object.prototype.hasOwnProperty.call(markerValues, identifier)) return markerValues[identifier];
-        let value = resolveBuiltin(identifier, worldInfo);
+        let value = resolveBuiltin(identifier, worldInfo, sourcePrompt);
         if (identifier === 'dialogueExamples') {
             value = [joinBlocks(worldInfo.examplesTop), value, joinBlocks(worldInfo.examplesBottom)].filter(Boolean).join('\n\n');
         }

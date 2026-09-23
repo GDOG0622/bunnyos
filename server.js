@@ -590,6 +590,44 @@ function setSummaryWorldbookId(character, id) {
     delete character.summaryWorldbookId;
 }
 
+const REALTIME_PROMPT_BODY = '当前现实时间：{{now}}（{{timezone}}）\n今天是{{date}}，{{weekday}}，现在{{time}}。\n你必须以此时间为锚回复：作息、用餐、是否在上班/睡觉、能否立刻响应等都基于上述真实时间和星期判断，不要凭空假设当前是别的时段。';
+const EDITABLE_BUILTIN_TAGS = Object.freeze({
+    bunnyosRealtime: 'realtime',
+    onlinePrivateChat: 'private_chat_protocol',
+    onlineGroupChat: 'group_chat_protocol'
+});
+
+function editableBuiltinBody(identifier) {
+    if (identifier === 'bunnyosRealtime') return REALTIME_PROMPT_BODY;
+    if (identifier === 'onlinePrivateChat') return ONLINE_PRIVATE_CHAT_PROTOCOL;
+    if (identifier === 'onlineGroupChat') return ONLINE_GROUP_CHAT_PROTOCOL;
+    return null;
+}
+
+function initializeEditableBuiltinContent(preset) {
+    if (preset?.extensions?.bunnyosEditableBuiltinContent) return false;
+    if (!Array.isArray(preset?.prompts)) return false;
+    for (const prompt of preset.prompts) {
+        const fallback = editableBuiltinBody(prompt.identifier);
+        if (fallback === null) continue;
+        const raw = String(prompt.content || '').trim();
+        if (!raw) {
+            prompt.content = fallback;
+            continue;
+        }
+        const tag = EDITABLE_BUILTIN_TAGS[prompt.identifier];
+        const wrapped = raw.match(new RegExp(`^<${tag}>\\s*([\\s\\S]*?)\\s*<\\/${tag}>$`, 'i'));
+        if (wrapped) prompt.content = wrapped[1].trim();
+    }
+    preset.extensions = { ...(preset.extensions || {}), bunnyosEditableBuiltinContent: true };
+    return true;
+}
+
+function wrapEditableBuiltin(identifier, body) {
+    const tag = EDITABLE_BUILTIN_TAGS[identifier];
+    return tag ? `<${tag}>\n${String(body || '').trim()}\n</${tag}>` : '';
+}
+
 function buildBlankStPreset(name) {
     const builtinMarkers = [
         { identifier: 'bunnyosRealtime', name: '实时模式' },
@@ -610,7 +648,7 @@ function buildBlankStPreset(name) {
         injection_depth: 4,
         injection_order: 100,
         role: 'system',
-        content: '',
+        content: editableBuiltinBody(m.identifier) ?? '',
         system_prompt: true,
         marker: true,
         forbid_overrides: true
@@ -624,7 +662,7 @@ function buildBlankStPreset(name) {
         openai_max_tokens: 2048,
         prompts,
         prompt_order: [{ character_id: 100001, order: prompts.map(p => ({ identifier: p.identifier, enabled: true })) }],
-        extensions: { bunnyosBuiltinArranged: true, bunnyosPromptGroups: [] }
+        extensions: { bunnyosBuiltinArranged: true, bunnyosEditableBuiltinContent: true, bunnyosPromptGroups: [] }
     };
 }
 
@@ -795,10 +833,10 @@ const ONLINE_GROUP_CHAT_PROTOCOL = `<Group_Chat_Protocol>
 
 </Group_Chat_Protocol>`;
 
-function buildBuiltinPromptContent(identifier, character, userPersona, variables, chatType) {
+function buildBuiltinPromptContent(identifier, character, userPersona, variables, chatType, sourcePrompt) {
     switch (identifier) {
         case 'bunnyosRealtime':
-            return '<realtime>\n当前现实时间：{{now}}（{{timezone}}）\n今天是{{date}}，{{weekday}}，现在{{time}}。\n你必须以此时间为锚回复：作息、用餐、是否在上班/睡觉、能否立刻响应等都基于上述真实时间和星期判断，不要凭空假设当前是别的时段。\n</realtime>';
+            return wrapEditableBuiltin(identifier, sourcePrompt?.content ?? REALTIME_PROMPT_BODY);
         case 'charDescription':
             return buildCharacterInfoPrompt(character);
         case 'personaDescription':
@@ -825,9 +863,9 @@ function buildBuiltinPromptContent(identifier, character, userPersona, variables
         case 'chatHistory':
             return buildChatHistoryPrompt(variables);
         case 'onlinePrivateChat':
-            return chatType === 'group' ? '' : `<private_chat_protocol>\n${ONLINE_PRIVATE_CHAT_PROTOCOL}\n</private_chat_protocol>`;
+            return chatType === 'group' ? '' : wrapEditableBuiltin(identifier, sourcePrompt?.content ?? ONLINE_PRIVATE_CHAT_PROTOCOL);
         case 'onlineGroupChat':
-            return chatType === 'group' ? `<group_chat_protocol>\n${ONLINE_GROUP_CHAT_PROTOCOL}\n</group_chat_protocol>` : '';
+            return chatType === 'group' ? wrapEditableBuiltin(identifier, sourcePrompt?.content ?? ONLINE_GROUP_CHAT_PROTOCOL) : '';
         default:
             return '';
     }
@@ -848,6 +886,9 @@ async function buildQqPresetPrompt(character, variables, userPersona, history = 
     const presetId = getCurrentQqPromptPresetId();
     const storedPreset = presetId ? readJsonFile(stPresetFile(presetId), null) : null;
     const preset = isSillyTavernPreset(storedPreset) ? storedPreset : buildBlankStPreset('空白预设');
+    if (initializeEditableBuiltinContent(preset) && storedPreset === preset && presetId) {
+        writeJsonFile(stPresetFile(presetId), preset);
+    }
 
     const qqSettings = readJsonFile(QQ_SETTINGS_FILE, {});
     const responseTokens = Math.min(Math.max(parseInt(options.responseTokens ?? preset.openai_max_tokens, 10) || 2048, 1), 200000);
@@ -869,7 +910,7 @@ async function buildQqPresetPrompt(character, variables, userPersona, history = 
         responseTokens,
         worldInfoSettings: { ...qqSettings, ...preset },
         render: value => renderPromptTemplate(value, variables),
-        resolveBuiltin: identifier => buildBuiltinPromptContent(identifier, character, userPersona, variables, chatType),
+        resolveBuiltin: (identifier, _worldInfo, sourcePrompt) => buildBuiltinPromptContent(identifier, character, userPersona, variables, chatType, sourcePrompt),
         pinExamples: preset.pin_examples === true,
         tailPrompt,
         tokenCounter: tokenizer.messageCounter,
@@ -2069,7 +2110,15 @@ app.get('/api/st-presets/:id', (req, res) => {
         const file = stPresetFile(id);
         const preset = readJsonFile(file, null);
         if (!isSillyTavernPreset(preset)) return res.status(404).json({ error: '未找到酒馆预设' });
-        res.json({ id, summary: summarizeStPreset(id, preset, fs.statSync(file)), preset });
+        if (initializeEditableBuiltinContent(preset)) writeJsonFile(file, preset);
+        res.json({
+            id, summary: summarizeStPreset(id, preset, fs.statSync(file)), preset,
+            editableBuiltinDefaults: {
+                bunnyosRealtime: REALTIME_PROMPT_BODY,
+                onlinePrivateChat: ONLINE_PRIVATE_CHAT_PROTOCOL,
+                onlineGroupChat: ONLINE_GROUP_CHAT_PROTOCOL
+            }
+        });
     } catch (e) {
         res.status(500).json({ error: '读取酒馆预设失败' });
     }
@@ -2080,6 +2129,7 @@ app.post('/api/st-presets/:id', (req, res) => {
         const id = stPresetIdFromName(req.params.id);
         const preset = req.body?.preset;
         if (!isSillyTavernPreset(preset)) return res.status(400).json({ error: '不是有效的酒馆预设 JSON' });
+        initializeEditableBuiltinContent(preset);
         writeJsonFile(stPresetFile(id), preset);
         res.json({ success: true, summary: summarizeStPreset(id, preset, fs.statSync(stPresetFile(id))) });
     } catch (e) {

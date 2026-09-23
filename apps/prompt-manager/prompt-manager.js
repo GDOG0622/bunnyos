@@ -3,6 +3,7 @@ const state = {
     stPresets: [],
     currentPresetId: '',
     currentPreset: null,
+    editableBuiltinDefaults: {},
     filter: 'all',
     search: '',
     groupMode: false,
@@ -91,6 +92,11 @@ const builtinPrompts = [
 ];
 
 const builtinIds = new Set(builtinPrompts.map(item => item.identifier));
+const editableBuiltinTags = {
+    bunnyosRealtime: 'realtime',
+    onlinePrivateChat: 'private_chat_protocol',
+    onlineGroupChat: 'group_chat_protocol'
+};
 const legacyBuiltinIds = new Set(['charPersonality']);
 
 const variableDocs = [
@@ -220,6 +226,7 @@ async function loadPresetDetail(id) {
     const data = await res.json();
     state.currentPresetId = data.id;
     state.currentPreset = data.preset;
+    state.editableBuiltinDefaults = data.editableBuiltinDefaults || {};
     state.dirty = false;
     normalizeCurrentPreset();
     $('#preset-select').value = data.id;
@@ -274,7 +281,7 @@ function normalizeCurrentPreset() {
                 injection_depth: 4,
                 injection_order: 100,
                 role: item.role,
-                content: item.content,
+                content: state.editableBuiltinDefaults[item.identifier] ?? item.content,
                 system_prompt: true,
                 marker: true,
                 forbid_overrides: true,
@@ -476,9 +483,13 @@ function createPromptRow({ entry, index, prompt }) {
     row.draggable = true;
     row.dataset.index = index;
     const locked = isLockedPrompt(prompt.identifier);
+    const editableBody = isEditableBuiltinPrompt(prompt.identifier);
+    const editLocked = locked && !editableBody;
     const selected = state.groupSelection.includes(index);
     const summary = prompt.marker
-        ? markerLabels[prompt.identifier] || '动态插入点'
+        ? (editableBody
+            ? (prompt.content || '').replace(/\s+/g, ' ').slice(0, 120)
+            : markerLabels[prompt.identifier] || '动态插入点')
         : (prompt.content || '').replace(/\s+/g, ' ').slice(0, 120);
     row.innerHTML = `
         <label class="group-check ${state.groupMode ? '' : 'hidden'}" title="选择分组端点">
@@ -495,12 +506,12 @@ function createPromptRow({ entry, index, prompt }) {
             <div class="prompt-meta-line">
                 <span class="badge">${escapeHtml(prompt.role || 'system')}</span>
                 ${prompt.marker ? '<span class="badge marker">marker</span>' : ''}
-                ${locked ? '<span class="badge lock">locked</span>' : ''}
+                ${locked ? `<span class="badge lock">${editableBody ? 'fixed' : 'locked'}</span>` : ''}
                 <span class="prompt-sub">${escapeHtml(summary)}</span>
             </div>
         </div>
         <div class="prompt-actions">
-            <button class="pm-icon-btn" type="button" data-action="edit" title="${locked ? '内置条目不可编辑' : '编辑'}" ${locked ? 'disabled' : ''}><i class="bi ${locked ? 'bi-lock' : 'bi-pencil'}"></i></button>
+            <button class="pm-icon-btn" type="button" data-action="edit" title="${editLocked ? '内置条目不可编辑' : '编辑正文'}" ${editLocked ? 'disabled' : ''}><i class="bi ${editLocked ? 'bi-lock' : 'bi-pencil'}"></i></button>
             <button class="pm-icon-btn" type="button" data-action="copy" title="${locked ? '内置条目不可复制' : '复制条目'}" ${locked ? 'disabled' : ''}><i class="bi bi-files"></i></button>
             <button class="pm-icon-btn danger" type="button" data-action="delete" title="${locked ? '内置条目不可删除' : '删除'}" ${locked ? 'disabled' : ''}><i class="bi bi-trash"></i></button>
         </div>
@@ -535,6 +546,10 @@ function getPromptGroups() {
 
 function isLockedPrompt(identifier) {
     return builtinIds.has(identifier);
+}
+
+function isEditableBuiltinPrompt(identifier) {
+    return Object.prototype.hasOwnProperty.call(editableBuiltinTags, identifier);
 }
 
 function toggleGroupMode() {
@@ -869,7 +884,7 @@ async function deletePrompt(identifier) {
 }
 
 function openPromptEditor(identifier) {
-    if (isLockedPrompt(identifier)) {
+    if (isLockedPrompt(identifier) && !isEditableBuiltinPrompt(identifier)) {
         toast('内置条目不可编辑');
         return;
     }
@@ -879,13 +894,28 @@ function openPromptEditor(identifier) {
     state.editingMode = 'prompt';
     state.editingId = identifier;
     $$('.pm-modal-card').forEach(card => card.removeAttribute('data-mode'));
-    $('#editor-title').textContent = '编辑条目';
-    $('#editor-delete').classList.remove('hidden');
-    $('.advanced-fields').classList.remove('hidden');
+    const fixedBody = isEditableBuiltinPrompt(identifier);
+    $('#editor-title').textContent = fixedBody ? '编辑固定条目正文' : '编辑条目';
+    $('#editor-delete').classList.toggle('hidden', fixedBody);
+    $('.advanced-fields').classList.toggle('hidden', fixedBody);
     fillEditor(prompt, entry);
+    setFixedBodyEditorMode(identifier);
     state.snapshot = JSON.stringify(editorDraft());
     $('#editor-modal').classList.remove('hidden');
     notifyNavState();
+}
+
+function setFixedBodyEditorMode(identifier = '') {
+    const fixedBody = isEditableBuiltinPrompt(identifier);
+    ['editor-name', 'editor-identifier', 'editor-role', 'editor-enabled', 'editor-marker', 'editor-system-prompt',
+        'editor-injection-position', 'editor-injection-depth', 'editor-injection-order', 'editor-injection-trigger',
+        'editor-forbid-overrides'].forEach(id => { $(`#${id}`).disabled = fixedBody; });
+    const note = $('#editor-fixed-note');
+    note.classList.toggle('hidden', !fixedBody);
+    if (fixedBody) {
+        note.textContent = `只编辑正文；发送给模型时会自动包上 <${editableBuiltinTags[identifier]}> 标签。`;
+        $('#editor-marker-details').classList.add('hidden');
+    }
 }
 
 function openPromptViewer(identifier) {
@@ -965,10 +995,16 @@ async function saveEditorIfChanged() {
 }
 
 function savePromptDraft(draft) {
-    if (isLockedPrompt(state.editingId)) return;
+    if (isLockedPrompt(state.editingId) && !isEditableBuiltinPrompt(state.editingId)) return;
     const prompt = getPromptMap().get(state.editingId);
     const entry = getPromptOrder().find(item => item.identifier === state.editingId);
     if (!prompt || !entry) return;
+    if (isEditableBuiltinPrompt(state.editingId)) {
+        prompt.content = draft.content;
+        markDirty();
+        renderPromptList();
+        return;
+    }
     const nextId = draft.identifier || state.editingId;
     if (nextId !== state.editingId && getPromptMap().has(nextId)) {
         toast('identifier 已存在');
@@ -1004,6 +1040,7 @@ function closeEditor() {
     state.editingMode = '';
     state.editingId = '';
     state.snapshot = '';
+    setFixedBodyEditorMode();
     notifyNavState();
 }
 
@@ -1098,6 +1135,10 @@ function buildAssemblyPreview() {
 
 function buildPromptDisplayContent(prompt) {
     if (!prompt) return '';
+    if (isEditableBuiltinPrompt(prompt.identifier)) {
+        const tag = editableBuiltinTags[prompt.identifier];
+        return `<${tag}>\n${scrubPreviewContent(prompt.content || '').trim()}\n</${tag}>`;
+    }
     if (prompt.marker) {
         const slot = markerSlotByIdentifier[prompt.identifier];
         if (slot && state.markerExpanded[slot] && state.markerPreviewCache) {

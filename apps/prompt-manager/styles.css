@@ -397,6 +397,7 @@ body:has(.pm-root) {
 }
 .pm-preview { min-height: 120px; }
 .assembly-preview { min-height: 100%; }
+.pm-editor-note { margin: 0 0 8px; color: var(--pm-sub); font-size: 12px; line-height: 1.5; }
 
 .pm-tabbar {
     display: flex;
