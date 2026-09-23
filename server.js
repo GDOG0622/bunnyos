@@ -4218,6 +4218,16 @@ function buildUpstreamErrorPayload({ upstream, rawText, model = '', operation = 
     };
 }
 
+function sendUpstreamError(res, details) {
+    const status = Number(details.upstream?.status) || 0;
+    // Cloudflare replaces origin 5xx responses with an HTML error page, hiding
+    // the JSON body that explains the model provider's actual failure.
+    const clientStatus = status >= 400 && status < 500 ? status : 424;
+    const retryAfter = details.upstream?.headers?.get?.('retry-after');
+    if (retryAfter) res.set('Retry-After', retryAfter);
+    return res.status(clientStatus).json(buildUpstreamErrorPayload(details));
+}
+
 function buildInternalErrorPayload(error, operation = 'reply') {
     return {
         error: error?.message || 'BunnyOS 内部错误',
@@ -4352,14 +4362,14 @@ app.post('/api/qq/reply', async (req, res) => {
             lastRawText = rawText;
             if (!upstream.ok) {
                 console.error('[QQ reply upstream error]', upstream.status, rawText.slice(0, 500));
-                return res.status(502).json(buildUpstreamErrorPayload({
+                return sendUpstreamError(res, {
                     upstream, rawText, model, operation: 'reply', attempt: attemptUsed
-                }));
+                });
             }
             let data;
             try { data = JSON.parse(rawText); }
             catch {
-                return res.status(502).json({
+                return res.status(424).json({
                     error: '模型返回的不是有效 JSON',
                     error_code: 'INVALID_UPSTREAM_JSON',
                     error_type: 'invalid_response_error',
@@ -4394,7 +4404,7 @@ app.post('/api/qq/reply', async (req, res) => {
         }
 
         if (!rawAccumulatedForRetry) {
-            return res.status(502).json({
+            return res.status(424).json({
                 error: `模型没有返回内容（finish_reason=${finishReason || '未知'}）`,
                 error_code: 'EMPTY_UPSTREAM_RESPONSE',
                 error_type: 'empty_response_error',
@@ -4408,7 +4418,7 @@ app.post('/api/qq/reply', async (req, res) => {
         }
         const cleaned = cleanedAccumulated.trim();
         if (!cleaned) {
-            return res.status(502).json({
+            return res.status(424).json({
                 error: `模型只返回了 <think> 思维链，剥离后无可见正文（finish_reason=${finishReason || '未知'}，已尝试 ${attemptUsed} 次）`,
                 error_code: 'THINKING_ONLY_RESPONSE',
                 error_type: 'empty_visible_response_error',
@@ -4422,7 +4432,7 @@ app.post('/api/qq/reply', async (req, res) => {
         }
         const segments = splitReplyToSegments(cleaned);
         if (!segments.length) {
-            return res.status(502).json({
+            return res.status(424).json({
                 error: '清洗后切不出有效气泡段',
                 error_code: 'EMPTY_REPLY_SEGMENTS',
                 error_type: 'reply_parse_error',
@@ -4562,14 +4572,14 @@ app.post('/api/qq/impersonate', async (req, res) => {
         const rawText = await upstream.text();
         if (!upstream.ok) {
             console.error('[QQ impersonate upstream error]', upstream.status, rawText.slice(0, 500));
-            return res.status(502).json(buildUpstreamErrorPayload({
+            return sendUpstreamError(res, {
                 upstream, rawText, model, operation: 'impersonate', attempt: 1
-            }));
+            });
         }
         let data;
         try { data = JSON.parse(rawText); }
         catch {
-            return res.status(502).json({
+            return res.status(424).json({
                 error: '模型返回的不是有效 JSON',
                 error_code: 'INVALID_UPSTREAM_JSON',
                 error_type: 'invalid_response_error',
@@ -4584,7 +4594,7 @@ app.post('/api/qq/impersonate', async (req, res) => {
         }
         const reply = data?.choices?.[0]?.message?.content?.trim();
         const finishReason = data?.choices?.[0]?.finish_reason;
-        if (!reply) return res.status(502).json({
+        if (!reply) return res.status(424).json({
             error: `模型没有返回内容（finish_reason=${finishReason || '未知'}）`,
             error_code: 'EMPTY_UPSTREAM_RESPONSE',
             error_type: 'empty_response_error',
@@ -4596,7 +4606,7 @@ app.post('/api/qq/impersonate', async (req, res) => {
             timestamp: new Date().toISOString()
         });
         const cleaned = stripThinkingTags(reply);
-        if (!cleaned) return res.status(502).json({
+        if (!cleaned) return res.status(424).json({
             error: `代回只返回了 <think> 思维链，剥离后无可见正文`,
             error_code: 'THINKING_ONLY_RESPONSE',
             error_type: 'empty_visible_response_error',
