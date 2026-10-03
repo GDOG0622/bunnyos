@@ -1,9 +1,12 @@
 const chatLoadPromises = new Map();
 
-async function fetchQqJson(url, fallback) {
+async function fetchQqJson(url, fallback, strict = false) {
     const response = await fetch(url);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    try { return await response.json(); } catch { return fallback; }
+    try { return await response.json(); } catch (error) {
+        if (strict) throw error;
+        return fallback;
+    }
 }
 
 function markChatSummary(chat) {
@@ -31,18 +34,27 @@ async function loadData() {
     try {
         // 首屏只等联系人和聊天摘要；群聊、表情合集等非首屏数据在后台补载。
         const [chars, chats] = await Promise.all([
-            fetchQqJson('/api/qq/characters', []),
-            fetchQqJson('/api/qq/chats?summary=1', []),
+            fetchQqJson('/api/qq/characters', [], true),
+            fetchQqJson('/api/qq/chats?summary=1', [], true),
         ]);
-        state.characters = Array.isArray(chars) ? chars : [];
-        state.chats = Array.isArray(chats) ? chats.map(markChatSummary) : [];
+        if (!Array.isArray(chars) || !Array.isArray(chats)) throw new Error('QQ 数据格式不正确');
+        state.characters = chars;
+        state.chats = chats.map(markChatSummary);
         $('#chat-list')?.querySelector('.qq-core-load-error')?.remove();
         renderContacts();
         renderChats();
+        window.bunnyosQqCoreReady = true;
+        if (window.parent !== window) {
+            window.parent.postMessage({ type: 'bunnyos:qq-core-ready' }, location.origin);
+        }
         loadSecondaryQqData().catch(error => console.warn('[QQ] secondary data load failed', error));
     } catch (err) {
+        window.bunnyosQqCoreReady = false;
         console.warn('[QQ] load core data failed', err);
         renderQqCoreLoadError(err);
+        if (window.parent !== window) {
+            window.parent.postMessage({ type: 'bunnyos:qq-core-error', message: err?.message || 'QQ 数据加载失败' }, location.origin);
+        }
     }
 }
 

@@ -379,9 +379,10 @@
 
         // 桌面空闲时可预热常用 App；只创建 iframe，不显示窗口。
         window.bunnyosPreloadApp = function(app) {
-            if (!app?.id || !app.entryUrl || iframes.has(app.id)) return;
-            getOrCreateIframe(app);
+            if (!app?.id || !app.entryUrl) return null;
+            const iframe = getOrCreateIframe(app);
             trackOpen(app.id);
+            return iframe;
         };
 
         new ResizeObserver(updateAppLayoutMode).observe(appWindow);

@@ -172,6 +172,12 @@
     }
 }
 
+@media (max-width: 768px) and (display-mode: standalone) {
+    .app-window {
+        height: 100vh !important;
+    }
+}
+
 @media (prefers-reduced-motion: reduce) {
     .app-window,
     .app-window.fullscreen .window-header {

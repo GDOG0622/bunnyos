@@ -29,6 +29,19 @@
 </head>
 <body>
 
+    <div class="boot-screen" id="boot-screen" role="status" aria-live="polite">
+        <div class="boot-card">
+            <div class="boot-mark" aria-hidden="true"><span></span><span></span></div>
+            <h1>BunnyOS</h1>
+            <p id="boot-message">正在准备桌面…</p>
+            <div class="boot-progress" aria-hidden="true"><span></span></div>
+            <div class="boot-actions" id="boot-actions" hidden>
+                <button type="button" id="boot-retry">重新加载</button>
+                <button type="button" id="boot-enter">先进入桌面</button>
+            </div>
+        </div>
+    </div>
+
     <div class="top-bar mobile-status">
         <span id="mobile-time">10:00</span>
         <div class="right">

@@ -27,6 +27,89 @@ body {
     color: #333;
 }
 
+.boot-screen {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background: linear-gradient(155deg, #fffdf7, #e8f8f3 65%, #ddf0ef);
+    color: #34514d;
+    transition: opacity 0.25s ease, visibility 0.25s ease;
+}
+
+.boot-screen.is-ready {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.boot-card { width: min(100%, 300px); text-align: center; }
+.boot-card h1 { font-size: 28px; letter-spacing: 0.02em; }
+.boot-card p { min-height: 2.8em; margin-top: 12px; font-size: 14px; line-height: 1.4; }
+.boot-mark {
+    position: relative;
+    width: 78px;
+    height: 68px;
+    margin: 0 auto 20px;
+    border-radius: 44% 44% 48% 48%;
+    background: #fff;
+    box-shadow: 0 10px 30px rgba(50, 92, 84, 0.12);
+}
+.boot-mark span {
+    position: absolute;
+    bottom: 43px;
+    width: 22px;
+    height: 54px;
+    border-radius: 50% 50% 35% 35%;
+    background: #fff;
+}
+.boot-mark span:first-child { left: 12px; transform: rotate(-13deg); }
+.boot-mark span:last-child { right: 12px; transform: rotate(13deg); }
+.boot-progress {
+    height: 4px;
+    margin: 16px auto 0;
+    overflow: hidden;
+    border-radius: 4px;
+    background: rgba(52, 81, 77, 0.12);
+}
+.boot-progress span {
+    display: block;
+    width: 40%;
+    height: 100%;
+    border-radius: inherit;
+    background: #77b9ad;
+    animation: boot-slide 1.5s ease-in-out infinite alternate;
+}
+.boot-screen.has-error .boot-progress { display: none; }
+.boot-actions { display: flex; justify-content: center; gap: 10px; margin-top: 18px; }
+.boot-actions[hidden] { display: none; }
+.boot-actions button {
+    padding: 9px 13px;
+    border: 1px solid #a5c9c2;
+    border-radius: 12px;
+    background: #fff;
+    color: #34514d;
+    cursor: pointer;
+}
+.boot-actions button:first-child { background: #345f57; border-color: #345f57; color: #fff; }
+@keyframes boot-slide { from { transform: translateX(-5%); } to { transform: translateX(155%); } }
+
+html.bunny-dark-mode .boot-screen { background: linear-gradient(155deg, #243a3a, #172a2b); }
+html.bunny-dark-mode .boot-actions button { background: #36504f; color: #fff; border-color: #698b84; }
+html.bunny-dark-mode .boot-actions button:first-child { background: #74b3a6; color: #17302a; }
+
+/* iOS 主屏幕安装版中 100dvh 可能少算底部的独立模式区域。 */
+@media (max-width: 768px) and (display-mode: standalone) {
+    body {
+        height: 100vh;
+    }
+    .boot-screen {
+        height: 100vh;
+    }
+}
+
 button,
 input,
 select,

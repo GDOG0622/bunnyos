@@ -253,7 +253,7 @@ async function loadThemeSettings() {
         return settings;
     } catch (e) {
         console.warn("无法读取主题设置。", e);
-        return {};
+        return null;
     }
 }
 

@@ -60,19 +60,12 @@
                 const apps = await res.json();
                 const resolvedApps = apps.length ? apps : defaultApps;
                 renderApps(resolvedApps);
-                schedulePrimaryAppPreload(resolvedApps);
+                return apps.length ? resolvedApps : null;
             } catch (e) {
                 console.warn('无法读取后端 App 清单，使用默认 App。', e);
                 renderApps(defaultApps);
+                return null;
             }
-        }
-
-        function schedulePrimaryAppPreload(apps) {
-            const primaryApp = apps.find(app => app.id === 'QQ' && app.entryUrl);
-            if (!primaryApp || navigator.connection?.saveData) return;
-            // QQ 是主 App：桌面图标渲染完就立即在后台建 iframe，不再等最长 1.8 秒的 idle 回调。
-            // 用户很快点开时会复用同一个正在加载/已经加载完成的 iframe。
-            setTimeout(() => window.bunnyosPreloadApp?.(primaryApp), 80);
         }
 
         window.renderApps = renderApps;
