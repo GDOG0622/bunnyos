@@ -24,6 +24,7 @@
             function enterDesktop() {
                 bootScreen.classList.add('is-ready');
                 bootScreen.setAttribute('aria-hidden', 'true');
+                setTimeout(() => bootScreen.remove(), 300);
             }
             function waitForQq(reload = false) {
                 return new Promise((resolve, reject) => {

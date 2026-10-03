@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
+    <meta name="bunnyos-shell-version" content="20261003.2">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>BunnyOS</title>
     <link rel="icon" href="/app-icon">
@@ -22,9 +23,26 @@
         }
     </script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="assets/styles/base.css">
-    <link rel="stylesheet" href="assets/styles/desktop.css">
-    <link rel="stylesheet" href="assets/styles/window.css">
+    <!-- 启动遮罩的关键布局随 HTML 一起更新，避免旧 CSS 缓存使它进入桌面文档流。 -->
+    <style id="boot-critical-style">
+        #boot-screen {
+            position: fixed;
+            inset: 0;
+            width: 100%;
+            height: 100dvh;
+            box-sizing: border-box;
+            z-index: 99999;
+            display: grid;
+            place-items: center;
+            overflow: hidden;
+            background-color: #edf8f2;
+        }
+        html.bunny-dark-mode #boot-screen { background-color: #172a2b; }
+        #boot-screen.is-ready { visibility: hidden; pointer-events: none; }
+    </style>
+    <link rel="stylesheet" href="assets/styles/base.css?v=20261003.2">
+    <link rel="stylesheet" href="assets/styles/desktop.css?v=20261003.2">
+    <link rel="stylesheet" href="assets/styles/window.css?v=20261003.2">
     <link rel="stylesheet" href="assets/styles/announcement.css?v=20260923.1">
 </head>
 <body>
@@ -134,12 +152,12 @@
     <audio id="bunnyos-notify-audio" preload="auto" playsinline webkit-playsinline></audio>
 
     <script src="assets/scripts/catbox-proxy.js"></script>
-    <script src="assets/scripts/theme.js"></script>
-    <script src="assets/scripts/apps.js?v=20260819.1"></script>
-    <script src="assets/scripts/window-manager.js?v=20260819.2"></script>
+    <script src="assets/scripts/theme.js?v=20261003.2"></script>
+    <script src="assets/scripts/apps.js?v=20261003.2"></script>
+    <script src="assets/scripts/window-manager.js?v=20261003.2"></script>
     <script src="assets/scripts/notify.js"></script>
     <script src="assets/scripts/announcement.js"></script>
-    <script src="assets/scripts/clock.js"></script>
+    <script src="assets/scripts/clock.js?v=20261003.2"></script>
 </body>
 </html>
 
