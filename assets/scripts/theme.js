@@ -246,9 +246,15 @@ function applyThemeToIframe(iframe) {
 
 async function loadThemeSettings() {
     try {
-        const res = await fetch("/api/settings", { cache: "no-store" });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const settings = await res.json();
+        const pending = window.bunnyosTakeStartupRequest?.('/api/settings');
+        let settings;
+        if (pending) {
+            settings = await pending;
+        } else {
+            const res = await fetch("/api/settings", { cache: "no-store" });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            settings = await res.json();
+        }
         applyThemeSettings(settings);
         return settings;
     } catch (e) {

@@ -59,11 +59,12 @@
                 bootScreen.classList.remove('has-error');
                 try {
                     if (!retry || !qqApp) {
-                        setMessage('正在读取桌面设置…');
-                        const settings = await window.loadThemeSettings?.();
+                        setMessage('正在准备桌面和 QQ…');
+                        const [settings, apps] = await Promise.all([
+                            window.loadThemeSettings?.(),
+                            loadApps(),
+                        ]);
                         if (!settings) throw new Error('无法读取桌面设置');
-                        setMessage('正在准备桌面…');
-                        const apps = await loadApps();
                         if (!apps) throw new Error('无法读取 App 列表');
                         qqApp = apps.find(app => app.id === 'QQ' && app.entryUrl);
                         if (!qqApp) throw new Error('QQ App 未安装或缺少入口');

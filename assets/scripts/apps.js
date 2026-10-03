@@ -55,9 +55,15 @@
 
         async function loadApps() {
             try {
-                const res = await fetch('/api/apps');
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                const apps = await res.json();
+                const pending = window.bunnyosTakeStartupRequest?.('/api/apps');
+                let apps;
+                if (pending) {
+                    apps = await pending;
+                } else {
+                    const res = await fetch('/api/apps', { cache: 'no-store' });
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    apps = await res.json();
+                }
                 const resolvedApps = apps.length ? apps : defaultApps;
                 renderApps(resolvedApps);
                 return apps.length ? resolvedApps : null;

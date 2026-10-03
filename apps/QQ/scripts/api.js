@@ -1,6 +1,11 @@
 const chatLoadPromises = new Map();
 
 async function fetchQqJson(url, fallback, strict = false) {
+    let pending;
+    try {
+        if (window.parent !== window) pending = window.parent.bunnyosTakeStartupRequest?.(url);
+    } catch { /* 独立打开或跨域嵌入时，按原路径请求。 */ }
+    if (pending) return pending;
     const response = await fetch(url);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     try { return await response.json(); } catch (error) {

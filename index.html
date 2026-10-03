@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="bunnyos-shell-version" content="20261003.2">
+    <meta name="bunnyos-shell-version" content="20261003.3">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>BunnyOS</title>
     <link rel="icon" href="/app-icon">
@@ -13,6 +13,26 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="BunnyOS">
+    <script>
+        // 核心数据与样式、脚本同时下载；只在本次启动的内存中交接一次。
+        (() => {
+            const requests = new Map();
+            window.bunnyosTakeStartupRequest = url => {
+                const pending = requests.get(url);
+                requests.delete(url);
+                return pending;
+            };
+            for (const url of ['/api/settings', '/api/apps', '/api/qq/characters', '/api/qq/chats?summary=1']) {
+                const pending = fetch(url, { cache: 'no-store' }).then(response => {
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    return response.json();
+                });
+                // 消费者稍后接管错误并显示重试，避免先完成的失败请求产生未处理 rejection。
+                pending.catch(() => {});
+                requests.set(url, pending);
+            }
+        })();
+    </script>
     <script>
         // 调试：URL 带 ?debug=1 时加载 Eruda 移动端 devtools
         if (location.search.includes('debug=1')) {
@@ -152,12 +172,12 @@
     <audio id="bunnyos-notify-audio" preload="auto" playsinline webkit-playsinline></audio>
 
     <script src="assets/scripts/catbox-proxy.js"></script>
-    <script src="assets/scripts/theme.js?v=20261003.2"></script>
-    <script src="assets/scripts/apps.js?v=20261003.2"></script>
+    <script src="assets/scripts/theme.js?v=20261003.3"></script>
+    <script src="assets/scripts/apps.js?v=20261003.3"></script>
     <script src="assets/scripts/window-manager.js?v=20261003.2"></script>
     <script src="assets/scripts/notify.js"></script>
     <script src="assets/scripts/announcement.js"></script>
-    <script src="assets/scripts/clock.js?v=20261003.2"></script>
+    <script src="assets/scripts/clock.js?v=20261003.3"></script>
 </body>
 </html>
 
