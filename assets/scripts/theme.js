@@ -209,6 +209,8 @@ function applyThemeSettings(settings = bunnyThemeSettings) {
 
     applyViewportWallpaper();
 
+    document.body.classList.toggle("bunny-hide-mobile-status", !Boolean(bunnyThemeSettings.beauty_showMobileStatus));
+
     injectDarkMode(document, bunnyThemeSettings.beauty_darkMode);
     injectFont(document, bunnyThemeSettings);
     // 池里所有 iframe 都要刷

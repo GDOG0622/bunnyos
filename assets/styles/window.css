@@ -137,7 +137,7 @@
         max-width: none !important;
         height: 100dvh !important;
         padding-top: env(safe-area-inset-top, 0px);
-        padding-bottom: env(safe-area-inset-bottom, 0px);
+        padding-bottom: 0;
         max-height: none !important;
         min-width: 0 !important;
         min-height: 0 !important;
@@ -176,6 +176,7 @@
 
     .app-window.chrome-hidden > .window-content {
         height: auto !important;
+        flex-basis: auto !important;
         flex: 1 1 auto;
     }
 }

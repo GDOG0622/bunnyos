@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="bunnyos-shell-version" content="20261003.4">
+    <meta name="bunnyos-shell-version" content="20261003.5">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>BunnyOS</title>
     <link rel="icon" href="/app-icon">
@@ -60,12 +60,12 @@
         html.bunny-dark-mode #boot-screen { background-color: #172a2b; }
         #boot-screen.is-ready { visibility: hidden; pointer-events: none; }
     </style>
-    <link rel="stylesheet" href="assets/styles/base.css?v=20261003.4">
-    <link rel="stylesheet" href="assets/styles/desktop.css?v=20261003.4">
-    <link rel="stylesheet" href="assets/styles/window.css?v=20261003.4">
+    <link rel="stylesheet" href="assets/styles/base.css?v=20261003.5">
+    <link rel="stylesheet" href="assets/styles/desktop.css?v=20261003.5">
+    <link rel="stylesheet" href="assets/styles/window.css?v=20261003.5">
     <link rel="stylesheet" href="assets/styles/announcement.css?v=20260923.1">
 </head>
-<body>
+<body class="bunny-hide-mobile-status">
 
     <div class="boot-screen" id="boot-screen" role="status" aria-live="polite">
         <div class="boot-card">
@@ -172,12 +172,12 @@
     <audio id="bunnyos-notify-audio" preload="auto" playsinline webkit-playsinline></audio>
 
     <script src="assets/scripts/catbox-proxy.js"></script>
-    <script src="assets/scripts/theme.js?v=20261003.4"></script>
-    <script src="assets/scripts/apps.js?v=20261003.4"></script>
-    <script src="assets/scripts/window-manager.js?v=20261003.4"></script>
+    <script src="assets/scripts/theme.js?v=20261003.5"></script>
+    <script src="assets/scripts/apps.js?v=20261003.5"></script>
+    <script src="assets/scripts/window-manager.js?v=20261003.5"></script>
     <script src="assets/scripts/notify.js"></script>
     <script src="assets/scripts/announcement.js"></script>
-    <script src="assets/scripts/clock.js?v=20261003.4"></script>
+    <script src="assets/scripts/clock.js?v=20261003.5"></script>
 </body>
 </html>
 
