@@ -467,6 +467,11 @@ async function prepareMessagesForReply(messages) {
         if (!(/^data:image\//.test(dataUrl)) && id) {
             dataUrl = await getImageBlob(id).catch(() => null) || '';
         }
+        if (!dataUrl && m.image_url) {
+            const response = await fetch(m.image_url);
+            if (!response.ok) throw new Error('读取聊天原图失败');
+            dataUrl = await fileToDataUrl(await response.blob());
+        }
         if (/^data:image\//.test(dataUrl)) {
             latestImage = { id, message: m, dataUrl };
             break;

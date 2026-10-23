@@ -1,9 +1,10 @@
-const path = require('path');
+const { fileForId } = require('./storage-path');
+const { chatVersion, requireChatVersion } = require('./chat-storage');
 
 function createQqSummaryFeature(dependencies) {
     const {
         app, SETTINGS_FILE, CHARACTERS_DIR, CHATS_DIR,
-        cleanName, shortId, readJsonFile, writeJsonFile, readWorldbooks, writeWorldbooks,
+        shortId, readJsonFile, writeJsonFile, readWorldbooks, writeWorldbooks,
         getSummaryWorldbookId, setSummaryWorldbookId,
         getCurrentUserPersona, qqMessageToPromptText, stripThinkingTags, sanitizeErrorDetail,
         buildUpstreamErrorPayload, buildInternalErrorPayload,
@@ -225,10 +226,10 @@ function activeSmallSummaryEntries(book, characterId) {
 
 app.get('/api/qq/summary-settings/:characterId', (req, res) => {
     try {
-        const characterId = cleanName(req.params.characterId);
-        const character = readJsonFile(path.join(CHARACTERS_DIR, `${characterId}.json`), null);
+        const characterId = req.params.characterId;
+        const character = readJsonFile(fileForId(CHARACTERS_DIR, characterId), null);
         if (!character) return res.status(404).json({ error: '未找到角色', error_code: 'CHARACTER_NOT_FOUND' });
-        const chat = readJsonFile(path.join(CHATS_DIR, `${characterId}.json`), { messages: [] });
+        const chat = readJsonFile(fileForId(CHATS_DIR, characterId), { messages: [] });
         const summaryWorldbookId = getSummaryWorldbookId(character);
         const book = readWorldbooks().find(item => item.id === summaryWorldbookId);
         res.json({
@@ -244,34 +245,37 @@ app.get('/api/qq/summary-settings/:characterId', (req, res) => {
 
 app.put('/api/qq/summary-settings/:characterId', (req, res) => {
     try {
-        const characterId = cleanName(req.params.characterId);
-        const characterFile = path.join(CHARACTERS_DIR, `${characterId}.json`);
+        const characterId = req.params.characterId;
+        const characterFile = fileForId(CHARACTERS_DIR, characterId);
         const character = readJsonFile(characterFile, null);
         if (!character) return res.status(404).json({ error: '未找到角色', error_code: 'CHARACTER_NOT_FOUND' });
+        requireChatVersion(fileForId(CHATS_DIR, characterId), req.body?.version);
         const summaryWorldbookId = String(req.body?.summaryWorldbookId || '');
         if (summaryWorldbookId && !readWorldbooks().some(book => book.id === summaryWorldbookId)) {
             return res.status(400).json({ error: '选择的总结世界书不存在', error_code: 'SUMMARY_WORLDBOOK_NOT_FOUND' });
         }
         setSummaryWorldbookId(character, summaryWorldbookId);
         writeJsonFile(characterFile, character);
-        const chatFile = path.join(CHATS_DIR, `${characterId}.json`);
+        const chatFile = fileForId(CHATS_DIR, characterId);
         const chat = readJsonFile(chatFile, { characterId, messages: [] });
         chat.summaryLayerThreshold = clampSummaryThreshold(req.body?.layerThreshold);
         writeJsonFile(chatFile, chat);
-        res.json({ success: true, layerThreshold: chat.summaryLayerThreshold, summaryWorldbookId });
+        res.json({ success: true, layerThreshold: chat.summaryLayerThreshold, summaryWorldbookId, version: chatVersion(chatFile) });
     } catch (error) {
-        res.status(500).json(buildInternalErrorPayload(error, 'summary-settings'));
+        res.status(error.statusCode || 500).json({ ...buildInternalErrorPayload(error, 'summary-settings'), error: error.message, error_code: error.code });
     }
 });
 
 app.post('/api/qq/summarize', async (req, res) => {
     try {
-        const characterId = cleanName(req.body?.characterId || '');
-        const characterFile = path.join(CHARACTERS_DIR, `${characterId}.json`);
-        const chatFile = path.join(CHATS_DIR, `${characterId}.json`);
+        const characterId = req.body?.characterId || '';
+        const characterFile = fileForId(CHARACTERS_DIR, characterId);
+        const chatFile = fileForId(CHATS_DIR, characterId);
         const character = readJsonFile(characterFile, null);
         const chat = readJsonFile(chatFile, null);
         if (!character || !chat) return res.status(404).json({ error: '角色或聊天不存在', error_code: 'SUMMARY_TARGET_NOT_FOUND' });
+        requireChatVersion(chatFile, req.body?.version);
+        const version = chatVersion(chatFile);
         const threshold = clampSummaryThreshold(chat.summaryLayerThreshold);
         const layers = qqSummaryLayers(chat.messages);
         if (layers.length <= threshold) {
@@ -284,7 +288,11 @@ app.post('/api/qq/summarize', async (req, res) => {
             context,
             `当前<user>是“${userPersona?.name || 'user'}”，当前<char>是“${character.name || 'char'}”。请用实际名字替换模板中的<user>和<char>。`
         );
-        const { books, book } = ensureSummaryWorldbook(character, characterFile);
+        // The upstream request can outlive a save on another device; never write its old snapshot back.
+        requireChatVersion(chatFile, version);
+        const latestCharacter = readJsonFile(characterFile, null);
+        if (!latestCharacter) return res.status(404).json({ error: '角色已删除' });
+        const { books, book } = ensureSummaryWorldbook(latestCharacter, characterFile);
         const allIndexes = targetLayers.flatMap(layer => layer.indices).sort((a, b) => a - b);
         const firstMessage = chat.messages[allIndexes[0]];
         const lastMessage = chat.messages[allIndexes[allIndexes.length - 1]];
@@ -311,6 +319,7 @@ app.post('/api/qq/summarize', async (req, res) => {
         const activeCards = activeSmallSummaryEntries(book, characterId);
         res.json({
             triggered: true,
+            version: chatVersion(chatFile),
             entry,
             summaryWorldbookId: book.id,
             summaryWorldbookName: book.name,
@@ -321,14 +330,14 @@ app.post('/api/qq/summarize', async (req, res) => {
         });
     } catch (error) {
         console.error('[QQ summarize]', error);
-        res.status(error.status || 500).json(error.payload || buildInternalErrorPayload(error, 'summarize'));
+        res.status(error.statusCode || error.status || 500).json(error.payload || { ...buildInternalErrorPayload(error, 'summarize'), error: error.message, error_code: error.code });
     }
 });
 
 app.post('/api/qq/summarize/big/preview', async (req, res) => {
     try {
-        const characterId = cleanName(req.body?.characterId || '');
-        const character = readJsonFile(path.join(CHARACTERS_DIR, `${characterId}.json`), null);
+        const characterId = req.body?.characterId || '';
+        const character = readJsonFile(fileForId(CHARACTERS_DIR, characterId), null);
         const books = readWorldbooks();
         const book = books.find(item => item.id === getSummaryWorldbookId(character));
         if (!book) return res.status(400).json({ error: '尚未绑定总结世界书', error_code: 'SUMMARY_WORLDBOOK_NOT_BOUND' });
@@ -350,14 +359,14 @@ app.post('/api/qq/summarize/big/preview', async (req, res) => {
 
 app.post('/api/qq/summarize/big/confirm', (req, res) => {
     try {
-        const characterId = cleanName(req.body?.characterId || '');
+        const characterId = req.body?.characterId || '';
         const content = String(req.body?.content || '').trim();
         const sourceEntryIds = Array.isArray(req.body?.sourceEntryIds) ? req.body.sourceEntryIds.map(String) : [];
         if (!content) return res.status(400).json({ error: '大总结内容不能为空', error_code: 'EMPTY_BIG_SUMMARY' });
         if (sourceEntryIds.length !== SUMMARY_BATCH_CARD_COUNT) {
             return res.status(400).json({ error: '大总结必须对应 5 个小总结', error_code: 'INVALID_BIG_SUMMARY_SOURCE_COUNT' });
         }
-        const character = readJsonFile(path.join(CHARACTERS_DIR, `${characterId}.json`), null);
+        const character = readJsonFile(fileForId(CHARACTERS_DIR, characterId), null);
         const books = readWorldbooks();
         const book = books.find(item => item.id === getSummaryWorldbookId(character));
         if (!book) return res.status(400).json({ error: '尚未绑定总结世界书', error_code: 'SUMMARY_WORLDBOOK_NOT_BOUND' });

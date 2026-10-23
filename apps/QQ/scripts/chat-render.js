@@ -236,6 +236,7 @@ function messageContentHtml(msg, idx) {
         let imageSrc = '';
         if (msg.type === 'image') {
             imageSrc = msg.image
+                || msg.image_url
                 || state.imageAttachments?.[msg.client_image_id]?.dataUrl
                 || '';
         } else {

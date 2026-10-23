@@ -206,19 +206,19 @@ async function onChatImagePicked(e) {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file || !file.type.startsWith('image/') || !state.activeChatId) return;
-    const image = await fileToDataUrl(file);
-    const clientImageId = `img_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-    state.imageAttachments[clientImageId] = { dataUrl: image, consumed: false, characterId: state.activeChatId };
-    // 持久化到 IndexedDB：重载后历史图片仍能正常显示（仅前端用，不进 prompt）
-    putImageBlob(clientImageId, image).catch(err => console.warn('[QQ] IDB 写入图片失败', err));
-    await appendChatMessage({
-        role: 'user',
-        type: 'image',
-        text: '[图片]',
-        image,
-        client_image_id: clientImageId,
-        created_at: Date.now()
-    });
+    const characterId = state.activeChatId;
+    try {
+        const image = await fileToDataUrl(file);
+        const clientImageId = `img_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+        state.imageAttachments[clientImageId] = { dataUrl: image, consumed: false, characterId };
+        putImageBlob(clientImageId, image).catch(err => console.warn('[QQ] IDB 写入图片失败', err));
+        await appendChatMessage({
+            role: 'user', type: 'image', text: '[图片]', image,
+            client_image_id: clientImageId, created_at: Date.now()
+        }, characterId);
+    } catch (error) {
+        toast('图片尚未保存到服务器：' + error.message);
+    }
 }
 
 function openPopModal(id) {
@@ -246,37 +246,11 @@ async function sendPaidChatMessage({ characterId, cost, message, reason, button 
     let outcomeKnown = false;
     if (button) button.disabled = true;
     try {
-        const data = await queueChatOperation(characterId, async () => {
-            const res = await fetch(`/api/qq/chats/${encodeURIComponent(characterId)}/paid-message`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ cost, reason, requestId, message: paidMessage })
-            });
-            const payload = await res.json().catch(() => ({}));
-            if (!res.ok) {
-                outcomeKnown = true;
-                const error = new Error(payload?.error || `HTTP ${res.status}`);
-                error.status = res.status;
-                error.balance = payload?.balance;
-                throw error;
-            }
-            if (!payload?.message) throw new Error('服务器返回不完整，请安全重试');
-            outcomeKnown = true;
-            return payload;
+        const data = await mutateChat(characterId, `/api/qq/chats/${encodeURIComponent(characterId)}/paid-message`, 'POST', {
+            cost, reason, requestId, message: paidMessage
         });
-        let chat = state.chats.find(item => item.characterId === characterId);
-        if (!chat) {
-            chat = { characterId, messages: [], _messagesLoaded: true };
-            state.chats.unshift(chat);
-        }
-        chat.messages = Array.isArray(chat.messages) ? chat.messages : [];
-        if (!chat.messages.some(item => item?.client_request_id === requestId || item?.id === requestId)) {
-            chat.messages.push(data.message || paidMessage);
-        }
-        chat.updated_at = data.chat?.updated_at || Date.now();
-        chat.lastMessage = chat.messages[chat.messages.length - 1] || null;
-        chat.messageCount = chat.messages.length;
-        chat._messagesLoaded = true;
+        if (!data.message) throw new Error('服务器返回不完整，请安全重试');
+        outcomeKnown = true;
         if (typeof data.balance === 'number') state.walletBalance = data.balance;
         renderChats();
         if (state.activeChatId === characterId) renderActiveChat();
@@ -686,6 +660,8 @@ function queueChatOperation(characterId, operation) {
 
 function mergeSavedChat(saved, chat, expectedRevision) {
     const currentChat = state.chats.find(item => item.characterId === saved.characterId) || chat;
+    chat.version = saved.version;
+    if (currentChat) currentChat.version = saved.version;
     // 请求发送后若又有本地修改，旧响应只作为落盘确认，不能覆盖更新后的界面。
     if (currentChat && currentChat._localRevision !== expectedRevision) return saved;
     const localMessages = currentChat?.messages || [];
@@ -703,7 +679,7 @@ function mergeSavedChat(saved, chat, expectedRevision) {
         }
         return srvMsg;
     });
-    const localChat = {
+    let localChat = {
         ...saved,
         _localRevision: expectedRevision,
         messages: mergedMessages,
@@ -711,6 +687,7 @@ function mergeSavedChat(saved, chat, expectedRevision) {
         messageCount: mergedMessages.length,
         _messagesLoaded: true,
     };
+    if (currentChat) localChat = Object.assign(currentChat, localChat);
     const index = state.chats.findIndex(item => item.characterId === saved.characterId);
     if (index >= 0) state.chats[index] = localChat;
     else state.chats.unshift(localChat);
@@ -720,27 +697,67 @@ function mergeSavedChat(saved, chat, expectedRevision) {
 
 async function saveChat(chat) {
     if (!chat?.characterId) throw new Error('缺少聊天 ID');
-    const revision = (Number(chat._localRevision) || 0) + 1;
-    chat._localRevision = revision;
-    const persistMessages = (chat.messages || []).map(message => {
-        if (message?.type !== 'image') return message;
-        // 只剥 dataURL，保留 client_image_id 让 localStorage 缓存可找回
-        const clean = { ...message, text: message.text || '[图片]' };
-        delete clean.image;
-        return clean;
-    });
-    const requestBody = JSON.stringify({ messages: persistMessages });
+    chat._localRevision = (Number(chat._localRevision) || 0) + 1;
     const characterId = chat.characterId;
     return queueChatOperation(characterId, async () => {
+        const current = state.chats.find(item => item.characterId === characterId) || chat;
+        if (current._saveConflict) throw new Error('聊天保存已暂停，请复制当前修改后重新加载');
+        const revision = current._localRevision;
+        const persistMessages = await Promise.all((current.messages || []).map(async message => {
+            if (message?.type !== 'image') return { ...message };
+            const clean = { ...message, text: message.text || '[图片]' };
+            if (clean.image_url) delete clean.image;
+            else if (!clean.image) clean.image = await getImageBlob(clean.client_image_id);
+            return clean;
+        }));
         const res = await fetch(`/api/qq/chats/${encodeURIComponent(characterId)}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: requestBody,
+            body: JSON.stringify({ messages: persistMessages, version: current.version ?? null }),
         });
-        const saved = await res.json().catch(() => null);
-        if (!res.ok || !saved) throw new Error(saved?.error || `HTTP ${res.status}`);
-        const merged = mergeSavedChat(saved, chat, revision);
+        const saved = await readChatMutationResponse(res, current);
+        const merged = mergeSavedChat(saved, current, revision);
         if (state.activeChatId === characterId && merged !== saved) renderActiveChat();
         return merged;
+    });
+}
+
+async function readChatMutationResponse(response, chat) {
+    const data = await response.json().catch(() => null);
+    if (data?.error_code === 'CHAT_VERSION_CONFLICT') {
+        chat._saveConflict = true;
+        toast(data.error);
+    }
+    if (!response.ok || !data) {
+        const error = new Error(data?.error || `HTTP ${response.status}`);
+        error.status = response.status;
+        error.balance = data?.balance;
+        throw error;
+    }
+    return data;
+}
+
+async function mutateChat(characterId, url, method, body = {}, apply, signal) {
+    await ensureChatLoaded(characterId);
+    return queueChatOperation(characterId, async () => {
+        const chat = state.chats.find(item => item.characterId === characterId);
+        if (chat._saveConflict) throw new Error('请复制当前修改后重新加载聊天');
+        const revision = chat._localRevision;
+        const response = await fetch(url, {
+            method,
+            signal,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...body, version: chat.version ?? null })
+        });
+        const data = await readChatMutationResponse(response, chat);
+        if (chat._localRevision !== revision) {
+            chat._saveConflict = true;
+            throw new Error('操作期间聊天发生修改，当前修改已保留，请复制后重新加载');
+        }
+        if (apply) apply(data, chat);
+        if (data.chat) mergeSavedChat(data.chat, chat, revision);
+        else if (Array.isArray(data.messages)) mergeSavedChat(data, chat, revision);
+        if (data.version !== undefined) chat.version = data.version;
+        return data;
     });
 }

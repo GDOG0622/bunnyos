@@ -199,14 +199,7 @@ async function renderChatSettings() {
 async function clearChatMessages(charId) {
     if (!confirm('确定清空这段聊天记录？\n聊天本身保留，但所有消息会删除，不可恢复。')) return;
     try {
-        const res = await fetch(`/api/qq/chats/${encodeURIComponent(charId)}/messages`, { method: 'DELETE' });
-        if (!res.ok) {
-            const d = await res.json().catch(() => ({}));
-            toast(d.error || '清空失败');
-            return;
-        }
-        const chat = state.chats.find(c => c.characterId === charId);
-        if (chat) { chat.messages = []; chat.updated_at = Date.now(); }
+        await mutateChat(charId, `/api/qq/chats/${encodeURIComponent(charId)}/messages`, 'DELETE');
         renderChats();
         renderActiveChat();
         closeChatSettings();
@@ -220,17 +213,7 @@ async function toggleChatHidden(charId) {
     try {
         const chat = state.chats.find(c => c.characterId === charId);
         const nextHidden = !chat?.hidden;
-        const res = await fetch(`/api/qq/chats/${encodeURIComponent(charId)}/hidden`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ hidden: nextHidden })
-        });
-        if (!res.ok) {
-            const d = await res.json().catch(() => ({}));
-            toast(d.error || '更新失败');
-            return;
-        }
-        if (chat) chat.hidden = nextHidden;
+        await mutateChat(charId, `/api/qq/chats/${encodeURIComponent(charId)}/hidden`, 'PATCH', { hidden: nextHidden });
         renderChats();
         renderActiveChat();
         await renderChatSettings();
@@ -244,13 +227,9 @@ async function deleteChat(charId) {
     const character = state.characters.find(c => c.id === charId);
     if (!confirm(`确定删除与「${character?.name || charId}」的聊天？\n聊天记录 + 该 char 的美化绑定 + 专属背景都会清除，不可恢复（角色卡本身保留）。`)) return;
     try {
-        const res = await fetch(`/api/qq/chats/${encodeURIComponent(charId)}`, { method: 'DELETE' });
-        if (!res.ok) {
-            const d = await res.json().catch(() => ({}));
-            toast(d.error || '删除失败');
-            return;
-        }
-        state.chats = state.chats.filter(c => c.characterId !== charId);
+        await mutateChat(charId, `/api/qq/chats/${encodeURIComponent(charId)}`, 'DELETE', {}, () => {
+            state.chats = state.chats.filter(c => c.characterId !== charId);
+        });
         if (state.activeChatId === charId) state.activeChatId = '';
         renderChats();
         renderActiveChat();

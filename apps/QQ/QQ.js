@@ -8,9 +8,9 @@
     bindEvents();
     loadPersonas();
     loadPromptPresetSetting();
-    loadData();
+    migrateCachedChatImagesToServer()
+        .catch(error => toast('旧图片迁移未完成：' + error.message))
+        .finally(() => loadData());
     loadGlobalSkin();
-    // 把老的 localStorage 图片缓存迁到 IDB（一次性，迁完 localStorage 释放）
-    if (typeof migrateLocalStorageImagesToIdb === 'function') migrateLocalStorageImagesToIdb();
     notifyNavState();
 });
