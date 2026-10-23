@@ -10,6 +10,8 @@
         const mobileDesktop = document.getElementById('mobile-desktop');
         let installedApps = [];
         window.installedApps = installedApps;
+        let resolveAppsReady;
+        window.bunnyosAppsReady = new Promise(resolve => { resolveAppsReady = resolve; });
 
         function createAppItem(app) {
             const item = document.createElement('button');
@@ -66,6 +68,7 @@
                 }
                 const resolvedApps = apps.length ? apps : defaultApps;
                 renderApps(resolvedApps);
+                if (apps.length) resolveAppsReady(resolvedApps);
                 return apps.length ? resolvedApps : null;
             } catch (e) {
                 console.warn('无法读取后端 App 清单，使用默认 App。', e);

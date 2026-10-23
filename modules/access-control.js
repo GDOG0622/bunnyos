@@ -48,7 +48,7 @@ function installAccessControl(app, { rootDir, env = process.env }) {
     });
 }
 
-function installStaticFiles(app, rootDir) {
+function installStaticFiles(app, rootDir, storageDir = rootDir) {
     const mediaPrefixes = ['/data/assets/', '/data/qq/beauty-backgrounds/', '/data/qq/char-backgrounds/', '/assets/backgrounds/', '/assets/app-icons/'];
     app.use((req, res, next) => {
         let requested;
@@ -60,7 +60,8 @@ function installStaticFiles(app, rootDir) {
             res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'; style-src 'unsafe-inline'");
             res.setHeader('Cache-Control', 'private, no-store');
         }
-        try { safeStoragePath(rootDir, requested.replace(/^\/+/, '') || 'index.html'); } catch { return res.sendStatus(404); }
+        const fileRoot = mediaPrefixes.some(prefix => normalized.startsWith(prefix)) ? storageDir : rootDir;
+        try { safeStoragePath(fileRoot, requested.replace(/^\/+/, '') || 'index.html'); } catch { return res.sendStatus(404); }
         next();
     });
     const options = {
@@ -73,7 +74,10 @@ function installStaticFiles(app, rootDir) {
             }
         }
     };
-    for (const directory of ['apps', 'assets', 'data/assets', 'data/qq/beauty-backgrounds', 'data/qq/char-backgrounds']) {
+    for (const directory of ['data/assets', 'data/qq/beauty-backgrounds', 'data/qq/char-backgrounds', 'assets/backgrounds', 'assets/app-icons']) {
+        app.use(`/${directory}`, express.static(path.join(storageDir, directory), options));
+    }
+    for (const directory of ['apps', 'assets']) {
         app.use(`/${directory}`, express.static(path.join(rootDir, directory), options));
     }
     for (const name of ['index.html', 'service-worker.js', 'manifest.webmanifest', 'icon.png', 'icon.jpg', 'icon.jpeg', 'icon.gif', 'icon.webp', 'icon.svg', 'icon.ico']) {

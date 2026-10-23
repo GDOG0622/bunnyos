@@ -31,7 +31,6 @@
                     const timer = setTimeout(() => finish(new Error('QQ 加载超时，请检查网络后重试')), 20000);
                     function onMessage(event) {
                         if (event.origin !== location.origin || event.source !== qqIframe?.contentWindow) return;
-                        if (event.data?.type === 'bunnyos:qq-core-ready') finish();
                         if (event.data?.type === 'bunnyos:qq-core-error') finish(new Error(event.data.message || 'QQ 数据加载失败'));
                     }
                     function finish(error) {
@@ -42,15 +41,7 @@
                     }
                     window.addEventListener('message', onMessage);
                     qqIframe = window.bunnyosPreloadApp?.(qqApp);
-                    if (!qqIframe) {
-                        finish(new Error('QQ 页面无法加载'));
-                    } else if (reload) {
-                        qqIframe.src = qqApp.entryUrl;
-                    } else {
-                        try {
-                            if (qqIframe.contentWindow?.bunnyosQqCoreReady) finish();
-                        } catch (error) { /* 跨域 App 不读取内部状态 */ }
-                    }
+                    window.bunnyosWaitForQq(qqApp, reload).then(() => finish(), finish);
                 });
             }
             async function start(retry = false) {

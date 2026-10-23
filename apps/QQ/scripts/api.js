@@ -96,6 +96,7 @@ async function ensureChatLoaded(characterId) {
 async function activateChat(characterId) {
     if (!characterId) return null;
     state.activeChatId = characterId;
+    applyCharBeauty(characterId);
     setChatListCollapsed(true);
     renderChats();
     renderActiveChat();

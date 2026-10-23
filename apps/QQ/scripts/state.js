@@ -38,7 +38,6 @@ const state = {
     selectedDeleteIndexes: new Set(),
     messageMenuOpenedAt: 0,
     pageHistory: ['main'],
-    imageAttachments: {},
     chatVisibleLayers: {},
     activeVisibleMessageStart: 0,
     loadingEarlierChatLayers: false,

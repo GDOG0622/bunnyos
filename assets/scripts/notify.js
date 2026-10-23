@@ -192,7 +192,7 @@
         const appId = params.get('openApp');
         const cid = params.get('characterId');
         if (appId) {
-            setTimeout(() => window.bunnyosOpenAppAndFocusChat?.(appId, cid || ''), 800);
+            window.bunnyosOpenAppAndFocusChat?.(appId, cid || '');
         }
     } catch {}
 })();

@@ -1,21 +1,26 @@
 # BunnyOS Storage And Assets
 
-BunnyOS is single-user. Persistent state should live in local project files, not browser `localStorage`.
+BunnyOS serves one user across devices. Persistent state lives outside the code directory, in `BUNNYOS_STORAGE_DIR` (default: the sibling `<code-directory>-data`). Paths below are relative to that storage root. Browser drafts and legacy image migration are the only temporary local state.
 
 ## Primary Storage
 
 | Path | Purpose |
 | --- | --- |
 | `settings.json` | Global settings saved by Settings App. |
+| `server-env.json` | PM2 environment settings and secrets; excluded from portable backups. |
+| `data/wallet.json` | Balance, idempotent transaction records and pending chat/beauty projections. |
 | `data/characters/` | Character cards. |
 | `data/chats/` | Chat histories. |
 | `data/presets/image-prompts.json` | Image prompt presets. |
 | `data/userpersonas/` | User personas. |
-| `data/worlds/` | World/lorebook data. |
+| `data/worldbooks/` | Worldbooks with stable IDs and per-book version checks. |
+| `data/worlds/` | Legacy worldbook collection retained after one-time migration. |
 | `data/assets/` | Media resource pool for future user/imported assets. |
 | `data/backups/` | Backups. |
 | `assets/backgrounds/` | Currently used desktop wallpaper files. |
 | `assets/app-icons/` | Currently used uploaded App icon files. |
+
+Stop an old service before running `node scripts/migrate-storage.js` once. Subsequent code updates never copy or restore user data. Settings writes use `{version, changes}`; conflicts preserve the draft. New chat images are server references; the Settings migration entry point uploads legacy browser originals.
 
 ## Settings Fields
 

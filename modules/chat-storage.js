@@ -24,7 +24,11 @@ function atomicWriteJson(file, data) {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const temporary = `${file}.${crypto.randomUUID()}.tmp`;
     try {
-        fs.writeFileSync(temporary, JSON.stringify(data, null, 2), { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+        const descriptor = fs.openSync(temporary, 'wx', 0o600);
+        try {
+            fs.writeFileSync(descriptor, JSON.stringify(data, null, 2), 'utf8');
+            fs.fsyncSync(descriptor);
+        } finally { fs.closeSync(descriptor); }
         fs.renameSync(temporary, file);
     } finally {
         fs.rmSync(temporary, { force: true });

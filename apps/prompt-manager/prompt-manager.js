@@ -14,8 +14,6 @@ const state = {
     worldInfoSettings: {},
     currentBookId: '',
     qqGlobalWorldbookIds: [],
-    markerPreviewCache: null,
-    markerExpanded: { world_info: false, memories: false },
     variables: {},
     editingMode: '',
     editingId: '',
@@ -29,7 +27,7 @@ const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const persistenceQueues = new Map();
 
 window.addEventListener('beforeunload', event => {
-    if (!state.dirty) return;
+    if (!state.dirty && !state.worldbookBooks.some(book => book._dirty)) return;
     event.preventDefault();
     event.returnValue = '';
 });
@@ -73,23 +71,7 @@ const markerTemplates = {
     chatHistory: '<chat_history>\n{{chat_history}}\n</chat_history>'
 };
 
-const markerSlotByIdentifier = {
-    worldInfoAfter: 'world_info',
-    worldInfoBefore: 'world_info',
-    memory: 'memories'
-};
-
-const builtinPrompts = [
-    { identifier: 'bunnyosRealtime', name: '实时模式', content: '', role: 'system' },
-    { identifier: 'worldInfoBefore', name: '世界书·角色前', content: '', role: 'system' },
-    { identifier: 'charDescription', name: 'CHAR人设', content: '', role: 'system' },
-    { identifier: 'worldInfoAfter', name: '世界书·角色后', content: '', role: 'system' },
-    { identifier: 'personaDescription', name: 'USER人设', content: '', role: 'system' },
-    { identifier: 'memory', name: '记忆', content: '', role: 'system' },
-    { identifier: 'onlinePrivateChat', name: '线上·私聊', content: '', role: 'system' },
-    { identifier: 'onlineGroupChat', name: '线上·群聊', content: '', role: 'system' },
-    { identifier: 'chatHistory', name: '聊天记录', content: '', role: 'system' }
-];
+const builtinPrompts = StPreset.builtins;
 
 const builtinIds = new Set(builtinPrompts.map(item => item.identifier));
 const editableBuiltinTags = {
@@ -97,7 +79,6 @@ const editableBuiltinTags = {
     onlinePrivateChat: 'private_chat_protocol',
     onlineGroupChat: 'group_chat_protocol'
 };
-const legacyBuiltinIds = new Set(['charPersonality']);
 
 const variableDocs = [
     ['{{now}}', '<now>', '当前完整时间，例如 2026-06-19 14:23:08'],
@@ -262,87 +243,7 @@ function onSamplingInput(field) {
 }
 
 function normalizeCurrentPreset() {
-    if (!state.currentPreset) return;
-    if (!Array.isArray(state.currentPreset.prompts)) state.currentPreset.prompts = [];
-    getPromptOrder();
-    state.currentPreset.extensions = state.currentPreset.extensions || {};
-    if (!Array.isArray(state.currentPreset.extensions.bunnyosPromptGroups)) {
-        state.currentPreset.extensions.bunnyosPromptGroups = [];
-    }
-    removeLegacyBuiltins();
-    const promptMap = getPromptMap();
-    for (const item of builtinPrompts) {
-        if (!promptMap.has(item.identifier)) {
-            state.currentPreset.prompts.push({
-                identifier: item.identifier,
-                name: item.name,
-                enabled: true,
-                injection_position: 0,
-                injection_depth: 4,
-                injection_order: 100,
-                role: item.role,
-                content: state.editableBuiltinDefaults[item.identifier] ?? item.content,
-                system_prompt: true,
-                marker: true,
-                forbid_overrides: true,
-                injection_trigger: ''
-            });
-            state.dirty = true;
-        } else {
-            const prompt = promptMap.get(item.identifier);
-            if (prompt.name !== item.name) state.dirty = true;
-            prompt.name = item.name;
-            prompt.role = prompt.role || item.role;
-            prompt.marker = true;
-            prompt.system_prompt = true;
-            prompt.forbid_overrides = true;
-        }
-    }
-    const order = getPromptOrder();
-    for (const item of builtinPrompts) {
-        if (!order.some(entry => entry.identifier === item.identifier)) {
-            order.unshift({ identifier: item.identifier, enabled: true });
-        }
-    }
-    order.forEach(entry => {
-        if (builtinIds.has(entry.identifier)) entry.enabled = true;
-    });
-    if (!state.currentPreset.extensions.bunnyosBuiltinArranged) {
-        const builtinEntries = [];
-        const rest = [];
-        for (const entry of order) {
-            if (builtinIds.has(entry.identifier)) builtinEntries.push({ ...entry, enabled: true });
-            else rest.push(entry);
-        }
-        const seen = new Set();
-        const uniqueBuiltin = builtinPrompts
-            .map(item => builtinEntries.find(entry => entry.identifier === item.identifier) || { identifier: item.identifier, enabled: true })
-            .filter(entry => {
-                if (seen.has(entry.identifier)) return false;
-                seen.add(entry.identifier);
-                return true;
-            });
-        state.currentPreset.prompt_order[0].order = [...uniqueBuiltin, ...rest.filter(entry => !seen.has(entry.identifier))];
-        state.currentPreset.extensions.bunnyosBuiltinArranged = true;
-        state.dirty = true;
-    }
-}
-
-function removeLegacyBuiltins() {
-    const beforePrompts = state.currentPreset.prompts.length;
-    state.currentPreset.prompts = state.currentPreset.prompts.filter(prompt => !legacyBuiltinIds.has(prompt.identifier));
-    state.currentPreset.prompt_order.forEach(group => {
-        const beforeOrder = group.order?.length || 0;
-        group.order = (group.order || []).filter(entry => !legacyBuiltinIds.has(entry.identifier));
-        if (group.order.length !== beforeOrder) state.dirty = true;
-    });
-    state.currentPreset.extensions.bunnyosPromptGroups = getPromptGroups()
-        .map(group => ({
-            ...group,
-            itemIds: group.itemIds.filter(id => !legacyBuiltinIds.has(id))
-        }))
-        .filter(group => group.itemIds.length > 1);
-    if (state.currentPreset.prompts.length !== beforePrompts) state.dirty = true;
+    if (state.currentPreset && StPreset.normalize(state.currentPreset, state.editableBuiltinDefaults)) state.dirty = true;
 }
 
 async function setCurrentPreset(id) {
@@ -801,7 +702,7 @@ async function refreshCurrentFromSource() {
 
 async function deleteCurrentPreset() {
     if (!state.currentPresetId || !await askConfirm('确定删除当前预设吗？')) return;
-    const res = await fetch(`/api/st-presets/${encodeURIComponent(state.currentPresetId)}`, { method: 'DELETE' });
+    const res = await fetch(`/api/st-presets/${encodeURIComponent(state.currentPresetId)}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version: book._version }) });
     if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         toast(data.error || '删除失败');
@@ -1054,32 +955,50 @@ function deleteCurrentEditorItem() {
     }
 }
 
-function openPreview() {
-    $('#preview-title').textContent = '装配预览';
-    $('#assembly-preview').textContent = buildAssemblyPreview();
-    renderMarkerToggles();
+async function openPreview() {
+    $('#preview-title').textContent = '实际装配预览';
     $('#preview-modal').classList.remove('hidden');
-    notifyNavState();
-}
-
-function renderMarkerToggles() {
+    $('#assembly-preview').textContent = '正在装配…';
     const wrap = $('#preview-marker-toggles');
     wrap.innerHTML = '';
     wrap.classList.remove('hidden');
-    ['world_info', 'memories'].forEach(slot => {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'preview-marker-toggle';
-        btn.textContent = `${state.markerExpanded[slot] ? '收起' : '展开'} ${slot}`;
-        btn.addEventListener('click', () => toggleMarkerExpansion(slot));
-        wrap.appendChild(btn);
-    });
-    const itemization = document.createElement('button');
-    itemization.type = 'button';
-    itemization.className = 'preview-marker-toggle';
-    itemization.textContent = '最近一次 Prompt Itemization';
-    itemization.addEventListener('click', showLastContextItemization);
-    wrap.appendChild(itemization);
+    notifyNavState();
+    try {
+        const response = await fetch('/api/qq/characters');
+        if (!response.ok) throw new Error('读取角色失败');
+        const characters = await response.json();
+        const select = document.createElement('select');
+        select.setAttribute('aria-label', '预览聊天');
+        select.innerHTML = '<option value="">空聊天</option>';
+        for (const character of characters) {
+            const option = document.createElement('option');
+            option.value = character.id;
+            option.textContent = character.name || character.id;
+            select.appendChild(option);
+        }
+        select.value = state.previewCharacterId || '';
+        select.addEventListener('change', () => { state.previewCharacterId = select.value; refreshAssemblyPreview(); });
+        wrap.appendChild(select);
+        const itemization = document.createElement('button');
+        itemization.textContent = '最近一次 Prompt Itemization';
+        itemization.addEventListener('click', showLastContextItemization);
+        wrap.appendChild(itemization);
+        await refreshAssemblyPreview();
+    } catch (error) { $('#assembly-preview').textContent = '预览失败：' + error.message; }
+}
+
+let previewRequest = 0;
+async function refreshAssemblyPreview() {
+    const request = ++previewRequest;
+    try {
+        const response = await fetch('/api/qq/prompt-preview', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ characterId: state.previewCharacterId || '', preset: state.currentPreset, presetId: state.currentPresetId })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || '装配失败');
+        if (request === previewRequest) $('#assembly-preview').textContent = scrubPreviewContent(data.promptText || '');
+    } catch (error) { if (request === previewRequest) $('#assembly-preview').textContent = '预览失败：' + error.message; }
 }
 
 function showLastContextItemization() {
@@ -1093,20 +1012,6 @@ function showLastContextItemization() {
     $('#assembly-preview').textContent = JSON.stringify(value, null, 2);
 }
 
-async function toggleMarkerExpansion(slot) {
-    state.markerExpanded[slot] = !state.markerExpanded[slot];
-    if (state.markerExpanded[slot] && !state.markerPreviewCache) {
-        try {
-            const res = await fetch('/api/qq/preset-marker-preview');
-            state.markerPreviewCache = res.ok ? await res.json() : { world_info: '', memories: '' };
-        } catch {
-            state.markerPreviewCache = { world_info: '', memories: '' };
-        }
-    }
-    $('#assembly-preview').textContent = buildAssemblyPreview();
-    renderMarkerToggles();
-}
-
 function closePreview() {
     $('#preview-modal').classList.add('hidden');
     $('#preview-marker-toggles').classList.add('hidden');
@@ -1118,21 +1023,6 @@ async function copyPreview() {
     toast('已复制预览');
 }
 
-function buildAssemblyPreview() {
-    if (!state.currentPreset) return '';
-    const promptMap = getPromptMap();
-    const blocks = [];
-    getPromptOrder().forEach((entry) => {
-        if (!entry.enabled) return;
-        const prompt = promptMap.get(entry.identifier);
-        if (!prompt) return;
-        const body = buildPromptDisplayContent(prompt);
-        if (!body.trim() && !prompt.marker) return;
-        blocks.push(body);
-    });
-    return blocks.join('\n\n');
-}
-
 function buildPromptDisplayContent(prompt) {
     if (!prompt) return '';
     if (isEditableBuiltinPrompt(prompt.identifier)) {
@@ -1140,10 +1030,6 @@ function buildPromptDisplayContent(prompt) {
         return `<${tag}>\n${scrubPreviewContent(prompt.content || '').trim()}\n</${tag}>`;
     }
     if (prompt.marker) {
-        const slot = markerSlotByIdentifier[prompt.identifier];
-        if (slot && state.markerExpanded[slot] && state.markerPreviewCache) {
-            return state.markerPreviewCache[slot] || `<${slot}>\n（当前没有任何选中世界书条目）\n</${slot}>`;
-        }
         return markerTemplates[prompt.identifier] || `[动态插入：${markerLabels[prompt.identifier] || `${prompt.identifier} 对应内容`}]`;
     }
     return scrubPreviewContent(prompt.content || '');
@@ -1160,7 +1046,10 @@ async function loadWorldbooks() {
         fetch('/api/qq/global-worldbooks')
     ]);
     const booksData = booksRes.ok ? await booksRes.json() : { books: [] };
-    state.worldbookBooks = Array.isArray(booksData.books) ? booksData.books : [];
+    const loadedBooks = Array.isArray(booksData.books) ? booksData.books : [];
+    const drafts = new Map(state.worldbookBooks.filter(book => book._dirty).map(book => [book.id, book]));
+    state.worldbookBooks = loadedBooks.map(book => drafts.get(book.id) || book);
+    for (const [id, draft] of drafts) if (!loadedBooks.some(book => book.id === id)) state.worldbookBooks.push(draft);
     if (!state.worldbookBooks.find(book => book.id === state.currentBookId)) {
         state.currentBookId = state.worldbookBooks[0]?.id || '';
     }
@@ -1279,7 +1168,6 @@ async function saveGlobalChips() {
             });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
         });
-        state.markerPreviewCache = null;
         return true;
     } catch (error) {
         console.warn('[prompt-manager] save global worldbooks failed', error);
@@ -1374,7 +1262,6 @@ function renderWorldbookEntries() {
             book.updated_at = Date.now();
             saveWorldbooks();
             renderWorldbookMeta();
-            state.markerPreviewCache = null;
             row.classList.toggle('disabled', entry.enabled === false);
         });
         row.querySelector('.prompt-main')?.addEventListener('click', () => openWorldbookEditor(entry.id));
@@ -1467,28 +1354,30 @@ function saveWorldbookDraft(draft) {
     saveWorldbooks();
     renderWorldbookEntries();
     renderWorldbookMeta();
-    state.markerPreviewCache = null;
 }
 
 async function saveWorldbooks() {
     const current = getCurrentBook();
     if (!current) return false;
-    const body = JSON.stringify({ books: [current] });
+    const changes = JSON.parse(JSON.stringify({ name: current.name, entries: current.entries }));
+    current._dirty = true;
     try {
-        await queuePersistence('worldbooks', async () => {
-            const res = await fetch('/api/worldbooks', {
-                method: 'POST',
+        await queuePersistence(`worldbook:${current.id}`, async () => {
+            if (current._saveConflict) throw new Error('请保留当前草稿，重新加载世界书后再保存');
+            const res = await fetch(`/api/worldbooks/books/${encodeURIComponent(current.id)}`, {
+                method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
-                body
+                body: JSON.stringify({ version: current._version, changes })
             });
-            if (!res.ok) {
-                const data = await res.json().catch(() => ({}));
-                throw new Error(data.error || `HTTP ${res.status}`);
-            }
+            const data = await res.json().catch(() => ({}));
+            if (res.status === 409) current._saveConflict = true;
+            if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+            current._version = data.book._version;
+            current._dirty = JSON.stringify(changes) !== JSON.stringify({ name: current.name, entries: current.entries });
         });
         return true;
     } catch (error) {
-        console.warn('[prompt-manager] save worldbooks failed', error);
+        console.warn('[prompt-manager] save worldbook failed', error);
         toast(`世界书保存失败：${error.message}`);
         return false;
     }
@@ -1509,7 +1398,6 @@ function copyWorldbookEntry(entryId) {
     saveWorldbooks();
     renderWorldbookEntries();
     renderWorldbookMeta();
-    state.markerPreviewCache = null;
     toast('已复制条目');
 }
 
@@ -1526,7 +1414,6 @@ async function deleteWorldbook(entryId) {
     state.editingId = '';
     renderWorldbookEntries();
     renderWorldbookMeta();
-    state.markerPreviewCache = null;
     notifyNavState();
 }
 
@@ -1561,7 +1448,6 @@ function moveWorldbookEntry(from, to) {
     book.updated_at = Date.now();
     saveWorldbooks();
     renderWorldbookEntries();
-    state.markerPreviewCache = null;
 }
 
 let worldbookTouchDragState = null;
@@ -1642,7 +1528,7 @@ async function deleteCurrentBook() {
     const book = getCurrentBook();
     if (!book) return;
     if (!await askConfirm(`删除整本「${book.name || '未命名'}」？所有条目会一起消失，被绑定它的角色卡和全局列表也会自动清理。`)) return;
-    const res = await fetch(`/api/worldbooks/books/${encodeURIComponent(book.id)}`, { method: 'DELETE' });
+    const res = await fetch(`/api/worldbooks/books/${encodeURIComponent(book.id)}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version: book._version }) });
     if (!res.ok) {
         toast('删除失败');
         return;

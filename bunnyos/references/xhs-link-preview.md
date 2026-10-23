@@ -34,8 +34,8 @@
 
 1. `extractFirstLink(rawText)` 识别 `https://...` 和裸域名链接。
 2. `normalizeInputLink(url)` 给裸链接补 `https://`。
-3. 先尝试前端直抓 `tryFrontendLinkPreview(url, rawText)`。
-4. 前端失败后调用后端 `POST /api/qq/link-preview`。
+3. 先尝试浏览器直抓 HTML（`fetchFrontendHtml`），保留设备网络出口的抓取机会。
+4. 将 HTML、最终 URL 与分享文案交给 `POST /api/qq/link-preview`。跳转、OG、小红书状态解析、通用标题判断和封面缓存统一在服务端执行；浏览器抓取失败时沿用服务端原生抓取及各平台兜底。
 5. 后端返回后，前端保存一条 `type: "link"` 消息，字段包括：
    - `url`
    - `title`

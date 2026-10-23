@@ -22,11 +22,11 @@ function formatCC(n) {
 }
 
 // 通用钱包加减（供红包 / 商城等模块调用）。失败时抛错
-async function adjustWallet(delta, reason = '') {
+async function adjustWallet(delta, reason = '', requestId = makeClientMessageId('adjust')) {
     const res = await fetch('/api/wallet/adjust', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ delta, reason })
+        body: JSON.stringify({ delta, reason, requestId })
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
