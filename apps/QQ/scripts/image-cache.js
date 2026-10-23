@@ -1,5 +1,5 @@
 // IndexedDB 图片缓存：每张发过的图片 dataURL 按 client_image_id 存
-// localStorage 5-10MB 太小，IDB 几十 GB；存 dataURL 字符串，简单可靠
+// 原图由服务端保存；这里用于预览和旧数据迁移。
 const IMG_DB_NAME = 'bunnyos-qq';
 const IMG_STORE = 'images';
 const IMG_DB_VERSION = 1;
@@ -20,18 +20,15 @@ function openImgDb() {
 }
 
 async function putImageBlob(id, dataUrl) {
-    if (!id || !dataUrl) return;
-    try {
-        const db = await openImgDb();
-        await new Promise((resolve, reject) => {
-            const tx = db.transaction(IMG_STORE, 'readwrite');
-            tx.objectStore(IMG_STORE).put(dataUrl, id);
-            tx.oncomplete = () => resolve();
-            tx.onerror = () => reject(tx.error);
-        });
-    } catch (err) {
-        console.warn('[IDB put]', err);
-    }
+    if (!id || !dataUrl) throw new Error('缺少图片 ID 或内容');
+    const db = await openImgDb();
+    await new Promise((resolve, reject) => {
+        const tx = db.transaction(IMG_STORE, 'readwrite');
+        tx.objectStore(IMG_STORE).put(dataUrl, id);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error || new Error('图片写入失败'));
+        tx.onabort = () => reject(tx.error || new Error('图片写入已中止'));
+    });
 }
 
 async function getImageBlob(id) {
@@ -103,6 +100,7 @@ async function getImageCacheStats() {
 
 // 一次性把老的 localStorage `qq:img:*` 迁移到 IDB（兼容 v0.x → v1.x）
 async function migrateLocalStorageImagesToIdb() {
+    let migrated = 0;
     try {
         const keys = [];
         for (let i = 0; i < localStorage.length; i++) {
@@ -113,14 +111,47 @@ async function migrateLocalStorageImagesToIdb() {
         for (const k of keys) {
             const id = k.slice('qq:img:'.length);
             const dataUrl = localStorage.getItem(k);
-            if (dataUrl) await putImageBlob(id, dataUrl);
+            if (!dataUrl) continue;
+            await putImageBlob(id, dataUrl);
+            if (await getImageBlob(id) !== dataUrl) throw new Error('图片迁移校验失败');
             localStorage.removeItem(k);
+            migrated += 1;
         }
-        console.log(`[IDB] 迁移了 ${keys.length} 张图片从 localStorage → IDB`);
-        return keys.length;
+        console.log(`[IDB] 迁移了 ${migrated} 张图片从 localStorage → IDB`);
+        return migrated;
     } catch (err) {
         console.warn('[IDB migrate]', err);
-        return 0;
+        return migrated;
+    }
+}
+
+async function migrateCachedChatImagesToServer() {
+    await migrateLocalStorageImagesToIdb();
+    const response = await fetch('/api/qq/chats?summary=1');
+    if (!response.ok) throw new Error(`读取旧图片记录失败 (HTTP ${response.status})`);
+    const summaries = await response.json();
+    for (const summary of summaries) {
+        if (!summary.missingImageCount) continue;
+        const detail = await fetch(`/api/qq/chats/${encodeURIComponent(summary.characterId)}`);
+        if (!detail.ok) throw new Error(`读取旧图片聊天失败 (HTTP ${detail.status})`);
+        const chat = await detail.json();
+        let changed = false;
+        for (const message of chat.messages || []) {
+            if (message?.type !== 'image' || message.image_url || !message.client_image_id) continue;
+            const image = await getImageBlob(message.client_image_id)
+                || localStorage.getItem(`qq:img:${message.client_image_id}`);
+            if (image) { message.image = image; changed = true; }
+        }
+        if (!changed) continue;
+        const result = await fetch(`/api/qq/chats/${encodeURIComponent(chat.characterId)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ messages: chat.messages, version: chat.version })
+        });
+        if (!result.ok) {
+            const data = await result.json().catch(() => ({}));
+            throw new Error(data.error || `旧图片上传失败 (HTTP ${result.status})`);
+        }
     }
 }
 

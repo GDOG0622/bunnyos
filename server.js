@@ -1,5 +1,4 @@
 const express = require('express');
-const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
@@ -13,17 +12,36 @@ const { buildStContext } = require('./modules/st-context');
 const { createModelTokenCounter } = require('./modules/st-context/tokenizer');
 const { createPortableBackupFeature } = require('./modules/portable-backup');
 const { createWorldbookStore } = require('./modules/worldbook-store');
+const { installAccessControl, installStaticFiles, secretEquals } = require('./modules/access-control');
+const { validateFileId, fileForId, safeStoragePath } = require('./modules/storage-path');
+const { chatVersion, requireChatVersion, atomicWriteJson, persistChatImages } = require('./modules/chat-storage');
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = Number(process.env.PORT ?? 3000);
 
-app.use(cors());
+app.disable('x-powered-by');
+installAccessControl(app, { rootDir: __dirname });
 app.use((req, res, next) => {
     res.setHeader('Permissions-Policy', 'microphone=(self), camera=(self)');
     next();
 });
 app.use(express.json({ limit: '200mb' }));
 app.use(express.urlencoded({ limit: '200mb', extended: true }));
+
+for (const parameter of ['id', 'characterId']) {
+    app.param(parameter, (req, res, next, value) => {
+        try { validateFileId(value); next(); } catch (error) { res.status(400).json({ error: error.message }); }
+    });
+}
+app.use((req, res, next) => {
+    try {
+        for (const source of [req.body, req.query]) {
+            if (source?.characterId !== undefined && source.characterId !== '') validateFileId(source.characterId);
+        }
+        if (req.body?.id !== undefined) validateFileId(req.body.id);
+        next();
+    } catch (error) { res.status(400).json({ error: error.message }); }
+});
 
 app.use('/api', (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
@@ -103,20 +121,7 @@ app.use((err, req, res, next) => {
     next(err);
 });
 
-// 静态提供当前目录，以支持 index.html 等前端页面
-app.use(express.static(path.join(__dirname), {
-    setHeaders: (res, filePath) => {
-        const ext = path.extname(filePath).toLowerCase();
-        if (['.html', '.json', '.webmanifest'].includes(ext)) {
-            res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-            res.setHeader('Pragma', 'no-cache');
-            res.setHeader('Expires', '0');
-        } else if (['.js', '.css'].includes(ext)) {
-            // 允许浏览器短期复用拆分后的前端资源，减少 QQ 每次启动重复下载十几个脚本。
-            res.setHeader('Cache-Control', 'public, max-age=300, must-revalidate');
-        }
-    }
-}));
+installStaticFiles(app, __dirname);
 
 // 萝卜机目录结构
 const APPS_DIR = path.join(__dirname, 'apps');
@@ -361,8 +366,7 @@ function readJsonFile(filePath, fallback) {
 }
 
 function writeJsonFile(filePath, data) {
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+    atomicWriteJson(filePath, data);
 }
 
 function isPrivateNetworkAddress(address) {
@@ -438,7 +442,7 @@ function uniqueStPresetId(name, currentId = '') {
 }
 
 function stPresetFile(id) {
-    return path.join(ST_PRESETS_DIR, `${stPresetIdFromName(id)}.json`);
+    return fileForId(ST_PRESETS_DIR, id);
 }
 
 function ensureDefaultStPreset() {
@@ -931,15 +935,20 @@ function savePersonaAvatar(id, name, dataUrl, oldAvatar = '') {
     if (!parsed || !parsed.mime.startsWith('image/')) return oldAvatar || '';
     fs.mkdirSync(USER_PERSONA_AVATARS_DIR, { recursive: true });
     if (oldAvatar) {
-        const oldPath = path.join(__dirname, oldAvatar.replace(/^\//, '').split('?')[0]);
-        if (oldPath.startsWith(USER_PERSONA_AVATARS_DIR) && fs.existsSync(oldPath)) {
-            fs.rmSync(oldPath, { force: true });
-        }
+        removePersonaAvatar(oldAvatar);
     }
     const ext = extensionFromMime(parsed.mime);
-    const fileName = `${cleanFileName(name || 'user')}-${id}.${ext}`;
-    fs.writeFileSync(path.join(USER_PERSONA_AVATARS_DIR, fileName), parsed.buffer);
+    const fileName = `${cleanName(name || 'user')}-${validateFileId(id)}.${ext}`;
+    fs.writeFileSync(fileForId(USER_PERSONA_AVATARS_DIR, `${cleanName(name || 'user')}-${id}`, `.${ext}`), parsed.buffer);
     return `/data/assets/avatars/userpersonas/${fileName}`;
+}
+
+function removePersonaAvatar(avatar) {
+    const prefix = '/data/assets/avatars/userpersonas/';
+    if (!avatar.startsWith(prefix)) return;
+    const name = avatar.slice(prefix.length).split('?')[0];
+    if (name.includes('/') || name.includes('\\')) return;
+    fs.rmSync(safeStoragePath(USER_PERSONA_AVATARS_DIR, name), { force: true });
 }
 
 function getShanghaiDateParts(date = new Date()) {
@@ -964,7 +973,7 @@ function buildPromptVariables({ characterId = '', userName = '', messages = [] }
     const settings = readJsonFile(SETTINGS_FILE, {});
     const currentPersona = getCurrentUserPersona();
     const character = characterId
-        ? readJsonFile(path.join(CHARACTERS_DIR, `${cleanName(characterId)}.json`), null)
+        ? readJsonFile(fileForId(CHARACTERS_DIR, characterId), null)
         : null;
     const parts = getShanghaiDateParts();
     const date = `${parts.year}-${parts.month}-${parts.day}`;
@@ -1370,7 +1379,7 @@ app.post('/api/qq/beauties/backgrounds/:id/image', (req, res) => {
         }
         const ext = extensionFromMime(parsed.mime);
         const fileName = `${id}.${ext}`;
-        fs.writeFileSync(path.join(QQ_BEAUTY_BG_DIR, fileName), parsed.buffer);
+        fs.writeFileSync(fileForId(QQ_BEAUTY_BG_DIR, id, `.${ext}`), parsed.buffer);
         const version = Date.now();
         const url = `/data/qq/beauty-backgrounds/${fileName}?v=${version}`;
         list[idx] = { ...list[idx], url };
@@ -1401,7 +1410,7 @@ app.post('/api/qq/char-beauty/:characterId/background', (req, res) => {
             .forEach(f => fs.rmSync(path.join(QQ_CHAR_BG_DIR, f), { force: true }));
         const ext = extensionFromMime(parsed.mime);
         const fileName = `${cid}.${ext}`;
-        fs.writeFileSync(path.join(QQ_CHAR_BG_DIR, fileName), parsed.buffer);
+        fs.writeFileSync(fileForId(QQ_CHAR_BG_DIR, cid, `.${ext}`), parsed.buffer);
         const version = Date.now();
         const url = `/data/qq/char-backgrounds/${fileName}?v=${version}`;
         const cb = readCharBeauty();
@@ -1444,7 +1453,7 @@ app.get('/api/qq/char-beauty-usage/:type/:id', (req, res) => {
         const charIds = Object.keys(cb).filter(c => cb[c] && slots.some(s => cb[c][s] === id));
         const names = [];
         charIds.forEach(cid => {
-            const f = path.join(CHARACTERS_DIR, `${cid}.json`);
+            const f = fileForId(CHARACTERS_DIR, cid);
             if (fs.existsSync(f)) {
                 try {
                     const rec = JSON.parse(fs.readFileSync(f, 'utf-8'));
@@ -1492,9 +1501,9 @@ function promptMessagesToText(messages = []) {
 app.get('/api/qq/chat-tokens/:characterId', async (req, res) => {
     try {
         const characterId = req.params.characterId;
-        const character = readJsonFile(path.join(CHARACTERS_DIR, `${cleanName(characterId)}.json`), null);
+        const character = readJsonFile(fileForId(CHARACTERS_DIR, characterId), null);
         if (!character) return res.status(404).json({ error: '未找到角色' });
-        const chatFile = path.join(CHATS_DIR, `${characterId}.json`);
+        const chatFile = fileForId(CHATS_DIR, characterId);
         const chatRaw = readJsonFile(chatFile, { messages: [] });
         const list = qqSummaryFeature.filterPromptMessages(chatRaw?.messages);
         const userPersona = getCurrentUserPersona();
@@ -1969,7 +1978,7 @@ app.post('/api/admin/update-from-github', (req, res) => {
     const token = String(process.env.BUNNYOS_UPDATE_TOKEN || '').trim();
     if (!token) return res.status(404).json({ error: 'Not found' });
     const provided = String(req.get('x-bunnyos-update-token') || req.query.token || '').trim();
-    if (!provided || provided !== token) return res.status(403).json({ error: 'Forbidden' });
+    if (!provided || !secretEquals(provided, token)) return res.status(403).json({ error: 'Forbidden' });
 
     const script = [
         'set -e',
@@ -3298,7 +3307,7 @@ app.get('/api/qq/preset-marker-preview', (req, res) => {
     try {
         const characterId = String(req.query?.characterId || '');
         const character = characterId
-            ? readJsonFile(path.join(CHARACTERS_DIR, `${cleanName(characterId)}.json`), null)
+            ? readJsonFile(fileForId(CHARACTERS_DIR, characterId), null)
             : null;
         const qqSettings = readJsonFile(QQ_SETTINGS_FILE, {});
         const summaryWorldbookId = getSummaryWorldbookId(character);
@@ -3448,10 +3457,7 @@ app.delete('/api/userpersonas/:id', (req, res) => {
         const file = path.join(USER_PERSONAS_DIR, target.fileName);
         if (fs.existsSync(file)) fs.rmSync(file, { force: true });
         if (target.avatar) {
-            const avatarPath = path.join(__dirname, target.avatar.replace(/^\//, '').split('?')[0]);
-            if (avatarPath.startsWith(USER_PERSONA_AVATARS_DIR) && fs.existsSync(avatarPath)) {
-                fs.rmSync(avatarPath, { force: true });
-            }
+            removePersonaAvatar(target.avatar);
         }
         const remaining = personas.filter(item => item.id !== id);
         if (currentPersonaId === id) {
@@ -3508,14 +3514,14 @@ app.post('/api/qq/characters', (req, res) => {
     console.log(`[POST /api/qq/characters] content-length=${req.headers['content-length']} body-keys=${Object.keys(req.body || {}).join(',')}`);
     try {
         const body = req.body || {};
-        const id = body.id || shortId();
+        const id = validateFileId(body.id ?? shortId());
         let avatarPath = '';
         if (body.avatarDataUrl) {
             const parsed = parseDataUrl(body.avatarDataUrl);
             if (parsed && parsed.mime.startsWith('image/')) {
                 const ext = extensionFromMime(parsed.mime);
                 const fileName = `${id}.${ext}`;
-                fs.writeFileSync(path.join(AVATARS_DIR, fileName), parsed.buffer);
+                fs.writeFileSync(fileForId(AVATARS_DIR, id, `.${ext}`), parsed.buffer);
                 avatarPath = `/data/assets/avatars/${fileName}`;
             }
         }
@@ -3528,7 +3534,7 @@ app.post('/api/qq/characters', (req, res) => {
             worldbookIds: Array.isArray(body.worldbookIds) ? body.worldbookIds : [],
             memory: { ...(body.memory && typeof body.memory === 'object' ? body.memory : {}), summaryWorldbookId: String(body.memory?.summaryWorldbookId || body.summaryWorldbookId || '') }
         };
-        fs.writeFileSync(path.join(CHARACTERS_DIR, `${id}.json`), JSON.stringify(record, null, 2), 'utf-8');
+        fs.writeFileSync(fileForId(CHARACTERS_DIR, id), JSON.stringify(record, null, 2), 'utf-8');
         res.json(record);
     } catch (e) {
         console.error(e);
@@ -3540,7 +3546,7 @@ app.post('/api/qq/characters', (req, res) => {
 app.put('/api/qq/characters/:id', (req, res) => {
     try {
         const id = req.params.id;
-        const file = path.join(CHARACTERS_DIR, `${id}.json`);
+        const file = fileForId(CHARACTERS_DIR, id);
         if (!fs.existsSync(file)) return res.status(404).json({ error: '未找到角色' });
         const cur = JSON.parse(fs.readFileSync(file, 'utf-8'));
         const body = req.body || {};
@@ -3555,7 +3561,7 @@ app.put('/api/qq/characters/:id', (req, res) => {
                 }
                 const ext = extensionFromMime(parsed.mime);
                 const fileName = `${id}.${ext}`;
-                fs.writeFileSync(path.join(AVATARS_DIR, fileName), parsed.buffer);
+                fs.writeFileSync(fileForId(AVATARS_DIR, id, `.${ext}`), parsed.buffer);
                 avatar = `/data/assets/avatars/${fileName}`;
             }
         }
@@ -3583,9 +3589,9 @@ const qqSummaryFeature = createQqSummaryFeature({
 app.delete('/api/qq/characters/:id', (req, res) => {
     try {
         const id = req.params.id;
-        const file = path.join(CHARACTERS_DIR, `${id}.json`);
+        const file = fileForId(CHARACTERS_DIR, id);
         if (fs.existsSync(file)) fs.rmSync(file, { force: true });
-        const chatFile = path.join(CHATS_DIR, `${id}.json`);
+        const chatFile = fileForId(CHATS_DIR, id);
         if (fs.existsSync(chatFile)) fs.rmSync(chatFile, { force: true });
         // 顺手清头像
         if (fs.existsSync(AVATARS_DIR)) {
@@ -3601,14 +3607,7 @@ app.delete('/api/qq/characters/:id', (req, res) => {
 
 // 单人聊天记录
 function sanitizeChatMessagesForStorage(messages) {
-    // 图片：dataURL 不进存盘（前端 localStorage 兜底，详见 §1.x 图片处理 2026-06-22）；
-    // 但 client_image_id 必须保留，让重载后 localStorage 还能找到图。
-    return (Array.isArray(messages) ? messages : []).map(message => {
-        if (!message || typeof message !== 'object' || message.type !== 'image') return message;
-        const clean = { ...message, text: message.text || '[图片]' };
-        delete clean.image;
-        return clean;
-    });
+    return persistChatImages(__dirname, Array.isArray(messages) ? messages : []);
 }
 
 function sanitizeChatForStorage(chat) {
@@ -3618,6 +3617,21 @@ function sanitizeChatForStorage(chat) {
         messages: sanitizeChatMessagesForStorage(data.messages)
     };
 }
+
+function chatResponse(file, chat) {
+    return { ...chat, version: chatVersion(file) };
+}
+
+app.use('/api/qq/chats/:characterId', (req, res, next) => {
+    if (['GET', 'HEAD'].includes(req.method) || req.path === '/paid-message') return next();
+    try {
+        const version = req.body && Object.hasOwn(req.body, 'version') ? req.body.version : req.get('If-Match');
+        requireChatVersion(fileForId(CHATS_DIR, req.params.characterId), version);
+        next();
+    } catch (error) {
+        res.status(error.statusCode || 400).json({ error: error.message, error_code: error.code });
+    }
+});
 
 app.get('/api/qq/chats', (req, res) => {
     try {
@@ -3631,14 +3645,16 @@ app.get('/api/qq/chats', (req, res) => {
                 const clean = sanitizeChatForStorage(raw);
                 settleExpiredUserTransfers(clean.messages);
                 if (JSON.stringify(raw) !== JSON.stringify(clean)) {
-                    fs.writeFileSync(file, JSON.stringify(clean, null, 2), 'utf-8');
+                    writeJsonFile(file, clean);
                 }
-                if (!summaryOnly) return clean;
+                if (!summaryOnly) return chatResponse(file, clean);
                 const { messages, ...meta } = clean;
                 return {
                     ...meta,
+                    version: chatVersion(file),
                     lastMessage: messages[messages.length - 1] || null,
                     messageCount: messages.length,
+                    missingImageCount: messages.filter(message => message?.type === 'image' && !message.image_url).length,
                     favoriteCount: messages.filter(message => message?.favorited).length,
                 };
             } catch { return null; }
@@ -3652,15 +3668,15 @@ app.get('/api/qq/chats', (req, res) => {
 
 app.get('/api/qq/chats/:characterId', (req, res) => {
     try {
-        const file = path.join(CHATS_DIR, `${req.params.characterId}.json`);
-        if (!fs.existsSync(file)) return res.json({ characterId: req.params.characterId, messages: [] });
+        const file = fileForId(CHATS_DIR, req.params.characterId);
+        if (!fs.existsSync(file)) return res.json({ characterId: req.params.characterId, messages: [], version: null });
         const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
         const clean = sanitizeChatForStorage(raw);
         settleExpiredUserTransfers(clean.messages);
         if (JSON.stringify(raw) !== JSON.stringify(clean)) {
-            fs.writeFileSync(file, JSON.stringify(clean, null, 2), 'utf-8');
+            writeJsonFile(file, clean);
         }
-        res.json(clean);
+        res.json(chatResponse(file, clean));
     } catch (e) {
         res.status(500).json({ error: '读取聊天失败' });
     }
@@ -3736,7 +3752,7 @@ function scanAndScheduleExpiredUserTransfers() {
             const chat = sanitizeChatForStorage(readJsonFile(filePath, {}));
             const updates = settleExpiredUserTransfers(chat.messages);
             if (updates.length) {
-                fs.writeFileSync(filePath, JSON.stringify(chat, null, 2), 'utf-8');
+                writeJsonFile(filePath, chat);
                 settled += updates.length;
             }
             earliestExpiry = Math.min(earliestExpiry, findEarliestPendingTransferExpiry(chat.messages));
@@ -3754,7 +3770,7 @@ app.post('/api/qq/chats/:characterId/paid-message', (req, res) => {
     const requestId = String(req.body?.requestId || '').trim().slice(0, 160);
     const cost = Number(req.body?.cost);
     const reason = String(req.body?.reason || '').slice(0, 200);
-    const chatPath = path.join(CHATS_DIR, `${characterId}.json`);
+    const chatPath = fileForId(CHATS_DIR, characterId);
     let walletBefore = null;
     let chatBefore = null;
     let chatExisted = false;
@@ -3780,9 +3796,10 @@ app.post('/api/qq/chats/:characterId/paid-message', (req, res) => {
         const existing = chat.messages.find(item => item?.client_request_id === requestId || item?.id === requestId);
         if (existing) {
             const wallet = readWallet();
-            return res.json({ success: true, idempotent: true, balance: wallet.balance, message: existing, chat });
+            return res.json({ success: true, idempotent: true, balance: wallet.balance, message: existing, chat: chatResponse(chatPath, chat) });
         }
 
+        requireChatVersion(chatPath, req.body?.version);
         walletBefore = readWallet();
         const nextBalance = walletBefore.balance - cost;
         if (nextBalance < 0) {
@@ -3793,11 +3810,12 @@ app.post('/api/qq/chats/:characterId/paid-message', (req, res) => {
         chat.characterId = characterId;
         chat.updated_at = now;
         writeJsonFile(WALLET_FILE, { balance: nextBalance, updated_at: now });
-        fs.writeFileSync(chatPath, JSON.stringify(chat, null, 2), 'utf-8');
+        writeJsonFile(chatPath, chat);
         armTransferSettlement(findEarliestPendingTransferExpiry(chat.messages));
         console.log(`[WALLET] -${cost} → ${nextBalance}${reason ? ` (${reason})` : ''}`);
-        res.json({ success: true, balance: nextBalance, message, chat });
+        res.json({ success: true, balance: nextBalance, message, chat: chatResponse(chatPath, chat) });
     } catch (error) {
+        if (error.statusCode === 409) return res.status(409).json({ error: error.message, error_code: error.code });
         // 两个文件无法依靠文件系统实现真正的跨文件事务；同步失败时立即恢复旧快照。
         try {
             if (walletBefore) writeJsonFile(WALLET_FILE, walletBefore);
@@ -3821,7 +3839,7 @@ app.post('/api/qq/chats/:characterId/transfer/:idx/receive', (req, res) => {
         const characterId = req.params.characterId;
         const idx = Number(req.params.idx);
         if (!Number.isInteger(idx) || idx < 0) return res.status(400).json({ error: 'idx 非法' });
-        const chatPath = path.join(CHATS_DIR, `${characterId}.json`);
+        const chatPath = fileForId(CHATS_DIR, characterId);
         if (!fs.existsSync(chatPath)) return res.status(404).json({ error: '聊天不存在' });
         const chat = JSON.parse(fs.readFileSync(chatPath, 'utf-8'));
         const msg = chat?.messages?.[idx];
@@ -3841,9 +3859,9 @@ app.post('/api/qq/chats/:characterId/transfer/:idx/receive', (req, res) => {
         const nextBalance = w.balance + amt;
         writeJsonFile(WALLET_FILE, { balance: nextBalance, updated_at: settledAt });
         chat.updated_at = settledAt;
-        fs.writeFileSync(chatPath, JSON.stringify(chat, null, 2), 'utf-8');
+        writeJsonFile(chatPath, chat);
         console.log(`[WALLET] +${amt} (transfer received from ${characterId})`);
-        res.json({ success: true, balance: nextBalance, settled_at: settledAt });
+        res.json({ success: true, balance: nextBalance, settled_at: settledAt, version: chatVersion(chatPath) });
     } catch (e) {
         console.error('[transfer receive]', e);
         res.status(500).json({ error: '领取失败' });
@@ -3852,23 +3870,24 @@ app.post('/api/qq/chats/:characterId/transfer/:idx/receive', (req, res) => {
 
 app.post('/api/qq/chats/:characterId', (req, res) => {
     try {
+        if (!Array.isArray(req.body?.messages)) return res.status(400).json({ error: 'messages 必须是数组' });
         const characterId = req.params.characterId;
         const messages = sanitizeChatMessagesForStorage(req.body?.messages);
         settleExpiredUserTransfers(messages);
-        const chatFile = path.join(CHATS_DIR, `${characterId}.json`);
+        const chatFile = fileForId(CHATS_DIR, characterId);
         // 保留原 chat 的辅助字段（如 hidden），只覆盖 messages + updated_at
-        const prev = fs.existsSync(chatFile) ? readJsonFile(chatFile, {}) : {};
+        const prev = fs.existsSync(chatFile) ? JSON.parse(fs.readFileSync(chatFile, 'utf8')) : {};
         const data = {
             ...prev,
             characterId,
             messages,
             updated_at: Date.now()
         };
-        fs.writeFileSync(chatFile, JSON.stringify(data, null, 2), 'utf-8');
+        writeJsonFile(chatFile, data);
         armTransferSettlement(findEarliestPendingTransferExpiry(messages));
-        res.json(data);
+        res.json(chatResponse(chatFile, data));
     } catch (e) {
-        res.status(500).json({ error: '保存聊天失败' });
+        res.status(400).json({ error: e.message || '保存聊天失败' });
     }
 });
 
@@ -3876,12 +3895,12 @@ app.post('/api/qq/chats/:characterId', (req, res) => {
 app.delete('/api/qq/chats/:characterId/messages', (req, res) => {
     try {
         const characterId = req.params.characterId;
-        const chatFile = path.join(CHATS_DIR, `${characterId}.json`);
-        if (!fs.existsSync(chatFile)) return res.json({ characterId, messages: [] });
+        const chatFile = fileForId(CHATS_DIR, characterId);
+        if (!fs.existsSync(chatFile)) return res.json({ characterId, messages: [], version: null });
         const prev = readJsonFile(chatFile, {});
         const data = { ...prev, characterId, messages: [], updated_at: Date.now() };
-        fs.writeFileSync(chatFile, JSON.stringify(data, null, 2), 'utf-8');
-        res.json(data);
+        writeJsonFile(chatFile, data);
+        res.json(chatResponse(chatFile, data));
     } catch (e) {
         res.status(500).json({ error: '清空聊天失败' });
     }
@@ -3891,11 +3910,11 @@ app.delete('/api/qq/chats/:characterId/messages', (req, res) => {
 app.patch('/api/qq/chats/:characterId/hidden', (req, res) => {
     try {
         const characterId = req.params.characterId;
-        const chatFile = path.join(CHATS_DIR, `${characterId}.json`);
+        const chatFile = fileForId(CHATS_DIR, characterId);
         const prev = fs.existsSync(chatFile) ? readJsonFile(chatFile, {}) : { characterId, messages: [] };
         const data = { ...prev, characterId, hidden: !!req.body?.hidden };
-        fs.writeFileSync(chatFile, JSON.stringify(data, null, 2), 'utf-8');
-        res.json(data);
+        writeJsonFile(chatFile, data);
+        res.json(chatResponse(chatFile, data));
     } catch (e) {
         res.status(500).json({ error: '隐藏聊天失败' });
     }
@@ -3905,7 +3924,7 @@ app.patch('/api/qq/chats/:characterId/hidden', (req, res) => {
 app.delete('/api/qq/chats/:characterId', (req, res) => {
     try {
         const characterId = req.params.characterId;
-        const chatFile = path.join(CHATS_DIR, `${characterId}.json`);
+        const chatFile = fileForId(CHATS_DIR, characterId);
         if (fs.existsSync(chatFile)) fs.rmSync(chatFile, { force: true });
         // 顺手清 char 专属背景文件
         if (fs.existsSync(QQ_CHAR_BG_DIR)) {
@@ -3966,7 +3985,7 @@ app.post('/api/qq/sticker-packs', (req, res) => {
 app.get('/app-icon', (req, res) => {
     const exts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico'];
     for (const ext of exts) {
-        const iconPath = path.join(__dirname, `icon.${ext}`);
+        const iconPath = safeStoragePath(__dirname, `icon.${ext}`);
         if (fs.existsSync(iconPath)) {
             res.set('Cache-Control', 'no-cache');
             return res.sendFile(iconPath);
@@ -4309,7 +4328,7 @@ app.post('/api/qq/reply', async (req, res) => {
             });
         }
 
-        const character = readJsonFile(path.join(CHARACTERS_DIR, `${cleanName(characterId)}.json`), null);
+        const character = readJsonFile(fileForId(CHARACTERS_DIR, characterId), null);
         if (!character) return res.status(404).json({
             error: '未找到角色', error_code: 'CHARACTER_NOT_FOUND', error_type: 'not_found_error', operation: 'reply'
         });
@@ -4577,7 +4596,7 @@ app.post('/api/qq/impersonate', async (req, res) => {
         if (!apiUrl || !apiKey || !model) return res.status(400).json({
             error: '请先在设置里配置主 API', error_code: 'MAIN_API_NOT_CONFIGURED', error_type: 'configuration_error', operation: 'impersonate'
         });
-        const character = readJsonFile(path.join(CHARACTERS_DIR, `${cleanName(characterId)}.json`), null);
+        const character = readJsonFile(fileForId(CHARACTERS_DIR, characterId), null);
         if (!character) return res.status(404).json({
             error: '未找到角色', error_code: 'CHARACTER_NOT_FOUND', error_type: 'not_found_error', operation: 'impersonate'
         });
@@ -4680,7 +4699,7 @@ const bunnyosHttpServer = app.listen(PORT, () => {
     console.log(`[BunnyOS v2-qq-413debug] booted ${new Date().toISOString()}`);
     console.log(`  body limit: 200mb (json + urlencoded)`);
     console.log(`  QQ routes:  /api/qq/characters, /api/qq/groups`);
-    console.log(`  url:        http://localhost:${PORT}/index.html`);
+    console.log(`  url:        http://localhost:${bunnyosHttpServer.address().port}/index.html`);
     console.log('===========================================');
 });
 

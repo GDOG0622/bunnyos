@@ -569,8 +569,9 @@ let settings = {};
         }
 
         async function clearChatImageCache() {
-            if (!confirm('清空聊天图片缓存？\n旧消息里的图片缩略会变成 [图片] 占位，但聊天本身、新发图不受影响。')) return;
+            if (!confirm('清空当前浏览器的聊天图片缓存？\n已上传的服务端原图会保留。清理前会先尝试补传历史原图。')) return;
             try {
+                await migrateCachedChatImagesToServer();
                 const db = await openQqImgDbReadonly();
                 if (!db || !db.objectStoreNames.contains('images')) {
                     alert('缓存已经是空的');

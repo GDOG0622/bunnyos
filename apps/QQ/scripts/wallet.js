@@ -57,15 +57,13 @@ async function receiveTransferAt(idx) {
     const msg = chat.messages?.[idx];
     if (!msg || msg.role !== 'assistant' || msg.type !== 'transfer' || msg.status !== 'pending') return;
     try {
-        const res = await fetch(
+        const data = await mutateChat(chat.characterId,
             `/api/qq/chats/${encodeURIComponent(chat.characterId)}/transfer/${idx}/receive`,
-            { method: 'POST' }
+            'POST', {}, (result, current) => {
+                current.messages[idx].status = 'received';
+                current.messages[idx].settled_at = result.settled_at;
+            }
         );
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-            toast(data?.error || '领取失败');
-            return;
-        }
         // 同步本地状态
         msg.status = 'received';
         msg.settled_at = data.settled_at || Date.now();

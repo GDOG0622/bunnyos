@@ -39,16 +39,9 @@ async function saveChatSummarySettings() {
     const layerThreshold = Math.max(1, Math.min(parseInt(thresholdInput?.value, 10) || 100, 5000));
     if (thresholdInput) thresholdInput.value = String(layerThreshold);
     try {
-        const res = await fetch(`/api/qq/summary-settings/${encodeURIComponent(charId)}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ layerThreshold, summaryWorldbookId: worldbookSelect?.value || '' })
+        const data = await mutateChat(charId, `/api/qq/summary-settings/${encodeURIComponent(charId)}`, 'PUT', {
+            layerThreshold, summaryWorldbookId: worldbookSelect?.value || ''
         });
-        const data = await readApiResponse(res);
-        if (!res.ok) {
-            await showBackendError(`保存总结设置失败 (HTTP ${res.status})`, data, res);
-            return;
-        }
         const character = state.characters.find(item => item.id === charId);
         if (character) {
             character.memory = { ...(character.memory || {}), summaryWorldbookId: data.summaryWorldbookId || '' };
@@ -65,17 +58,14 @@ async function saveChatSummarySettings() {
 
 async function maybeRunLayerSummary(chat, signal) {
     try {
-        const res = await fetch('/api/qq/summarize', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ characterId: chat.characterId }),
-            signal,
-        });
-        const data = await readApiResponse(res);
-        if (!res.ok) {
-            await showBackendError(`自动总结失败 (HTTP ${res.status})`, data, res);
-            return { failed: true };
-        }
+        const data = await mutateChat(chat.characterId, '/api/qq/summarize', 'POST', {
+            characterId: chat.characterId
+        }, (result, current) => {
+            const archived = new Set(result.archivedMessageIndexes || []);
+            current.messages.forEach((message, index) => {
+                if (archived.has(index)) message.summary_archived = true;
+            });
+        }, signal);
         if (!data.triggered) return data;
         const archived = new Set(Array.isArray(data.archivedMessageIndexes) ? data.archivedMessageIndexes : []);
         (chat.messages || []).forEach((message, index) => {

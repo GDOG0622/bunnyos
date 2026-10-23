@@ -11,6 +11,7 @@
         }
 
         async readLocalBackup() {
+            await migrateCachedChatImagesToServer();
             const response = await fetch('/api/storage/backup/export');
             const data = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(data.error || `生成本地备份失败 (HTTP ${response.status})`);
