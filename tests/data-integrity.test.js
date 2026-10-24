@@ -30,7 +30,8 @@ test('settings, worldbooks, preset identities and financial commits survive stal
     await t.test('an old worldbook editor cannot delete a background summary', async () => {
         await json('/api/worldbooks/books', 'POST', { name: 'Memories' });
         const { books: [old] } = await json('/api/worldbooks');
-        const file = path.join(storage, 'data/worldbooks/Memories.json');
+        const directory = path.join(storage, 'data/worldbooks');
+        const file = path.join(directory, fs.readdirSync(directory).find(name => name.endsWith('.json')));
         const background = JSON.parse(fs.readFileSync(file));
         background.entries.push({ id: 'summary', content: 'background summary' });
         fs.writeFileSync(file, JSON.stringify(background));

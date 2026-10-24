@@ -1,5 +1,6 @@
+const crypto = require('crypto');
 const { fileForId } = require('./storage-path');
-const { chatVersion, requireChatVersion } = require('./chat-storage');
+const { chatVersion, requireChatVersion, atomicWriteJson } = require('./chat-storage');
 
 function createQqSummaryFeature(dependencies) {
     const {
@@ -224,6 +225,46 @@ function activeSmallSummaryEntries(book, characterId) {
         .sort((a, b) => Number(a.created_at || 0) - Number(b.created_at || 0));
 }
 
+function archiveSummary(chat, entry) {
+    for (const index of entry.sourceMessageIndexes) chat.messages[index].summary_archived = true;
+    chat.summaryLayerThreshold = entry.sourceLayerCount;
+    chat.lastSummaryAt = entry.created_at;
+    chat.updated_at = Math.max(Number(chat.updated_at || 0), entry.created_at);
+}
+
+function recover() {
+    const books = readWorldbooks();
+    let changed = false;
+    for (const book of books) {
+        for (const entry of Array.isArray(book.entries) ? book.entries : []) {
+            if (!entry.summaryArchivePending) continue;
+            const chatFile = fileForId(CHATS_DIR, entry.summaryCharacterId);
+            // Never replay an old chat over a later edit, or rewrite an already committed projection.
+            if (chatVersion(chatFile) !== entry.archivedChatVersion) {
+                requireChatVersion(chatFile, entry.sourceChatVersion);
+                const chat = readJsonFile(chatFile, null);
+                archiveSummary(chat, entry);
+                atomicWriteJson(chatFile, chat);
+            }
+            delete entry.summaryArchivePending;
+            changed = true;
+        }
+    }
+    if (changed) writeWorldbooks(books);
+}
+
+function summaryResult(chatFile, chat, book, entry) {
+    const activeCards = activeSmallSummaryEntries(book, entry.summaryCharacterId);
+    return {
+        triggered: true, version: chatVersion(chatFile), entry,
+        summaryWorldbookId: book.id, summaryWorldbookName: book.name,
+        archivedMessageIndexes: entry.sourceMessageIndexes,
+        activeSmallCards: activeCards.length,
+        needsBigSummary: activeCards.length >= SUMMARY_BATCH_CARD_COUNT,
+        unsummarizedLayers: qqSummaryLayers(chat.messages).length,
+    };
+}
+
 app.get('/api/qq/summary-settings/:characterId', (req, res) => {
     try {
         const characterId = req.params.characterId;
@@ -274,30 +315,38 @@ app.post('/api/qq/summarize', async (req, res) => {
         const character = readJsonFile(characterFile, null);
         const chat = readJsonFile(chatFile, null);
         if (!character || !chat) return res.status(404).json({ error: '角色或聊天不存在', error_code: 'SUMMARY_TARGET_NOT_FOUND' });
-        requireChatVersion(chatFile, req.body?.version);
         const version = chatVersion(chatFile);
+        const boundBook = readWorldbooks().find(book => book.id === getSummaryWorldbookId(character));
+        const committed = (boundBook?.entries || []).find(entry => entry.summaryCharacterId === characterId
+            && entry.sourceChatVersion === req.body?.version && entry.archivedChatVersion === version);
+        if (committed) return res.json(summaryResult(chatFile, chat, boundBook, committed));
+        requireChatVersion(chatFile, req.body?.version);
         const threshold = clampSummaryThreshold(chat.summaryLayerThreshold);
         const layers = qqSummaryLayers(chat.messages);
         if (layers.length <= threshold) {
             return res.json({ triggered: false, unsummarizedLayers: layers.length, layerThreshold: threshold });
         }
         const targetLayers = layers.slice(0, threshold);
+        const allIndexes = targetLayers.flatMap(layer => layer.indices).sort((a, b) => a - b);
+        const sourceBatchId = crypto.createHash('sha256')
+            .update(JSON.stringify([characterId, allIndexes.map(index => [index, chat.messages[index]])])).digest('hex');
+        const existing = (boundBook?.entries || []).find(entry => entry.sourceBatchId === sourceBatchId);
         const userPersona = getCurrentUserPersona();
         const context = summaryContextText(chat.messages, targetLayers, character, userPersona);
-        const content = await requestSummaryFromSecondaryApi(
+        const content = existing?.content ?? await requestSummaryFromSecondaryApi(
             context,
             `当前<user>是“${userPersona?.name || 'user'}”，当前<char>是“${character.name || 'char'}”。请用实际名字替换模板中的<user>和<char>。`
         );
         // The upstream request can outlive a save on another device; never write its old snapshot back.
+        recover();
         requireChatVersion(chatFile, version);
         const latestCharacter = readJsonFile(characterFile, null);
         if (!latestCharacter) return res.status(404).json({ error: '角色已删除' });
         const { books, book } = ensureSummaryWorldbook(latestCharacter, characterFile);
-        const allIndexes = targetLayers.flatMap(layer => layer.indices).sort((a, b) => a - b);
         const firstMessage = chat.messages[allIndexes[0]];
         const lastMessage = chat.messages[allIndexes[allIndexes.length - 1]];
         const now = Date.now();
-        const entry = {
+        const entry = book.entries?.find(item => item.sourceBatchId === sourceBatchId) || {
             id: `e_${shortId()}`,
             name: `小总结 ${summaryDateLabel(firstMessage?.created_at)} ～ ${summaryDateLabel(lastMessage?.created_at)}`,
             content, enabled: true,
@@ -308,26 +357,19 @@ app.post('/api/qq/summarize', async (req, res) => {
             created_at: now, updated_at: now,
         };
         book.entries = Array.isArray(book.entries) ? book.entries : [];
-        book.entries.push(entry);
-        book.updated_at = now;
-        writeWorldbooks(books);
-        allIndexes.forEach(index => { if (chat.messages[index]) chat.messages[index].summary_archived = true; });
-        chat.summaryLayerThreshold = threshold;
-        chat.lastSummaryAt = now;
-        chat.updated_at = now;
-        writeJsonFile(chatFile, chat);
-        const activeCards = activeSmallSummaryEntries(book, characterId);
-        res.json({
-            triggered: true,
-            version: chatVersion(chatFile),
-            entry,
-            summaryWorldbookId: book.id,
-            summaryWorldbookName: book.name,
-            archivedMessageIndexes: allIndexes,
-            activeSmallCards: activeCards.length,
-            needsBigSummary: activeCards.length >= SUMMARY_BATCH_CARD_COUNT,
-            unsummarizedLayers: qqSummaryLayers(chat.messages).length,
+        if (!book.entries.includes(entry)) book.entries.push(entry);
+        Object.assign(entry, {
+            sourceBatchId, sourceChatVersion: version, sourceMessageIndexes: allIndexes,
+            summaryArchivePending: true,
         });
+        archiveSummary(chat, entry);
+        entry.archivedChatVersion = crypto.createHash('sha256').update(JSON.stringify(chat, null, 2)).digest('hex');
+        book.updated_at = now;
+        // The card and its archive intent share one durable file commit.
+        writeWorldbooks(books);
+        recover();
+        delete entry.summaryArchivePending;
+        res.json(summaryResult(chatFile, chat, book, entry));
     } catch (error) {
         console.error('[QQ summarize]', error);
         res.status(error.statusCode || error.status || 500).json(error.payload || { ...buildInternalErrorPayload(error, 'summarize'), error: error.message, error_code: error.code });
@@ -398,7 +440,7 @@ app.post('/api/qq/summarize/big/confirm', (req, res) => {
             .filter(message => message?.summary_archived !== true);
     }
 
-    return { filterPromptMessages };
+    return { filterPromptMessages, recover };
 }
 
 module.exports = { createQqSummaryFeature };
