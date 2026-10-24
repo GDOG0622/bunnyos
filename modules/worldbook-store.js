@@ -2,6 +2,8 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
+const { atomicWriteJson } = require('./chat-storage');
 
 function createWorldbookStore({ directory, legacyFile }) {
     const migrationMarker = path.join(directory, '.migration-complete');
@@ -18,7 +20,8 @@ function createWorldbookStore({ directory, legacyFile }) {
     }
 
     function fileFor(book) {
-        return path.join(directory, `${validateName(book.name)}.json`);
+        const key = crypto.createHash('sha256').update(String(book.id)).digest('hex');
+        return path.join(directory, `id-${key}.json`);
     }
 
     function validateBooks(books) {
@@ -47,15 +50,20 @@ function createWorldbookStore({ directory, legacyFile }) {
     function persist(books) {
         validateBooks(books);
         fs.mkdirSync(directory, { recursive: true });
+        // A legacy display name may occupy another book's future ID path; never overwrite that copy.
+        for (const book of books) {
+            const file = fileFor(book);
+            if (fs.existsSync(file) && String(JSON.parse(fs.readFileSync(file, 'utf8')).id) !== String(book.id)) {
+                throw new Error('世界书存储路径冲突，请先重命名旧文件：' + path.basename(file));
+            }
+        }
         const wanted = new Set();
         for (const book of books) {
             const file = fileFor(book);
             wanted.add(path.basename(file).toLocaleLowerCase('zh-CN'));
             const serialized = JSON.stringify(book, null, 2);
             if (fs.existsSync(file) && fs.readFileSync(file, 'utf8') === serialized) continue;
-            const temp = `${file}.${process.pid}.tmp`;
-            fs.writeFileSync(temp, serialized, 'utf8');
-            fs.renameSync(temp, file);
+            atomicWriteJson(file, book);
         }
         fs.writeFileSync(migrationMarker, '', 'utf8');
         for (const name of fs.readdirSync(directory)) {
@@ -91,10 +99,27 @@ function createWorldbookStore({ directory, legacyFile }) {
 
     function read() {
         ensureMigrated();
-        return fs.readdirSync(directory)
+        const records = fs.readdirSync(directory)
             .filter(name => name.toLowerCase().endsWith('.json'))
-            .map(name => JSON.parse(fs.readFileSync(path.join(directory, name), 'utf8')))
-            .sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0));
+            .map(name => {
+                const file = path.join(directory, name);
+                return { file, book: JSON.parse(fs.readFileSync(file, 'utf8')), modified: fs.statSync(file).mtimeMs };
+            });
+        const selected = new Map();
+        for (const record of records) {
+            const id = String(record.book?.id || '');
+            const previous = selected.get(id);
+            // A published ID file wins over leftover name files from an interrupted migration.
+            if (!previous || record.file === fileFor(record.book)
+                || (previous.file !== fileFor(previous.book)
+                    && (Number(record.book.updated_at || 0) > Number(previous.book.updated_at || 0)
+                        || (Number(record.book.updated_at || 0) === Number(previous.book.updated_at || 0)
+                            && record.modified > previous.modified)))) selected.set(id, record);
+        }
+        const books = [...selected.values()].map(record => record.book);
+        validateBooks(books);
+        if (records.length !== books.length || records.some(record => record.file !== fileFor(record.book))) persist(books);
+        return books.sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0));
     }
 
     function write(books) {

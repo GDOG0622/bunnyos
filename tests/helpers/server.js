@@ -29,6 +29,7 @@ async function testServer(t) {
         let fault = null;
         fs.renameSync = (from, to) => {
             if (fault && to === path.join(process.env.BUNNYOS_STORAGE_DIR, fault.path)) {
+                if (fault.skip > 0) { fault.skip--; return originalRename(from, to); }
                 const crash = fault.crash;
                 fault = null;
                 if (crash) process.exit(86);
@@ -94,9 +95,9 @@ async function testServer(t) {
             if (!response.ok) throw new Error(`${response.status}: ${JSON.stringify(data)}`);
             return data;
         },
-        fault: async (relative, crash = false) => {
+        fault: async (relative, crash = false, { skip = 0 } = {}) => {
             const ack = once(child, 'message');
-            child.send({ id: 'fault', fault: { path: relative, crash } });
+            child.send({ id: 'fault', fault: { path: relative, crash, skip } });
             await ack;
         },
         restart: async () => { await stop(); await start(); }

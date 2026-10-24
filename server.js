@@ -244,8 +244,8 @@ fs.mkdirSync(QQ_BEAUTY_BG_DIR, { recursive: true });
 const economy = createEconomyStore({ rootDir: STORAGE_ROOT, file: WALLET_FILE });
 economy.recover();
 app.use('/api', (req, res, next) => {
-    try { economy.recover(); next(); }
-    catch (error) { res.status(503).json({ error: '交易已提交，正在恢复聊天或美化文件。请使用原请求重试：' + error.message }); }
+    try { economy.recover(); qqSummaryFeature.recover(); next(); }
+    catch (error) { res.status(503).json({ error: '已提交的更改正在恢复。请使用原请求重试：' + error.message }); }
 });
 createPortableBackupFeature({ app, rootDir: STORAGE_ROOT });
 // 兜底：若文件存在但缺类目或缺 default 项，补齐
@@ -301,16 +301,23 @@ async function sendWebPushToAll(payload) {
         } catch (err) {
             if (err.statusCode === 404 || err.statusCode === 410) {
                 // 订阅失效，剔除
-                dead.push(sub.endpoint);
+                dead.push(sub);
             } else {
                 console.warn('[PUSH] 推送失败', err.statusCode, err.body || err.message);
             }
         }
     }));
+    let removed = 0;
     if (dead.length) {
-        writePushSubscriptions(subs.filter(s => !dead.includes(s.endpoint)));
+        // Provider replies describe the sent credentials; preserve concurrent renewals and user changes.
+        const current = readPushSubscriptions();
+        const remaining = current.filter(sub => !dead.some(expired => expired.endpoint === sub.endpoint
+            && expired.keys?.p256dh === sub.keys?.p256dh && expired.keys?.auth === sub.keys?.auth
+            && expired.expirationTime === sub.expirationTime));
+        removed = current.length - remaining.length;
+        if (removed) writePushSubscriptions(remaining);
     }
-    return { sent, removed: dead.length };
+    return { sent, removed };
 }
 
 function parseDataUrl(dataUrl) {
@@ -3637,6 +3644,7 @@ const qqSummaryFeature = createQqSummaryFeature({
     getCurrentUserPersona, qqMessageToPromptText, stripThinkingTags, sanitizeErrorDetail,
     buildUpstreamErrorPayload, buildInternalErrorPayload,
 });
+qqSummaryFeature.recover();
 // 删除角色
 app.delete('/api/qq/characters/:id', (req, res) => {
     try {
@@ -3824,6 +3832,12 @@ function armTransferSettlement(expiryAt) {
 }
 
 function scanAndScheduleExpiredUserTransfers() {
+    try { economy.recover(); qqSummaryFeature.recover(); }
+    catch (error) {
+        console.warn('[WALLET] pending changes could not be recovered', error.message);
+        armTransferSettlement(Date.now() + 1000);
+        return 0;
+    }
     if (!fs.existsSync(CHATS_DIR)) return 0;
     let settled = 0;
     let earliestExpiry = Infinity;
@@ -4483,6 +4497,7 @@ app.post('/api/qq/reply', async (req, res) => {
             });
         }
         task.controller.signal.throwIfAborted();
+        qqSummaryFeature.recover();
         requireChatVersion(chatFile, req.body?.version);
         QqReplies.appendReply(chat, segments, replaceIndex);
         writeJsonFile(chatFile, chat);
@@ -4516,10 +4531,10 @@ app.post('/api/notify/subscribe', (req, res) => {
         const sub = req.body?.subscription;
         if (!sub || !sub.endpoint) return res.status(400).json({ error: '订阅信息缺失' });
         const subs = readPushSubscriptions();
-        if (!subs.find(s => s.endpoint === sub.endpoint)) {
-            subs.push(sub);
-            writePushSubscriptions(subs);
-        }
+        const index = subs.findIndex(s => s.endpoint === sub.endpoint);
+        if (index < 0) subs.push(sub);
+        else subs[index] = sub;
+        writePushSubscriptions(subs);
         res.json({ success: true, total: subs.length });
     } catch (e) {
         res.status(500).json({ error: '保存订阅失败' });

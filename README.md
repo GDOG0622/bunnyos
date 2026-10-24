@@ -34,6 +34,7 @@ npm start
 
 - 设置通过 `PATCH /api/settings` 提交 `{version, changes}`，世界书通过 `PATCH /api/worldbooks/books/:id` 按本提交同样的结构。版本分别来自读取结果的 `_version`；冲突返回 409，编辑器保留草稿，重新加载前停止保存。
 - 钱包余额、交易 ID 和恢复队列共同保存在 `data/wallet.json`。领取、退款、购买和付费消息采用幂等交易；聊天或美化文件写入失败时，先完成账本中的恢复任务，再处理后续 API。重试必须复用原 `requestId`。
+- 小总结卡片与待归档标记在同一世界书文件中提交；聊天落盘失败或进程退出后，启动和后续 API 会先恢复归档，再接受修改。原版本的重试复用已提交卡片；若文件被外部修改到不匹配的版本，恢复会停止并返回 503，保留双方数据以便检查。
 - 普通回复和重新生成均由服务端解析、检查聊天版本并保存结构化消息，随后才返回成功及推送通知。关页不取消生成；「停止」按钮会显式取消服务端任务。代回仍只填入输入框。
 - 预设使用 `extensions.bunnyosPresetId` 作为稳定身份；旧文件首次读取时以原 ID 迁移，QQ 和编辑器的选择互相独立。改名可以更改可读文件名，不改变 ID。
 - 真实预览可选择角色聊天，和回复、代回、token 统计共用 ST 上下文构建及采样参数。时间、随机宏和概率世界书条目仍按每次构建求值。
@@ -78,7 +79,7 @@ BunnyOS-data/               独立存储目录（可通过环境变量更改）
    │  └─ st-presets-settings.json
    ├─ qq/                  QQ App 自身的 settings/groups/sticker-packs
    ├─ userpersonas/        user 人设，按名字命名
-   ├─ worldbooks/             每本世界书一个「世界书名.json」
+   ├─ worldbooks/             每本世界书一个「id-<ID 的 SHA-256>.json」
    ├─ worlds/worldbooks.json   旧版合集，首次迁移后保留作回退副本
    ├─ assets/              头像、背景、生图、音频、贴纸池
    ├─ vapid.json           Web Push VAPID 密钥对（自动生成，勿提交）
@@ -209,7 +210,7 @@ BunnyOS-data/               独立存储目录（可通过环境变量更改）
 
 **user 人设 `data/userpersonas/<名字>.json`**：`id / name / gender / birthday / status / customStatus / signature / note / prompt / avatar`。注入 AI 的字段：name / gender / birthday / prompt。
 
-**世界书 `data/worldbooks/<世界书名>.json`**：每本一个文件，书内保留稳定的 `id` 和 `entries`。名称不能重复；旧版 `data/worlds/worldbooks.json` 首次启动时迁移并保留原文件。条目支持 ST 的关键词、概率、递归、位置和触发字段；旧条目没有激活字段时按常驻处理。
+**世界书 `data/worldbooks/id-<ID 的 SHA-256>.json`**：文件路径由稳定 ID 决定，改名只原子替换同一个文件。名称不能重复；旧版合集和按名称保存的文件自动迁移。中断改名留下的重复 ID 优先保留已发布的 ID 文件，否则选择 `updated_at` 最新的副本（相同时按文件修改时间选择）。旧版 `data/worlds/worldbooks.json` 保留原文件。条目支持 ST 的关键词、概率、递归、位置和触发字段；旧条目没有激活字段时按常驻处理。
 
 **酒馆预设**：标准 ST 结构。BunnyOS 在 `extensions.bunnyosPromptGroups` 存自定义分组，`extensions.bunnyosBuiltinArranged` 标记 builtin marker 已排序。
 
