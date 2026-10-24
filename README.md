@@ -1,6 +1,6 @@
 # BunnyOS / 萝卜机
 
-本地"小手机"式 AI 聊天器外壳。`apps/` 装 App，`data/` 装用户数据，`settings.json` 装全局设置。
+支持多设备访问的个人 AI 聊天桌面。程序目录只存代码；用户数据、上传资源和线上配置统一放在独立存储目录。默认是程序目录旁的 `<程序目录名>-data/`（例如 `BunnyOS-data/`），也可以用 `BUNNYOS_STORAGE_DIR` 指定绝对路径。下文的 `data/`、`settings.json` 和用户资源路径均相对于该存储目录。
 
 ## 启动
 
@@ -18,7 +18,7 @@ npm start
 
 ### 登录与公网部署
 
-首次访问会显示浏览器登录框，用户名是 `bunnyos`。默认启动时自动生成随机密码，保存在本机 `data/access.json`；也可以用至少 16 字符的环境变量 `BUNNYOS_PASSWORD` 指定密码。密码不会打印到日志，不会进入云备份，恢复备份也不会替换本机登录密码。
+首次访问会显示浏览器登录框，用户名是 `bunnyos`。默认启动时自动生成随机密码，保存在独立存储目录的 `data/access.json`；也可以用至少 16 字符的环境变量 `BUNNYOS_PASSWORD` 指定密码。密码不会打印到日志，不会进入云备份，恢复备份也不会替换本机登录密码。
 
 公网访问请使用 HTTPS 反向代理，并设置 `BUNNYOS_ORIGIN` 为浏览器使用的完整来源（例如 `https://bunny.example.com`，含非默认端口时也要写端口）。未设置时按请求的协议和 Host 检查来源；HTTPS 代理后若未配置外部来源，写入请求可能被拒绝。页面、API、图片和设置事件流均需要登录，只允许同源访问。更新 webhook 仍单独校验 `BUNNYOS_UPDATE_TOKEN`。
 
@@ -29,8 +29,14 @@ npm start
 - 聊天接口返回服务端 `version`（文件内容摘要）；修改请求必须携带读取时的 `version`，新聊天传 `null`。过期请求返回 `409 / CHAT_VERSION_CONFLICT`，页面保留当前修改并暂停后续保存；复制需要的内容后重新加载页面，再继续编辑。清空、隐藏、删除、领取红包和总结也参与版本校验。
 - 当前部署保持单个 Node.js 进程（PM2 `instances: 1`）。版本检查与同步落盘在同一进程内完成；增加 worker 或多台服务前需要改用数据库事务或跨进程锁。
 - 新发送的 PNG、JPEG、GIF、WebP、AVIF 原图保存到 `data/assets/chat-images/`，聊天仅保存资源路径，云备份包含这些原图。单张原图上限 20MB，备份仍保持原有 100MB 上限。
-- 打开 QQ 或执行云备份时，会尝试从当前浏览器的 IndexedDB / 旧 localStorage 补传历史原图。若原图只存在另一台设备，请在原设备、原浏览器中运行迁移；缺少原图时云备份会报错，不再报告完整备份成功。清除旧设备缓存前请先完成迁移。
+- 新图片上传后只保存服务端资源引用，显示和模型请求都读取该原图。旧图片请在「设置 → 存储配置 → 旧版聊天图片迁移」补传；执行云备份时也会尝试补传。若原图只存在另一台设备，请在原设备、原浏览器中运行迁移；缺少原图时云备份会报错，不再报告完整备份成功。清除旧设备缓存前请先完成迁移。
 - 恢复前会验证所有路径、文件内容、大小写冲突、文件与目录冲突及符号链接，在临时目录准备完成后才替换当前数据。替换失败会自动还原原文件；恢复前快照保留在 `data/backups/`。恢复期间仍需额外磁盘空间；进程被强制终止或断电不属于可捕获异常，出现残留 `.restore-*` 时应先保留目录中的原文件再人工恢复。
+
+- 设置通过 `PATCH /api/settings` 提交 `{version, changes}`，世界书通过 `PATCH /api/worldbooks/books/:id` 按本提交同样的结构。版本分别来自读取结果的 `_version`；冲突返回 409，编辑器保留草稿，重新加载前停止保存。
+- 钱包余额、交易 ID 和恢复队列共同保存在 `data/wallet.json`。领取、退款、购买和付费消息采用幂等交易；聊天或美化文件写入失败时，先完成账本中的恢复任务，再处理后续 API。重试必须复用原 `requestId`。
+- 普通回复和重新生成均由服务端解析、检查聊天版本并保存结构化消息，随后才返回成功及推送通知。关页不取消生成；「停止」按钮会显式取消服务端任务。代回仍只填入输入框。
+- 预设使用 `extensions.bunnyosPresetId` 作为稳定身份；旧文件首次读取时以原 ID 迁移，QQ 和编辑器的选择互相独立。改名可以更改可读文件名，不改变 ID。
+- 真实预览可选择角色聊天，和回复、代回、token 统计共用 ST 上下文构建及采样参数。时间、随机宏和概率世界书条目仍按每次构建求值。
 
 ## 文件地图
 
@@ -43,11 +49,8 @@ BunnyOS/
 ├─ start.bat               Windows 一键启动
 ├─ start.sh                macOS/Linux 一键启动
 ├─ ecosystem.config.js     PM2 配置（VPS 部署用）
-├─ settings.json           全局设置
 ├─ icon.png                网页 favicon + PWA 图标
 ├─ assets/
-│  ├─ backgrounds/         用户上传的壁纸（thin-back.* 竖屏 / wide-back.* 横屏）
-│  ├─ app-icons/           用户上传的 App 图标
 │  ├─ styles/              base.css / desktop.css / window.css
 │  └─ scripts/             theme.js / apps.js / window-manager.js / clock.js / notify.js
 ├─ apps/
@@ -59,13 +62,19 @@ BunnyOS/
 ├─ modules/
 │  ├─ qq-summary.js         QQ 分层总结后端
 │  └─ st-context/           ST 风格上下文、世界书与 tokenizer/token 预算引擎
-├─ tests/                   node:test 聚焦测试
+└─ tests/                   node:test 聚焦测试
+
+BunnyOS-data/               独立存储目录（可通过环境变量更改）
+├─ server-env.json          线上环境配置，不包含在可移植备份中
+├─ settings.json            全局设置
+├─ assets/backgrounds/      上传壁纸（thin-back.* / wide-back.*）
+├─ assets/app-icons/        上传 App 图标
 └─ data/
    ├─ characters/          角色卡 <id>.json
    ├─ chats/qq/            单人聊天 <characterId>.json
    ├─ presets/
    │  ├─ image-prompts.json     生图提示词预设
-   │  ├─ st-presets/            每份酒馆兼容预设一个「预设名.json」
+   │  ├─ st-presets/            每份酒馆兼容预设一个「预设名.json」，内部 ID 独立于文件名
    │  └─ st-presets-settings.json
    ├─ qq/                  QQ App 自身的 settings/groups/sticker-packs
    ├─ userpersonas/        user 人设，按名字命名
@@ -88,7 +97,7 @@ BunnyOS/
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | GET | `/api/apps` | 扫描 `apps/*/manifest.json` 返回 App 清单 |
-| GET / POST | `/api/settings` | 全局 settings.json 读写 |
+| GET / PATCH | `/api/settings` | 读取全局设置 / 带版本的字段补丁 |
 | GET / POST | `/api/storage/backup/export` `/restore` | 生成可移植备份 / 恢复备份并自动保留本机回滚快照 |
 | POST | `/api/assets/upload` | 上传壁纸 / App 图标 |
 | GET / POST | `/api/presets` | 生图提示词预设 |
@@ -98,12 +107,13 @@ BunnyOS/
 | GET / POST / DELETE | `/api/st-presets/:id` | 读 / 覆盖 / 删 |
 | POST | `/api/st-presets/:id/rename` `/copy` `/refresh-default` | 改名 / 复制 / 重置为仅含固定条目的空白预设 |
 | POST | `/api/st-presets/import-default` | 重新导入默认预设 |
-| GET / POST | `/api/worldbooks` | 全部世界书读 / 覆盖 |
+| GET | `/api/worldbooks` | 全部世界书及各本版本 |
+| PATCH | `/api/worldbooks/books/:id` | 带版本修改该本的名称或条目 |
 | POST | `/api/worldbooks/books` | 新建空白本 |
 | DELETE | `/api/worldbooks/books/:id` | 删整本（清角色绑定 + QQ 全局列表） |
 | POST | `/api/worldbooks/import-st` | 导入酒馆世界书 JSON，并保留 ST 激活、位置、概率和递归字段 |
 | GET / POST | `/api/qq/global-worldbooks` | QQ 全局选中的书 id 列表 |
-| GET | `/api/qq/preset-marker-preview?characterId=` | 装配预览：world_info + memories 真实内容 |
+| POST | `/api/qq/prompt-preview` | 用指定角色聊天和编辑中的预设执行真实上下文构建 |
 | GET / POST | `/api/prompt/variables` `/render` | 变量手册 + 模板渲染 |
 | GET | `/api/tokenizers/status?model=` | 当前模型自动选择的 tokenizer、精确/回退状态 |
 | POST | `/api/tokenizers/openai/count?model=` | ST 兼容消息数组 token 计数 |
@@ -115,7 +125,8 @@ BunnyOS/
 | POST | `/api/qq/summarize` | 第 `阈值+1` 层触发小总结；副 API 生成、写世界书并归档旧层 |
 | POST | `/api/qq/summarize/big/preview` `/big/confirm` | 最新 5 张小总结生成大总结草稿；用户确认后保存并关闭原卡 |
 | GET / POST | `/api/qq/groups` `/sticker-packs` | 群定义 / 自定义表情包合集 |
-| POST | `/api/qq/reply` | AI 回复（按预设装配 + 采样参数 + 抗截断） |
+| POST | `/api/qq/reply` | 携带 characterId / version；服务端生成并保存，replaceIndex 指定重生成的最后一组回复 |
+| POST | `/api/qq/reply/cancel` | 使用 characterId / generationId 显式停止生成 |
 | POST | `/api/qq/impersonate` | AI 代回（user 视角拟回复，填入输入框不发送） |
 | POST | `/api/qq/link-preview` | 社交/商品链接解析；支持淘宝、闲鱼、拼多多短链和商品卡 |
 | GET | `/api/notify/vapid-public-key` | Web Push 公钥（前端订阅时取）|
@@ -234,7 +245,7 @@ BunnyOS/
 - **图床代理**：`POST /api/upload/image-host`（catbox 默认 + 自定义 imgbb/smms endpoint），调用方在美化编辑页头像 / 头像框的 URL 输入旁
 - **Catbox 免梯读取**：主桌面、QQ、设置和提示词管理器加载 `assets/scripts/catbox-proxy.js`，只在渲染时把 Catbox 的 `src/href/poster/srcset/CSS url()` 改写到 `/api/proxy/catbox`，不改存档原 URL；后端直连失败后复用 carrot 的 Cloudflare Worker，支持图片、GIF、视频、音频和字体
 - **carrot 数据迁移**：`POST /api/qq/import-carrot` 把酒馆 carrot 插件导出的 JSON 一键导入到 BunnyOS——表情包按 url 去重 / 头像框按 char-user 拆 / 头像对成对入库 / 字体合并到 `beautyPresets.font` / 提示音合并到 `notify_savedSounds`
-- **图片缓存升级 IndexedDB**：发过的图片 dataURL 写到 IDB `bunnyos-qq/images`（旧 `localStorage qq:img:*` 启动时自动迁移）；后端 chat 文件不存 dataURL 但保留 `client_image_id`；AI prompt 只发最近一张
+- **聊天原图**：新图片保存在服务端；旧 `localStorage qq:img:*` 和 IDB `bunnyos-qq/images` 只由独立迁移入口读取，日常渲染和生成不访问旧缓存。
 - **存储管理**：设置 → 存储配置 → 缓存管理（IDB 图片库统计 + 清空 / 浏览器站点 caches 清空）；图床配置在同一页
 - **M8 对话框管理**：聊天页三个点面板"清空聊天记录 / 隐藏此聊天 / 删除聊天"三个操作；后端 `DELETE /api/qq/chats/:cid/messages` + chat 加 `hidden` 字段 `PATCH /api/qq/chats/:cid/hidden`；联系人列表过滤 `hidden`，顶栏"显示隐藏聊天"toggle；删除会级联清掉对应的 char-beauty/char-background
 - **分层总结记忆**：聊天页三个点把头像/头像框/气泡/背景收进默认折叠的“美化”，新增“总结”；默认每 100 层总结一次，第 101 层才触发。副 API 生成一张小总结卡写入指定总结世界书，未指定时自动新建“角色名的记忆”；旧层只从 prompt 隐藏，不删聊天记录。启用小总结满 5 张后询问是否生成大总结，用户阅览确认后保存并关闭对应 5 张小卡
@@ -319,11 +330,17 @@ cd /opt/bunnyos
 npm install --omit=dev
 ```
 
-在 `ecosystem.config.js` 的 `env` 中设置一个长随机密钥：
+在独立存储目录（默认 `/opt/bunnyos-data`）创建 `server-env.json`，线上设置不要写回程序目录的 `ecosystem.config.js`：
 
-```js
-BUNNYOS_UPDATE_TOKEN: '换成一长串随机字符'
+```json
+{
+  "BUNNYOS_PASSWORD": "至少16字符的登录密码",
+  "BUNNYOS_ORIGIN": "https://你的域名",
+  "BUNNYOS_UPDATE_TOKEN": "换成一长串随机字符"
+}
 ```
+
+将该文件权限设为 `600`。自定义存储目录时，每次启动 PM2 或部署脚本都要设置相同的 `BUNNYOS_STORAGE_DIR`；PowerShell 部署脚本使用 `-StoragePath` 参数。
 
 然后启动：
 
@@ -342,7 +359,21 @@ Events: Just the push event
 
 安全注意：
 
-- `BUNNYOS_UPDATE_TOKEN` 不要提交到 GitHub；只放在 VPS 的 PM2 环境或线上 `ecosystem.config.js`。
+- `BUNNYOS_UPDATE_TOKEN` 等线上配置只放在独立存储目录的 `server-env.json` 或环境变量中，不提交到 GitHub。
 - `data/`、`settings.json`、`node_modules/` 不要提交；它们在 `.gitignore` 中应保持忽略。
-- Webhook 更新会在 `git reset --hard origin/main` 前临时备份并恢复 `settings.json`、`data/`、上传壁纸/图标目录以及线上 `ecosystem.config.js`，避免 GitHub 代码更新覆盖线上设置、聊天记录、API Key 和 PM2 token。
+- Webhook 更新只 fetch/reset 程序、安装依赖并重启 PM2，不复制或恢复用户数据。部署包也始终排除用户数据。
 - 这个 webhook 端点只有设置了 `BUNNYOS_UPDATE_TOKEN` 才启用；没有 token 时返回 404。
+
+### 从程序目录内存储升级（仅一次）
+
+首次升级请停用旧 webhook 更新流程。先停止旧服务，再安装新代码并迁移数据：
+
+```bash
+pm2 stop bunnyos
+# 获取本版本代码后，在程序目录执行；--pm2 会保留 PM2 中的 BunnyOS 环境配置。
+node scripts/migrate-storage.js --pm2
+pm2 startOrRestart ecosystem.config.js --update-env
+pm2 save
+```
+
+本地启动器用户先关闭旧服务窗口，再执行 `node scripts/migrate-storage.js`。迁移按原路径移动 `settings.json`、`data/` 和上传壁纸/图标目录，不覆盖已存在的目标；跨文件系统移动或目标冲突会中止，需要处理后再重试。旧目录仍有用户数据时，新服务会拒绝启动，防止静默切换到空存储。VPS 部署脚本在检测到旧目录时会先停止服务，再执行这一次迁移；此后更新不再接触用户数据。

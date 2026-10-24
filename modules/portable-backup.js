@@ -195,7 +195,7 @@ function createPortableBackupFeature({ app, rootDir }) {
         try {
             const backup = createPortableBackup(rootDir);
             if (backup.missingChatImages) {
-                return res.status(409).json({ error: `还有 ${backup.missingChatImages} 张聊天原图未上传，请在保存过原图的浏览器打开 QQ 完成迁移后再备份。` });
+                return res.status(409).json({ error: `还有 ${backup.missingChatImages} 张聊天原图未上传，请在保存过原图的浏览器进入设置的旧图片迁移入口，完成迁移后再备份。` });
             }
             res.json(backup);
         } catch (error) {

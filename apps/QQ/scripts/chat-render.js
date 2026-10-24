@@ -66,8 +66,6 @@ function renderActiveChat(options = {}) {
 
     $('#chat-title').textContent = character.name || '未命名';
     if (typeof syncActiveGenerationUi === 'function') syncActiveGenerationUi();
-    // 套用该 char 的美化：头像对 + 头像框（applyCharBeauty 完成后会 refreshMessageAvatars 把已渲染头像 src 换掉）
-    applyCharBeauty(character.id);
     const statusEl = $('#chat-status');
     if (statusEl && !statusEl.dataset.typing) statusEl.textContent = '在线';
     const box = $('#chat-messages');
@@ -150,8 +148,7 @@ function renderActiveChat(options = {}) {
         box.scrollTop = box.scrollHeight;
     }
     logChatLayoutDebug();
-    // 历史图片从 IndexedDB 拉到 state.imageAttachments，拉到再重渲一次（无图片时是 no-op）
-    if (typeof preloadImagesForActiveChat === 'function') preloadImagesForActiveChat(visibleRange.startIndex);
+
 }
 
 function logChatLayoutDebug() {
@@ -232,21 +229,13 @@ function messageContentHtml(msg, idx) {
         </div>`;
     }
     if (msg.type === 'sticker' || msg.type === 'image') {
-        // 图片优先级：当次 in-memory dataURL > state.imageAttachments（renderActiveChat 末尾的 IDB 预加载会填充）
-        let imageSrc = '';
-        if (msg.type === 'image') {
-            imageSrc = msg.image
-                || msg.image_url
-                || state.imageAttachments?.[msg.client_image_id]?.dataUrl
-                || '';
-        } else {
-            imageSrc = msg.image || '';
-        }
+        const imageSrc = msg.type === 'image' ? (msg.image_url || msg.image || '') : (msg.image || '');
         if (!imageSrc) {
             return `<div class="qq-message">${reply}${escapeHtml(msg.text || '[图片]')}</div>`;
         }
         return `<div class="qq-message qq-message-media">${reply}<img src="${escapeAttr(imageSrc)}" alt="${escapeAttr(msg.text || '')}" loading="lazy" decoding="async"></div>`;
     }
+    if (msg.type === 'transfer-receipt') return `<div class="qq-message">已领取红包</div>`;
     if (msg.type === 'transfer') {
         const amount = `${escapeHtml(msg.currency || '')}${escapeHtml(msg.amount || '')}`;
         const note = msg.note ? `<div class="qq-transfer-note">${escapeHtml(msg.note)}</div>` : '';
@@ -291,13 +280,6 @@ function messageContentHtml(msg, idx) {
             : '';
         const href = escapeAttr(msg.url || '');
         return `<div class="qq-message qq-link-card">${reply}<a class="qq-link-card-inner" href="${href}" target="_blank" rel="noopener noreferrer">${img}<div class="qq-link-body"><div class="qq-link-title">${t}</div>${d}${comments}${limited}<div class="qq-link-site">${site}</div></div></a></div>`;
-    }
-    // 兼容修复前已经以普通 text 存盘的三段/四段生活服务协议，刷新后也能渲染成卡片。
-    if (msg.role === 'assistant' && msg.type === 'text' && typeof parseAssistantSegment === 'function') {
-        const legacyService = parseAssistantSegment(activeMessageText(msg));
-        if (legacyService?.kind === 'service') {
-            return commerceCardHtml({ ...msg, ...legacyService, type: 'service' }, reply);
-        }
     }
     const voice = parseVoiceText(activeMessageText(msg));
     if (voice) {
@@ -404,4 +386,19 @@ function refreshMessageAvatars() {
         const slot = row.querySelector('.qq-message-avatar .qq-avatar');
         if (slot) slot.innerHTML = avatarHtml(isAssistant ? charUrl : userUrl);
     });
+}
+
+// Only animate the DOM: every bubble is already present in the saved chat.
+async function revealSavedReply(chat) {
+    if (state.activeChatId !== chat.characterId || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    const group = getReplyGroup(chat, chat.messages.length - 1);
+    const box = $('#chat-messages');
+    const rows = Array.from(box?.querySelectorAll('[data-idx]') || []).filter(row => Number(row.dataset.idx) >= group.start);
+    rows.slice(1).forEach(row => { row.style.display = 'none'; });
+    for (const row of rows.slice(1)) {
+        await sleep(Math.min(1400, 350 + (chat.messages[Number(row.dataset.idx)]?.text || '').length * 45));
+        if (state.activeChatId !== chat.characterId || !row.isConnected) return;
+        row.style.display = '';
+        box.scrollTop = box.scrollHeight;
+    }
 }

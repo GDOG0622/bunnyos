@@ -16,11 +16,20 @@ const { installAccessControl, installStaticFiles, secretEquals } = require('./mo
 const { validateFileId, fileForId, safeStoragePath } = require('./modules/storage-path');
 const { chatVersion, requireChatVersion, atomicWriteJson, persistChatImages } = require('./modules/chat-storage');
 
+const { storageRoot, requireExternalStorage } = require('./modules/storage-root');
+const { versionOf, requireVersion, applyFieldPatch } = require('./modules/versioned-json');
+const StPreset = require('./assets/scripts/st-preset');
+const QqReplies = require('./assets/scripts/qq-replies');
+const { createEconomyStore } = require('./modules/economy-store');
+const { migrateSettings } = require('./modules/settings-migration');
+const STORAGE_ROOT = storageRoot(__dirname);
+requireExternalStorage(__dirname, STORAGE_ROOT);
+
 const app = express();
 const PORT = Number(process.env.PORT ?? 3000);
 
 app.disable('x-powered-by');
-installAccessControl(app, { rootDir: __dirname });
+installAccessControl(app, { rootDir: STORAGE_ROOT });
 app.use((req, res, next) => {
     res.setHeader('Permissions-Policy', 'microphone=(self), camera=(self)');
     next();
@@ -121,15 +130,15 @@ app.use((err, req, res, next) => {
     next(err);
 });
 
-installStaticFiles(app, __dirname);
+installStaticFiles(app, __dirname, STORAGE_ROOT);
 
 // 萝卜机目录结构
 const APPS_DIR = path.join(__dirname, 'apps');
-const DATA_DIR = path.join(__dirname, 'data');
-const ASSETS_DIR = path.join(__dirname, 'assets');
+const DATA_DIR = path.join(STORAGE_ROOT, 'data');
+const ASSETS_DIR = path.join(STORAGE_ROOT, 'assets');
 const BACKGROUNDS_DIR = path.join(ASSETS_DIR, 'backgrounds');
 const APP_ICONS_DIR = path.join(ASSETS_DIR, 'app-icons');
-const SETTINGS_FILE = path.join(__dirname, 'settings.json');
+const SETTINGS_FILE = path.join(STORAGE_ROOT, 'settings.json');
 const PRESETS_FILE = path.join(DATA_DIR, 'presets', 'image-prompts.json');
 const ST_PRESETS_DIR = path.join(DATA_DIR, 'presets', 'st-presets');
 const ST_PRESETS_SETTINGS_FILE = path.join(DATA_DIR, 'presets', 'st-presets-settings.json');
@@ -232,7 +241,13 @@ ensureFileExist(WALLET_FILE, { balance: WALLET_INITIAL_BALANCE, updated_at: Date
 ensureFileExist(QQ_BEAUTIES_FILE, defaultBeautiesData());
 ensureFileExist(QQ_CHAR_BEAUTY_FILE, {});
 fs.mkdirSync(QQ_BEAUTY_BG_DIR, { recursive: true });
-createPortableBackupFeature({ app, rootDir: __dirname });
+const economy = createEconomyStore({ rootDir: STORAGE_ROOT, file: WALLET_FILE });
+economy.recover();
+app.use('/api', (req, res, next) => {
+    try { economy.recover(); next(); }
+    catch (error) { res.status(503).json({ error: '交易已提交，正在恢复聊天或美化文件。请使用原请求重试：' + error.message }); }
+});
+createPortableBackupFeature({ app, rootDir: STORAGE_ROOT });
 // 兜底：若文件存在但缺类目或缺 default 项，补齐
 {
     const cur = readJsonFile(QQ_BEAUTIES_FILE, {});
@@ -366,6 +381,19 @@ function readJsonFile(filePath, fallback) {
 }
 
 function writeJsonFile(filePath, data) {
+    if (filePath.startsWith(CHATS_DIR + path.sep) && Array.isArray(data?.messages)) {
+        projectTransferState(data.messages, data.characterId);
+        let committed = false;
+        for (const message of data.messages) {
+            if (message?.role !== 'user' || message.type !== 'transfer' || message.status !== 'received') continue;
+            const transactionId = message.transaction_id;
+            if (!economy.find(`accept:${transactionId}`) && !economy.find(`refund:${transactionId}`)) {
+                economy.commit({ id: `accept:${transactionId}`, delta: 0, details: { transactionId }, effects: [{ file: filePath, data }] });
+                committed = true;
+            }
+        }
+        if (committed) return;
+    }
     atomicWriteJson(filePath, data);
 }
 
@@ -424,25 +452,49 @@ function stPresetIdFromName(name) {
 }
 
 function uniqueStPresetId(name, currentId = '') {
-    const requested = String(name || '').trim();
-    if (!requested || requested.length > 80 || /[<>:"/\\|?*\x00-\x1f]/.test(requested)
-        || /[. ]$/.test(requested) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(requested)) {
-        const error = new Error('预设名称不能为空、超过 80 字，或包含文件名禁用字符');
-        error.statusCode = 400;
-        throw error;
-    }
-    const base = stPresetIdFromName(requested);
-    if (base.toLocaleLowerCase('zh-CN') !== String(currentId).toLocaleLowerCase('zh-CN')
-        && fs.readdirSync(ST_PRESETS_DIR).some(file => file.toLocaleLowerCase('zh-CN') === `${base}.json`.toLocaleLowerCase('zh-CN'))) {
-        const error = new Error(`预设名称不能重复：${base}`);
+    const requested = worldbookStore.validateName(name);
+    if (listStPresetSummaries().some(preset => preset.id !== currentId
+        && preset.name.toLocaleLowerCase('zh-CN') === requested.toLocaleLowerCase('zh-CN'))) {
+        const error = new Error(`预设名称不能重复：${requested}`);
         error.statusCode = 409;
         throw error;
     }
-    return base;
+    return currentId || `preset_${crypto.randomUUID()}`;
 }
 
 function stPresetFile(id) {
-    return fileForId(ST_PRESETS_DIR, id);
+    validateFileId(id);
+    for (const name of fs.readdirSync(ST_PRESETS_DIR).filter(name => name.endsWith('.json'))) {
+        const file = path.join(ST_PRESETS_DIR, name);
+        const preset = readJsonFile(file, null);
+        if (preset?.extensions?.bunnyosPresetId === id
+            || (!preset?.extensions?.bunnyosPresetId && path.basename(name, '.json') === id)) return file;
+    }
+    const file = fileForId(ST_PRESETS_DIR, id);
+    if (fs.existsSync(file)) {
+        const error = new Error('预设不存在');
+        error.statusCode = 404;
+        throw error;
+    }
+    return file;
+}
+
+function writeStPreset(id, preset) {
+    const oldFile = stPresetFile(id);
+    const name = worldbookStore.validateName(preset.name || preset.preset_name || id);
+    const file = fileForId(ST_PRESETS_DIR, stPresetIdFromName(name));
+    const sameWindowsFile = process.platform === 'win32' && file.toLowerCase() === oldFile.toLowerCase();
+    if (file !== oldFile && !sameWindowsFile && fs.existsSync(file)) {
+        const error = new Error('预设名称不能重复');
+        error.statusCode = 409;
+        throw error;
+    }
+    if (file !== oldFile && fs.existsSync(oldFile)) {
+        const old = readJsonFile(oldFile, null);
+        writeJsonFile(oldFile, { ...old, extensions: { ...old.extensions, bunnyosPresetId: id } });
+        fs.renameSync(oldFile, file);
+    }
+    writeJsonFile(file, { ...preset, name, extensions: { ...preset.extensions, bunnyosPresetId: id } });
 }
 
 function ensureDefaultStPreset() {
@@ -450,8 +502,8 @@ function ensureDefaultStPreset() {
         ? fs.readdirSync(ST_PRESETS_DIR).filter(file => file.endsWith('.json'))
         : [];
     if (!files.length) {
-        const id = stPresetIdFromName('空白预设');
-        writeJsonFile(stPresetFile(id), buildBlankStPreset('空白预设'));
+        const id = `preset_${crypto.randomUUID()}`;
+        writeStPreset(id, buildBlankStPreset('空白预设'));
         writeJsonFile(ST_PRESETS_SETTINGS_FILE, { currentPresetId: id });
     }
 }
@@ -463,9 +515,9 @@ function summarizeStPreset(id, data, stat = null) {
     const markerCount = Array.from(promptMap.values()).filter(prompt => prompt.marker).length;
     const name = data?.name || data?.preset_name || id;
     return {
-        id,
+        id: data?.extensions?.bunnyosPresetId || id,
         name,
-        fileName: `${id}.json`,
+        fileName: path.basename(stPresetFile(data?.extensions?.bunnyosPresetId || id)),
         promptCount: Array.isArray(data?.prompts) ? data.prompts.length : 0,
         orderCount: order.length,
         enabledCount,
@@ -483,6 +535,10 @@ function listStPresetSummaries() {
             const filePath = path.join(ST_PRESETS_DIR, file);
             const data = readJsonFile(filePath, null);
             if (!isSillyTavernPreset(data)) return null;
+            if (!data.extensions?.bunnyosPresetId) {
+                data.extensions = { ...data.extensions, bunnyosPresetId: path.basename(file, '.json') };
+                writeJsonFile(filePath, data);
+            }
             return summarizeStPreset(path.basename(file, '.json'), data, fs.statSync(filePath));
         })
         .filter(Boolean)
@@ -609,7 +665,8 @@ function editableBuiltinBody(identifier) {
 }
 
 function initializeEditableBuiltinContent(preset) {
-    if (preset?.extensions?.bunnyosEditableBuiltinContent) return false;
+    const normalized = StPreset.normalize(preset, Object.fromEntries(StPreset.builtins.map(item => [item.identifier, editableBuiltinBody(item.identifier) ?? ''])));
+    if (preset?.extensions?.bunnyosEditableBuiltinContent) return normalized;
     if (!Array.isArray(preset?.prompts)) return false;
     for (const prompt of preset.prompts) {
         const fallback = editableBuiltinBody(prompt.identifier);
@@ -887,10 +944,10 @@ function getCurrentQqPromptPresetId() {
 }
 
 async function buildQqPresetPrompt(character, variables, userPersona, history = [], chatType = 'private', options = {}) {
-    const presetId = getCurrentQqPromptPresetId();
-    const storedPreset = presetId ? readJsonFile(stPresetFile(presetId), null) : null;
+    const presetId = options.presetId || getCurrentQqPromptPresetId();
+    const storedPreset = options.preset || (presetId ? readJsonFile(stPresetFile(presetId), null) : null);
     const preset = isSillyTavernPreset(storedPreset) ? storedPreset : buildBlankStPreset('空白预设');
-    if (initializeEditableBuiltinContent(preset) && storedPreset === preset && presetId) {
+    if (initializeEditableBuiltinContent(preset) && !options.preset && storedPreset === preset && presetId) {
         writeJsonFile(stPresetFile(presetId), preset);
     }
 
@@ -927,7 +984,35 @@ async function buildQqPresetPrompt(character, variables, userPersona, history = 
             fallbackReason: tokenizer.fallbackReason
         }
     });
-    return { ...built, presetId, includesChatHistory: true };
+    const pickNumber = (value, fallback) => Number.isFinite(parseFloat(value)) ? parseFloat(value) : fallback;
+    return { ...built, presetId, includesChatHistory: true, sampling: {
+        temperature: pickNumber(preset.temperature, 1), top_p: pickNumber(preset.top_p, 1),
+        frequency_penalty: pickNumber(preset.frequency_penalty, 0), presence_penalty: pickNumber(preset.presence_penalty, 0),
+        max_tokens: responseTokens
+    } };
+}
+
+async function prepareQqPrompt(character, messages, chatType = 'private', generationType = 'normal', options = {}) {
+    const settings = readJsonFile(SETTINGS_FILE, {});
+    const list = qqSummaryFeature.filterPromptMessages(messages);
+    const userPersona = getCurrentUserPersona();
+    const variables = buildPromptVariables({ characterId: character?.id || '', userName: userPersona?.name || '', messages: list });
+    const latestVisualIndex = list.findLastIndex(message => message?.role !== 'assistant'
+        && (message.type === 'image' && message.image_url || message.type === 'link' && message.imageLocal));
+    const history = list.map((message, index) => {
+        const role = qqMessageToPromptRole(message);
+        const text = message.type === 'image' ? (message.text || '[图片]') : qqMessageToPromptText(list, index);
+        if (role === 'user' && index === latestVisualIndex
+            && (message.type !== 'link' || !shouldCompactRichLinkMessage(list, index))) {
+            const image = localStaticImageToDataUrl(message.type === 'image' ? message.image_url : message.imageLocal);
+            if (image) return { role, content: [{ type: 'text', text: text || '[图片]' }, { type: 'image_url', image_url: { url: image } }] };
+        }
+        return { role, content: text };
+    }).filter(message => message.content);
+    return buildQqPresetPrompt(character, variables, userPersona, history, chatType, {
+        ...options, generationType, model: settings.mainApi_model,
+        contextTokens: Math.min(Math.max(parseInt(settings.mainApi_context, 10) || 8192, 1), 200000)
+    });
 }
 
 function savePersonaAvatar(id, name, dataUrl, oldAvatar = '') {
@@ -1099,18 +1184,27 @@ app.get('/api/apps', (req, res) => {
     }
 });
 
-// 1. 获取所有设置
+function readSettings() {
+    const data = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+    if (migrateSettings(data)) writeJsonFile(SETTINGS_FILE, data);
+    return data;
+}
+
+function saveSettingsChanges(current, changes) {
+    const data = applyFieldPatch(current, changes);
+    data._updatedAt = Math.max(Date.now(), Number(current._updatedAt || 0) + 1);
+    writeJsonFile(SETTINGS_FILE, data);
+    broadcastSettingsUpdated(data);
+    return data;
+}
+
+function settingsResponse(data) {
+    return { ...data, _version: versionOf(data) };
+}
+
 app.get('/api/settings', (req, res) => {
-    try {
-        const rawData = fs.readFileSync(SETTINGS_FILE, 'utf-8');
-        const data = JSON.parse(rawData);
-        if (data && typeof data === 'object' && !Array.isArray(data) && !data._updatedAt) {
-            data._updatedAt = Math.floor(fs.statSync(SETTINGS_FILE).mtimeMs);
-        }
-        res.json(data);
-    } catch (e) {
-        res.status(500).json({ error: "无法读取 settings.json" });
-    }
+    try { res.json(settingsResponse(readSettings())); }
+    catch (error) { res.status(500).json({ error: '无法读取设置' }); }
 });
 
 app.get('/api/settings/events', (req, res) => {
@@ -1132,29 +1226,23 @@ app.get('/api/settings/events', (req, res) => {
     });
 });
 
-// 2. 保存设置
-app.post('/api/settings', (req, res) => {
+app.all('/api/settings', (req, res, next) => {
+    if (!['PATCH', 'POST'].includes(req.method)) return next();
     try {
-        const current = readJsonFile(SETTINGS_FILE, {});
-        const data = { ...current, ...(req.body || {}), _updatedAt: Date.now() };
-        writeJsonFile(SETTINGS_FILE, data);
-        broadcastSettingsUpdated(data);
-        res.json({ success: true, message: "设置已保存", settings: data, updatedAt: data._updatedAt });
-    } catch (e) {
-        res.status(500).json({ error: "保存设置失败" });
+        const current = readSettings();
+        requireVersion(current, req.body?.version, 'SETTINGS_VERSION_CONFLICT');
+        const data = saveSettingsChanges(current, req.body?.changes);
+        res.json({ success: true, settings: settingsResponse(data) });
+    } catch (error) {
+        res.status(error.statusCode || 500).json({ error: error.message, error_code: error.code });
     }
 });
 
 // ========== 钱包（萝卜币 / carrot coin）==========
 // 全局财务文件，余额不可负数。AI 端不暴露余额，详见 QQ美化系统计划.md §1.1
 function readWallet() {
-    const data = readJsonFile(WALLET_FILE, null);
-    if (!data || typeof data.balance !== 'number') {
-        const init = { balance: WALLET_INITIAL_BALANCE, updated_at: Date.now() };
-        writeJsonFile(WALLET_FILE, init);
-        return init;
-    }
-    return data;
+    const { balance, updated_at } = economy.read();
+    return { balance, updated_at };
 }
 
 app.get('/api/wallet', (req, res) => {
@@ -1168,21 +1256,14 @@ app.get('/api/wallet', (req, res) => {
 app.post('/api/wallet/adjust', (req, res) => {
     try {
         const delta = Number(req.body?.delta);
-        const reason = String(req.body?.reason || '').slice(0, 200);
-        if (!Number.isFinite(delta) || delta === 0) {
-            return res.status(400).json({ error: 'delta 必须为非零数字' });
+        const requestId = req.body?.requestId;
+        if (!Number.isFinite(delta) || delta === 0 || typeof requestId !== 'string' || !requestId) {
+            return res.status(400).json({ error: '需要非零 delta 和 requestId' });
         }
-        const wallet = readWallet();
-        const next = wallet.balance + delta;
-        if (next < 0) {
-            return res.status(402).json({ error: '余额不足', balance: wallet.balance, delta });
-        }
-        const updated = { balance: next, updated_at: Date.now() };
-        writeJsonFile(WALLET_FILE, updated);
-        console.log(`[WALLET] ${delta > 0 ? '+' : ''}${delta} → ${next}${reason ? ` (${reason})` : ''}`);
-        res.json(updated);
-    } catch (e) {
-        res.status(500).json({ error: '钱包写入失败' });
+        economy.commit({ id: `adjust:${requestId}`, delta, details: { reason: String(req.body?.reason || '').slice(0, 200) } });
+        res.json(readWallet());
+    } catch (error) {
+        res.status(error.statusCode || 500).json({ error: error.message, balance: error.balance });
     }
 });
 
@@ -1235,25 +1316,24 @@ app.post('/api/qq/beauties/:type', (req, res) => {
     try {
         const name = String(req.body?.name || '').trim() || '未命名美化';
         const price = BEAUTY_PRICES[type] || 0;
-        if (price > 0) {
-            const wallet = readWallet();
-            if (wallet.balance < price) {
-                return res.status(402).json({ error: '余额不足', balance: wallet.balance, price });
-            }
-            const next = wallet.balance - price;
-            writeJsonFile(WALLET_FILE, { balance: next, updated_at: Date.now() });
-            console.log(`[WALLET] -${price} → ${next} (create ${type})`);
+        const requestId = req.body?.requestId;
+        if (typeof requestId !== 'string' || !requestId) return res.status(400).json({ error: '缺少 requestId' });
+        const transactionId = `beauty:${requestId}`;
+        const previous = economy.find(transactionId);
+        if (previous) {
+            economy.commit({ id: transactionId, delta: -price, details: { type, name } });
+            return res.json(previous.result.item);
         }
         const data = readBeauties();
         const id = shortId();
-        const item = { ...defaultBeautyItem(type), id, name };
+        const item = { ...defaultBeautyItem(type), id, name, transaction_id: transactionId };
         data[type] = Array.isArray(data[type]) ? data[type] : [defaultBeautyItem(type)];
         data[type].push(item);
-        writeJsonFile(QQ_BEAUTIES_FILE, data);
+        economy.commit({ id: transactionId, delta: -price, details: { type, name }, result: { item }, effects: [{ file: QQ_BEAUTIES_FILE, data }] });
         res.json(item);
     } catch (e) {
         console.error('[BEAUTY POST]', e);
-        res.status(500).json({ error: '创建美化失败' });
+        res.status(e.statusCode || 500).json({ error: e.message || '创建美化失败', balance: e.balance });
     }
 });
 
@@ -1469,17 +1549,6 @@ app.get('/api/qq/char-beauty-usage/:type/:id', (req, res) => {
 
 // Prompt token 估算（沿用 SillyTavern fallback 思路：CJK 字符 ≈ 1tk，其余 ≈ 4 字符 / tk）
 // 没有上 gpt-tokenizer lib；这是粗估，用于面板显示当前 prompt 大致体积
-function estimateTokens(text) {
-    if (!text) return 0;
-    let cjk = 0;
-    let other = 0;
-    for (const ch of String(text)) {
-        if (/[一-鿿㐀-䶿぀-ヿ　-〿가-힯]/.test(ch)) cjk++;
-        else other++;
-    }
-    return Math.ceil(cjk + other / 4);
-}
-
 function promptMessagesToText(messages = []) {
     return (Array.isArray(messages) ? messages : []).map((m, idx) => {
         const role = m?.role || 'unknown';
@@ -1505,24 +1574,11 @@ app.get('/api/qq/chat-tokens/:characterId', async (req, res) => {
         if (!character) return res.status(404).json({ error: '未找到角色' });
         const chatFile = fileForId(CHATS_DIR, characterId);
         const chatRaw = readJsonFile(chatFile, { messages: [] });
-        const list = qqSummaryFeature.filterPromptMessages(chatRaw?.messages);
-        const userPersona = getCurrentUserPersona();
-        const variables = buildPromptVariables({ characterId, userName: userPersona?.name || '', messages: list });
-        const history = list
-            .map((m, idx) => ({ role: qqMessageToPromptRole(m), content: qqMessageToPromptText(list, idx) }))
-            .filter(m => m.content);
-        const settings = readJsonFile(SETTINGS_FILE, {});
-        const presetId = getCurrentQqPromptPresetId();
-        const presetRaw = presetId ? readJsonFile(stPresetFile(presetId), null) : null;
-        const responseTokens = Math.min(Math.max(parseInt(presetRaw?.openai_max_tokens, 10) || 2048, 1), 200000);
-        const contextTokens = Math.min(Math.max(parseInt(settings.mainApi_context, 10) || 8192, 1), 200000);
-        const presetPrompt = await buildQqPresetPrompt(character, variables, userPersona, history, 'private', { contextTokens, responseTokens, model: settings.mainApi_model });
-        const messages = presetPrompt
-            ? presetPrompt.messages
-            : [{ role: 'system', content: buildCharacterSystemPrompt(character, variables, userPersona) }, ...history];
+        const presetPrompt = await prepareQqPrompt(character, chatRaw.messages);
+        const messages = presetPrompt.messages;
         const promptText = promptMessagesToText(messages);
         res.json({
-            tokens: presetPrompt?.itemization?.estimatedPromptTokens ?? estimateTokens(promptText),
+            tokens: presetPrompt.itemization.estimatedPromptTokens,
             messageCount: messages.length,
             chars: promptText.length,
             promptText,
@@ -1811,8 +1867,8 @@ app.post('/api/upload/image-host', async (req, res) => {
                 if (target === 'catbox') url = await uploadToCatbox(parsed);
                 else if (target === 'custom') url = await uploadToCustomHost(parsed, host.custom);
                 if (url) {
-                    settings.imageHost = { ...host, lastWorking: target };
-                    writeJsonFile(SETTINGS_FILE, settings);
+                    const latest = readSettings();
+                    saveSettingsChanges(latest, { imageHost: { ...latest.imageHost, lastWorking: target } });
                     return res.json({ url, host: target });
                 }
             } catch (err) {
@@ -1958,6 +2014,7 @@ app.post('/api/qq/import-carrot', (req, res) => {
             allSettings.imported_carrot.notifFailBody = obj.cip_notif_fail_body_v1 || '';
             report.notifSounds = Object.keys(sounds).length;
         }
+        migrateSettings(allSettings, true);
         writeJsonFile(SETTINGS_FILE, allSettings);
 
         // 真正跳过的字段（命名空间冲突或暂无对应 UI）
@@ -1984,22 +2041,10 @@ app.post('/api/admin/update-from-github', (req, res) => {
         'set -e',
         `cd ${shellQuote(__dirname)}`,
         'BRANCH="${BUNNYOS_UPDATE_BRANCH:-main}"',
-        'TMP_DIR="$(mktemp -d)"',
-        '[ ! -f settings.json ] || cp -a settings.json "$TMP_DIR/settings.json"',
-        '[ ! -d data ] || cp -a data "$TMP_DIR/data"',
-        '[ ! -d assets/backgrounds ] || { mkdir -p "$TMP_DIR/assets"; cp -a assets/backgrounds "$TMP_DIR/backgrounds"; }',
-        '[ ! -d assets/app-icons ] || { mkdir -p "$TMP_DIR/assets"; cp -a assets/app-icons "$TMP_DIR/app-icons"; }',
-        '[ ! -f ecosystem.config.js ] || cp -a ecosystem.config.js "$TMP_DIR/ecosystem.config.js"',
         'git fetch origin "$BRANCH"',
         'git reset --hard "origin/$BRANCH"',
-        '[ ! -f "$TMP_DIR/settings.json" ] || cp -a "$TMP_DIR/settings.json" settings.json',
-        '[ ! -d "$TMP_DIR/data" ] || { rm -rf data && cp -a "$TMP_DIR/data" data; }',
-        '[ ! -d "$TMP_DIR/backgrounds" ] || { mkdir -p assets && rm -rf assets/backgrounds && cp -a "$TMP_DIR/backgrounds" assets/backgrounds; }',
-        '[ ! -d "$TMP_DIR/app-icons" ] || { mkdir -p assets && rm -rf assets/app-icons && cp -a "$TMP_DIR/app-icons" assets/app-icons; }',
-        '[ ! -f "$TMP_DIR/ecosystem.config.js" ] || cp -a "$TMP_DIR/ecosystem.config.js" ecosystem.config.js',
-        'rm -rf "$TMP_DIR"',
         'npm install --omit=dev',
-        'pm2 restart bunnyos --update-env',
+        'pm2 startOrRestart ecosystem.config.js --update-env',
         'pm2 save'
     ].join(' && ');
 
@@ -2088,7 +2133,7 @@ app.get('/api/st-presets', (req, res) => {
 // 以下静态路径必须放在 :id 之前，否则会被 :id 吃掉
 app.post('/api/st-presets/current', (req, res) => {
     try {
-        const id = stPresetIdFromName(req.body?.id || '');
+        const id = validateFileId(req.body?.id);
         if (!fs.existsSync(stPresetFile(id))) return res.status(404).json({ error: '未找到酒馆预设' });
         const settings = readJsonFile(ST_PRESETS_SETTINGS_FILE, {});
         writeJsonFile(ST_PRESETS_SETTINGS_FILE, { ...settings, currentPresetId: id });
@@ -2104,7 +2149,7 @@ app.post('/api/st-presets/new', (req, res) => {
         const name = String(req.body?.name || '空白预设').trim() || '空白预设';
         const id = uniqueStPresetId(name);
         const preset = buildBlankStPreset(name);
-        writeJsonFile(stPresetFile(id), preset);
+        writeStPreset(id, preset);
         const settings = readJsonFile(ST_PRESETS_SETTINGS_FILE, {});
         writeJsonFile(ST_PRESETS_SETTINGS_FILE, { ...settings, currentPresetId: id });
         res.json({ success: true, id });
@@ -2115,7 +2160,7 @@ app.post('/api/st-presets/new', (req, res) => {
 
 app.get('/api/st-presets/:id', (req, res) => {
     try {
-        const id = stPresetIdFromName(req.params.id);
+        const id = validateFileId(req.params.id);
         const file = stPresetFile(id);
         const preset = readJsonFile(file, null);
         if (!isSillyTavernPreset(preset)) return res.status(404).json({ error: '未找到酒馆预设' });
@@ -2135,11 +2180,11 @@ app.get('/api/st-presets/:id', (req, res) => {
 
 app.post('/api/st-presets/:id', (req, res) => {
     try {
-        const id = stPresetIdFromName(req.params.id);
+        const id = validateFileId(req.params.id);
         const preset = req.body?.preset;
         if (!isSillyTavernPreset(preset)) return res.status(400).json({ error: '不是有效的酒馆预设 JSON' });
         initializeEditableBuiltinContent(preset);
-        writeJsonFile(stPresetFile(id), preset);
+        writeStPreset(id, preset);
         res.json({ success: true, summary: summarizeStPreset(id, preset, fs.statSync(stPresetFile(id))) });
     } catch (e) {
         res.status(500).json({ error: '保存酒馆预设失败' });
@@ -2148,18 +2193,14 @@ app.post('/api/st-presets/:id', (req, res) => {
 
 app.post('/api/st-presets/:id/rename', (req, res) => {
     try {
-        const id = stPresetIdFromName(req.params.id);
+        const id = validateFileId(req.params.id);
         const name = String(req.body?.name || id).trim();
-        const nextId = uniqueStPresetId(name, id);
-        const oldFile = stPresetFile(id);
-        const nextFile = stPresetFile(nextId);
-        if (!fs.existsSync(oldFile)) return res.status(404).json({ error: '未找到酒馆预设' });
-        if (id !== nextId) fs.renameSync(oldFile, nextFile);
-        const preset = readJsonFile(nextFile, null);
-        if (isSillyTavernPreset(preset)) writeJsonFile(nextFile, { ...preset, name });
-        const settings = readJsonFile(ST_PRESETS_SETTINGS_FILE, {});
-        if (settings.currentPresetId === id) writeJsonFile(ST_PRESETS_SETTINGS_FILE, { ...settings, currentPresetId: nextId });
-        res.json({ success: true, id: nextId });
+        uniqueStPresetId(name, id);
+        const file = stPresetFile(id);
+        const preset = readJsonFile(file, null);
+        if (!isSillyTavernPreset(preset)) return res.status(404).json({ error: '未找到酒馆预设' });
+        writeStPreset(id, { ...preset, name });
+        res.json({ success: true, id });
     } catch (e) {
         res.status(e.statusCode || 500).json({ error: e.statusCode ? e.message : '重命名酒馆预设失败' });
     }
@@ -2167,11 +2208,12 @@ app.post('/api/st-presets/:id/rename', (req, res) => {
 
 app.post('/api/st-presets/:id/copy', (req, res) => {
     try {
-        const id = stPresetIdFromName(req.params.id);
+        const id = validateFileId(req.params.id);
         const preset = readJsonFile(stPresetFile(id), null);
         if (!isSillyTavernPreset(preset)) return res.status(404).json({ error: '未找到酒馆预设' });
-        const nextId = uniqueStPresetId(req.body?.name || `${id} 副本`);
-        writeJsonFile(stPresetFile(nextId), { ...preset, name: nextId });
+        const name = req.body?.name || `${preset.name || id} 副本`;
+        const nextId = uniqueStPresetId(name);
+        writeStPreset(nextId, { ...preset, name });
         res.json({ success: true, id: nextId });
     } catch (e) {
         res.status(e.statusCode || 500).json({ error: e.statusCode ? e.message : '复制酒馆预设失败' });
@@ -2180,11 +2222,11 @@ app.post('/api/st-presets/:id/copy', (req, res) => {
 
 app.post('/api/st-presets/:id/refresh-default', (req, res) => {
     try {
-        const id = stPresetIdFromName(req.params.id);
+        const id = validateFileId(req.params.id);
         const current = readJsonFile(stPresetFile(id), null);
         if (!isSillyTavernPreset(current)) return res.status(404).json({ error: '未找到预设' });
         const preset = buildBlankStPreset(current.name || id);
-        writeJsonFile(stPresetFile(id), preset);
+        writeStPreset(id, preset);
         const settings = readJsonFile(ST_PRESETS_SETTINGS_FILE, {});
         writeJsonFile(ST_PRESETS_SETTINGS_FILE, { ...settings, currentPresetId: id });
         res.json({ success: true, id });
@@ -2197,7 +2239,7 @@ app.delete('/api/st-presets/:id', (req, res) => {
     try {
         const presets = listStPresetSummaries();
         if (presets.length <= 1) return res.status(400).json({ error: '至少保留一个预设' });
-        const id = stPresetIdFromName(req.params.id);
+        const id = validateFileId(req.params.id);
         const file = stPresetFile(id);
         if (!fs.existsSync(file)) return res.status(404).json({ error: '未找到酒馆预设' });
         fs.rmSync(file, { force: true });
@@ -2216,7 +2258,7 @@ app.post('/api/st-presets/import-default', (req, res) => {
     try {
         const id = uniqueStPresetId('空白预设');
         const preset = buildBlankStPreset('空白预设');
-        writeJsonFile(stPresetFile(id), preset);
+        writeStPreset(id, preset);
         const settings = readJsonFile(ST_PRESETS_SETTINGS_FILE, {});
         writeJsonFile(ST_PRESETS_SETTINGS_FILE, { ...settings, currentPresetId: id });
         res.json({ success: true, id });
@@ -2242,7 +2284,7 @@ app.get('/api/qq/prompt-preset', (req, res) => {
 
 app.post('/api/qq/prompt-preset', (req, res) => {
     try {
-        const id = stPresetIdFromName(req.body?.id || '');
+        const id = validateFileId(req.body?.id);
         if (!fs.existsSync(stPresetFile(id))) return res.status(404).json({ error: '未找到提示词预设' });
         const qqSettings = readJsonFile(QQ_SETTINGS_FILE, {});
         writeJsonFile(QQ_SETTINGS_FILE, { ...qqSettings, currentPromptPresetId: id });
@@ -2303,10 +2345,10 @@ app.post('/api/qq/link-preview', async (req, res) => {
             return hostname || '链接';
         };
         const isGenericPreviewText = (text, hostname = host) => {
-            const value = String(text || '').trim().replace(/\s+/g, ' ');
+            const value = String(text || '').trim().replace(/[－—–]/g, '-').replace(/\s+/g, ' ');
             if (!value) return true;
             if (isXhsHost(hostname)) {
-                return /^(小红书|小红书 - 你的生活指南|小红书 - 标记我的生活|xiaohongshu|xhs)$/i.test(value)
+                return /^(小红书(?:\s*-\s*(?:你的生活指南|标记我的生活))?|xiaohongshu|xhs)$/i.test(value)
                     || /登录|访问链接异常|正在跳转|安全验证|验证码/.test(value);
             }
             if (isWeiboHost(hostname)) {
@@ -2586,7 +2628,15 @@ app.post('/api/qq/link-preview', async (req, res) => {
             }
         }
         // ── 工具：抓 HTML（追 HTTP redirect；解析 JS/meta redirect 兜底）──────────────
+        let browserHtmlUsed = false;
         const fetchHtml = async (targetUrl, timeout = 10000) => {
+            const frontend = req.body?.frontend;
+            if (!browserHtmlUsed && targetUrl === u.toString() && typeof frontend?.html === 'string'
+                && frontend.html.length <= 4 * 1024 * 1024 && frontend.finalUrl) {
+                browserHtmlUsed = true;
+                await assertPublicRemoteUrl(frontend.finalUrl);
+                return { finalUrl: frontend.finalUrl, html: frontend.html, resp: { ok: true, status: 200 } };
+            }
             const hdrs = {
                 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -3183,25 +3233,36 @@ app.post('/api/qq/link-preview', async (req, res) => {
 // 7. 世界书 —— 按「本」粒度
 app.get('/api/worldbooks', (req, res) => {
     try {
-        res.json({ books: readWorldbooks() });
+        res.json({ books: readWorldbooks().map(book => ({ ...book, _version: versionOf(book) })) });
     } catch (e) {
         res.status(500).json({ error: '读取世界书失败' });
     }
 });
 
-// 前端保存已加载的书；保留保存期间由总结等流程新增的书
-app.post('/api/worldbooks', (req, res) => {
+app.patch('/api/worldbooks/books/:id', (req, res) => {
     try {
-        if (!Array.isArray(req.body?.books)) return res.status(400).json({ error: '世界书数据必须是数组' });
-        const byId = new Map(readWorldbooks().map(book => [book.id, book]));
-        for (const book of req.body.books) byId.set(book.id, book);
-        const books = [...byId.values()];
+        const books = readWorldbooks();
+        const index = books.findIndex(book => book.id === req.params.id);
+        if (index < 0) return res.status(404).json({ error: '世界书不存在' });
+        requireVersion(books[index], req.body?.version, 'WORLDBOOK_VERSION_CONFLICT');
+        const changes = req.body?.changes;
+        if (!changes || Object.keys(changes).some(key => !['name', 'entries'].includes(key))
+            || (changes.entries !== undefined && !Array.isArray(changes.entries))) {
+            return res.status(400).json({ error: '无效的世界书修改' });
+        }
+        const book = { ...applyFieldPatch(books[index], changes), updated_at: Date.now() };
+        books[index] = book;
         writeWorldbooks(books);
-        res.json({ success: true });
-    } catch (e) {
-        res.status(e.statusCode || 500).json({ error: e.statusCode ? e.message : '保存世界书失败' });
+        res.json({ book: { ...book, _version: versionOf(book) } });
+    } catch (error) {
+        res.status(error.statusCode || 500).json({ error: error.message, error_code: error.code });
     }
 });
+
+// Old whole-collection writers must reload instead of silently replacing newer entries.
+app.post('/api/worldbooks', (req, res) => res.status(409).json({
+    error: '请刷新编辑器，使用带版本的世界书局部保存', error_code: 'WORLDBOOK_VERSION_CONFLICT'
+}));
 
 // 新建空白本
 app.post('/api/worldbooks/books', (req, res) => {
@@ -3222,7 +3283,11 @@ app.post('/api/worldbooks/books', (req, res) => {
 app.delete('/api/worldbooks/books/:id', (req, res) => {
     try {
         const id = req.params.id;
-        const books = readWorldbooks().filter(book => book.id !== id);
+        const currentBooks = readWorldbooks();
+        const currentBook = currentBooks.find(book => book.id === id);
+        if (!currentBook) return res.status(404).json({ error: '世界书不存在' });
+        requireVersion(currentBook, req.body?.version, 'WORLDBOOK_VERSION_CONFLICT');
+        const books = currentBooks.filter(book => book.id !== id);
         writeWorldbooks(books);
         // 清理 QQ 全局选择
         const qqSettings = readJsonFile(QQ_SETTINGS_FILE, {});
@@ -3244,7 +3309,7 @@ app.delete('/api/worldbooks/books/:id', (req, res) => {
         }
         res.json({ success: true });
     } catch (e) {
-        res.status(500).json({ error: '删除世界书失败' });
+        res.status(e.statusCode || 500).json({ error: e.message || '删除世界书失败', error_code: e.code });
     }
 });
 
@@ -3302,31 +3367,18 @@ app.post('/api/qq/global-worldbooks', (req, res) => {
     }
 });
 
-// 装配预览：实际 world_info / memories 内容（供前端展开查看）
-app.get('/api/qq/preset-marker-preview', (req, res) => {
+app.post('/api/qq/prompt-preview', async (req, res) => {
     try {
-        const characterId = String(req.query?.characterId || '');
-        const character = characterId
-            ? readJsonFile(fileForId(CHARACTERS_DIR, characterId), null)
-            : null;
-        const qqSettings = readJsonFile(QQ_SETTINGS_FILE, {});
-        const summaryWorldbookId = getSummaryWorldbookId(character);
-        res.json({
-            world_info: buildWorldbooksContent(
-                [...new Set([
-                    ...(Array.isArray(character?.worldbookIds) ? character.worldbookIds : []),
-                    ...(Array.isArray(qqSettings.globalWorldbookIds) ? qqSettings.globalWorldbookIds : []),
-                ].filter(id => id && id !== summaryWorldbookId))],
-                ''
-            ),
-            memories: buildWorldbooksContent(
-                summaryWorldbookId ? [summaryWorldbookId] : [],
-                'memory'
-            )
-        });
-    } catch (e) {
-        res.status(500).json({ error: '读取 marker 预览失败' });
-    }
+        const characterId = req.body?.characterId || '';
+        const character = characterId ? readJsonFile(fileForId(CHARACTERS_DIR, characterId), null) : null;
+        if (characterId && !character) return res.status(404).json({ error: '角色不存在' });
+        if (req.body?.preset && !isSillyTavernPreset(req.body.preset)) return res.status(400).json({ error: '无效预设' });
+        const chat = characterId ? readJsonFile(fileForId(CHATS_DIR, characterId), { messages: [] }) : { messages: [] };
+        const built = await prepareQqPrompt(character, chat.messages, req.body?.chatType === 'group' ? 'group' : 'private',
+            req.body?.generationType || 'normal', { preset: req.body?.preset, presetId: req.body?.presetId });
+        res.json({ ...built, characterId, chatVersion: characterId ? chatVersion(fileForId(CHATS_DIR, characterId)) : null,
+            promptText: promptMessagesToText(built.messages) });
+    } catch (error) { res.status(error.statusCode || 500).json({ error: error.message }); }
 });
 
 // 8. 提示词变量
@@ -3606,15 +3658,53 @@ app.delete('/api/qq/characters/:id', (req, res) => {
 });
 
 // 单人聊天记录
-function sanitizeChatMessagesForStorage(messages) {
-    return persistChatImages(__dirname, Array.isArray(messages) ? messages : []);
+function transferId(characterId, message, index) {
+    return message.transaction_id || `transfer:${characterId}:${message.id || message.created_at || index}`;
+}
+
+function projectTransferState(messages, characterId) {
+    const transactions = new Map(economy.read().transactions.map(transaction => [transaction.id, transaction]));
+    const visit = (message, index) => {
+        if (message?.type === 'transfer') {
+            message.transaction_id = transferId(characterId, message, index);
+            const transaction = transactions.get(`receive:${message.transaction_id}`)
+                || transactions.get(`accept:${message.transaction_id}`) || transactions.get(`refund:${message.transaction_id}`);
+            if (transaction) {
+                message.status = transaction.id.startsWith('refund:') ? 'returned' : 'received';
+                message.settled_at = transaction.created_at;
+            }
+        }
+        for (const version of message?.reply_group_versions || []) (version.messages || []).forEach(visit);
+    };
+    messages.forEach(visit);
+    return messages;
+}
+
+function sanitizeChatMessagesForStorage(messages, characterId) {
+    const clean = persistChatImages(STORAGE_ROOT, structuredClone(Array.isArray(messages) ? messages : []));
+    for (let index = 0; index < clean.length; index++) {
+        const message = clean[index];
+        if (message?.role === 'assistant' && !message.id) message.id = `legacy:${characterId}:${message.created_at || index}`;
+        if (message?.role === 'assistant' && message.type === 'text') {
+            const parsed = QqReplies.parseSegments([message.text], `legacy:${characterId}:${message.id || message.created_at || index}`)[0];
+            if (parsed && parsed.type !== 'text') clean[index] = { ...parsed, ...message, type: parsed.type, text: parsed.text };
+        }
+    }
+    const chat = { messages: clean };
+    for (let index = 0; index < clean.length; index++) {
+        if (clean[index]?.role !== 'assistant') continue;
+        const group = QqReplies.getReplyGroup(chat, index);
+        QqReplies.ensureGroupVersions(chat, group);
+        index = group.end;
+    }
+    return projectTransferState(clean, characterId);
 }
 
 function sanitizeChatForStorage(chat) {
     const data = chat && typeof chat === 'object' ? chat : {};
     return {
         ...data,
-        messages: sanitizeChatMessagesForStorage(data.messages)
+        messages: sanitizeChatMessagesForStorage(data.messages, data.characterId)
     };
 }
 
@@ -3643,7 +3733,7 @@ app.get('/api/qq/chats', (req, res) => {
                 const file = path.join(CHATS_DIR, f);
                 const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
                 const clean = sanitizeChatForStorage(raw);
-                settleExpiredUserTransfers(clean.messages);
+                settleExpiredUserTransfers(clean.messages, clean.characterId);
                 if (JSON.stringify(raw) !== JSON.stringify(clean)) {
                     writeJsonFile(file, clean);
                 }
@@ -3672,7 +3762,7 @@ app.get('/api/qq/chats/:characterId', (req, res) => {
         if (!fs.existsSync(file)) return res.json({ characterId: req.params.characterId, messages: [], version: null });
         const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
         const clean = sanitizeChatForStorage(raw);
-        settleExpiredUserTransfers(clean.messages);
+        settleExpiredUserTransfers(clean.messages, clean.characterId);
         if (JSON.stringify(raw) !== JSON.stringify(clean)) {
             writeJsonFile(file, clean);
         }
@@ -3684,29 +3774,20 @@ app.get('/api/qq/chats/:characterId', (req, res) => {
 
 // user→char 红包按现实时间满 24 小时自动退回，与后续聊了多少轮无关。
 const TRANSFER_AUTO_RETURN_MS = 24 * 60 * 60 * 1000;
-function settleExpiredUserTransfers(messages, now = Date.now()) {
-    let walletDelta = 0;
+function settleExpiredUserTransfers(messages, characterId, now = Date.now()) {
     const updates = [];
     for (let i = 0; i < messages.length; i++) {
-        const m = messages[i];
-        if (!m || m.role !== 'user' || m.type !== 'transfer' || m.status !== 'pending') continue;
-        const sentAt = Number(m.created_at);
-        if (!Number.isFinite(sentAt) || now - sentAt < TRANSFER_AUTO_RETURN_MS) continue;
-        const amt = Number(m.amount);
-        if (!Number.isFinite(amt) || amt <= 0) continue;
-        m.status = 'returned';
-        m.settled_at = now;
-        walletDelta += amt;
-        updates.push({ idx: i, amount: amt });
-    }
-    if (walletDelta > 0) {
-        try {
-            const w = readWallet();
-            writeJsonFile(WALLET_FILE, { balance: w.balance + walletDelta, updated_at: Date.now() });
-            console.log(`[WALLET] +${walletDelta} (24h transfer auto-return × ${updates.length})`);
-        } catch (err) {
-            console.warn('[WALLET] auto-return write failed', err);
-        }
+        const message = messages[i];
+        if (message?.role !== 'user' || message.type !== 'transfer' || message.status !== 'pending') continue;
+        const sentAt = Number(message.created_at);
+        const amount = Number(message.amount);
+        if (!Number.isFinite(sentAt) || now - sentAt < TRANSFER_AUTO_RETURN_MS || !Number.isFinite(amount) || amount <= 0) continue;
+        const transactionId = transferId(characterId, message, i);
+        economy.commit({ id: `refund:${transactionId}`, delta: amount, details: { transactionId } });
+        message.transaction_id = transactionId;
+        message.status = 'returned';
+        message.settled_at = now;
+        updates.push({ idx: i, amount });
     }
     return updates;
 }
@@ -3750,7 +3831,7 @@ function scanAndScheduleExpiredUserTransfers() {
         const filePath = path.join(CHATS_DIR, fileName);
         try {
             const chat = sanitizeChatForStorage(readJsonFile(filePath, {}));
-            const updates = settleExpiredUserTransfers(chat.messages);
+            const updates = settleExpiredUserTransfers(chat.messages, chat.characterId);
             if (updates.length) {
                 writeJsonFile(filePath, chat);
                 settled += updates.length;
@@ -3764,68 +3845,42 @@ function scanAndScheduleExpiredUserTransfers() {
     return settled;
 }
 
-// 付费聊天卡片：扣款、消息落盘与幂等校验在同一个服务端操作内完成。
 app.post('/api/qq/chats/:characterId/paid-message', (req, res) => {
-    const characterId = String(req.params.characterId || '');
-    const requestId = String(req.body?.requestId || '').trim().slice(0, 160);
-    const cost = Number(req.body?.cost);
-    const reason = String(req.body?.reason || '').slice(0, 200);
-    const chatPath = fileForId(CHATS_DIR, characterId);
-    let walletBefore = null;
-    let chatBefore = null;
-    let chatExisted = false;
     try {
-        if (!characterId || !requestId) return res.status(400).json({ error: '缺少聊天或请求 ID' });
-        if (!Number.isFinite(cost) || cost <= 0) return res.status(400).json({ error: '金额必须是正数' });
+        const characterId = req.params.characterId;
+        const requestId = req.body?.requestId;
+        const cost = Number(req.body?.cost);
+        if (typeof requestId !== 'string' || !requestId || requestId.length > 160 || !Number.isFinite(cost) || cost <= 0) {
+            return res.status(400).json({ error: '缺少有效的请求 ID 或金额' });
+        }
         const message = sanitizeChatMessagesForStorage([{ ...(req.body?.message || {}) }])[0];
-        if (!message || message.role !== 'user' || !['transfer', 'service'].includes(message.type)) {
-            return res.status(400).json({ error: '仅支持转账或服务卡片' });
+        if (message.role !== 'user' || !['transfer', 'service'].includes(message.type)
+            || Math.abs(Number(message.type === 'transfer' ? message.amount : message.price) - cost) > 0.000001
+            || !Number.isFinite(Number(message.type === 'transfer' ? message.amount : message.price))) {
+            return res.status(400).json({ error: '卡片类型或金额无效' });
         }
-        const declaredCost = Number(message.type === 'transfer' ? message.amount : message.price);
-        if (!Number.isFinite(declaredCost) || Math.abs(declaredCost - cost) > 0.000001) {
-            return res.status(400).json({ error: '卡片金额与扣款金额不一致' });
+        const transactionId = `paid:${characterId}:${requestId}`;
+        const details = { characterId, type: message.type, amount: cost };
+        const chatPath = fileForId(CHATS_DIR, characterId);
+        const previous = economy.find(transactionId);
+        if (previous) {
+            economy.commit({ id: transactionId, delta: -cost, details });
+            const chat = readJsonFile(chatPath, { characterId, messages: [] });
+            return res.json({ success: true, idempotent: true, ...readWallet(), message: previous.result.message, chat: chatResponse(chatPath, chat) });
         }
-        message.id = requestId;
-        message.client_request_id = requestId;
-        message.created_at = Number(message.created_at) || Date.now();
-
-        chatExisted = fs.existsSync(chatPath);
-        chatBefore = chatExisted ? fs.readFileSync(chatPath, 'utf-8') : null;
-        const chat = chatExisted ? sanitizeChatForStorage(JSON.parse(chatBefore)) : { characterId, messages: [] };
-        chat.messages = Array.isArray(chat.messages) ? chat.messages : [];
-        const existing = chat.messages.find(item => item?.client_request_id === requestId || item?.id === requestId);
-        if (existing) {
-            const wallet = readWallet();
-            return res.json({ success: true, idempotent: true, balance: wallet.balance, message: existing, chat: chatResponse(chatPath, chat) });
-        }
-
+        const chat = readJsonFile(chatPath, { characterId, messages: [] });
+        // Preserve retries of paid messages created before the transaction ledger existed.
+        const legacy = chat.messages.find(item => item.client_request_id === requestId || item.id === requestId);
+        if (legacy) return res.json({ success: true, idempotent: true, ...readWallet(), message: legacy, chat: chatResponse(chatPath, chat) });
         requireChatVersion(chatPath, req.body?.version);
-        walletBefore = readWallet();
-        const nextBalance = walletBefore.balance - cost;
-        if (nextBalance < 0) {
-            return res.status(402).json({ error: '余额不足', balance: walletBefore.balance, cost });
-        }
-        const now = Date.now();
+        Object.assign(message, { id: requestId, client_request_id: requestId, transaction_id: transactionId, created_at: Number(message.created_at) || Date.now() });
         chat.messages.push(message);
-        chat.characterId = characterId;
-        chat.updated_at = now;
-        writeJsonFile(WALLET_FILE, { balance: nextBalance, updated_at: now });
-        writeJsonFile(chatPath, chat);
+        chat.updated_at = Date.now();
+        economy.commit({ id: transactionId, delta: -cost, details, result: { message }, effects: [{ file: chatPath, data: chat }] });
         armTransferSettlement(findEarliestPendingTransferExpiry(chat.messages));
-        console.log(`[WALLET] -${cost} → ${nextBalance}${reason ? ` (${reason})` : ''}`);
-        res.json({ success: true, balance: nextBalance, message, chat: chatResponse(chatPath, chat) });
+        res.json({ success: true, ...readWallet(), message, chat: chatResponse(chatPath, chat) });
     } catch (error) {
-        if (error.statusCode === 409) return res.status(409).json({ error: error.message, error_code: error.code });
-        // 两个文件无法依靠文件系统实现真正的跨文件事务；同步失败时立即恢复旧快照。
-        try {
-            if (walletBefore) writeJsonFile(WALLET_FILE, walletBefore);
-            if (chatBefore !== null) fs.writeFileSync(chatPath, chatBefore, 'utf-8');
-            else if (!chatExisted && fs.existsSync(chatPath)) fs.rmSync(chatPath, { force: true });
-        } catch (rollbackError) {
-            console.error('[paid-message rollback failed]', rollbackError);
-        }
-        console.error('[paid-message]', error);
-        res.status(500).json({ error: '付费消息发送失败，未完成的扣款已回滚' });
+        res.status(error.statusCode || 500).json({ error: error.message, error_code: error.code, balance: error.balance });
     }
 });
 
@@ -3852,16 +3907,13 @@ app.post('/api/qq/chats/:characterId/transfer/:idx/receive', (req, res) => {
         if (!Number.isFinite(amt) || amt <= 0) return res.status(400).json({ error: '金额非法' });
 
         const settledAt = Date.now();
+        const transactionId = transferId(characterId, msg, idx);
+        msg.transaction_id = transactionId;
         msg.status = 'received';
         msg.settled_at = settledAt;
-
-        const w = readWallet();
-        const nextBalance = w.balance + amt;
-        writeJsonFile(WALLET_FILE, { balance: nextBalance, updated_at: settledAt });
         chat.updated_at = settledAt;
-        writeJsonFile(chatPath, chat);
-        console.log(`[WALLET] +${amt} (transfer received from ${characterId})`);
-        res.json({ success: true, balance: nextBalance, settled_at: settledAt, version: chatVersion(chatPath) });
+        economy.commit({ id: `receive:${transactionId}`, delta: amt, details: { characterId, transactionId }, effects: [{ file: chatPath, data: chat }] });
+        res.json({ success: true, ...readWallet(), settled_at: settledAt, version: chatVersion(chatPath) });
     } catch (e) {
         console.error('[transfer receive]', e);
         res.status(500).json({ error: '领取失败' });
@@ -3872,8 +3924,8 @@ app.post('/api/qq/chats/:characterId', (req, res) => {
     try {
         if (!Array.isArray(req.body?.messages)) return res.status(400).json({ error: 'messages 必须是数组' });
         const characterId = req.params.characterId;
-        const messages = sanitizeChatMessagesForStorage(req.body?.messages);
-        settleExpiredUserTransfers(messages);
+        const messages = sanitizeChatMessagesForStorage(req.body?.messages, characterId);
+        settleExpiredUserTransfers(messages, characterId);
         const chatFile = fileForId(CHATS_DIR, characterId);
         // 保留原 chat 的辅助字段（如 hidden），只覆盖 messages + updated_at
         const prev = fs.existsSync(chatFile) ? JSON.parse(fs.readFileSync(chatFile, 'utf8')) : {};
@@ -4140,64 +4192,19 @@ function qqMessageToText(msg, options = {}) {
 
 function localStaticImageToDataUrl(staticPath) {
     const value = String(staticPath || '').trim();
-    if (!value || !value.startsWith('/data/assets/link-previews/')) return '';
-    const abs = path.resolve(__dirname, value.replace(/^\/+/, ''));
-    const root = path.resolve(LINK_PREVIEWS_DIR);
-    if (!abs.startsWith(root + path.sep)) return '';
+    if (!/^\/data\/assets\/(?:link-previews|chat-images)\/[^/]+\.(?:png|jpg|jpeg|gif|webp|avif)$/.test(value)) return '';
+    const abs = safeStoragePath(STORAGE_ROOT, value.slice(1));
     if (!fs.existsSync(abs)) return '';
     const ext = path.extname(abs).toLowerCase();
-    const mime = ext === '.png' ? 'image/png'
+    const mime = ext === '.avif' ? 'image/avif' : ext === '.png' ? 'image/png'
         : ext === '.webp' ? 'image/webp'
             : ext === '.gif' ? 'image/gif'
                 : 'image/jpeg';
     const buf = fs.readFileSync(abs);
-    if (!buf.length || buf.length > 8 * 1024 * 1024) return '';
+    if (!buf.length || buf.length > 20 * 1024 * 1024) return '';
     return `data:${mime};base64,${buf.toString('base64')}`;
 }
 
-// 用角色卡拼出"你要扮演谁"的系统提示词
-function buildCharacterSystemPrompt(character, variables, userPersona = null) {
-    const lines = [
-        '你正在一个手机聊天软件（类似微信 / QQ）里扮演一个角色，正在用文字和用户私聊。',
-        '请始终以该角色的第一人称身份回复，不要跳出角色，不要解释你是 AI。',
-        ''
-    ];
-    const characterInfo = buildCharacterInfoPrompt(character);
-    if (characterInfo) {
-        lines.push(characterInfo);
-    }
-    const scenarioInfo = buildScenarioPrompt(character);
-    if (scenarioInfo) {
-        lines.push('', scenarioInfo);
-    }
-    const dialogueExamples = buildDialogueExamplesPrompt(character, variables);
-    if (dialogueExamples) {
-        lines.push('', dialogueExamples);
-    }
-    if (character.system_prompt && character.system_prompt.trim()) {
-        lines.push('', character.system_prompt.trim());
-    }
-    const userInfo = buildUserInfoPrompt(userPersona);
-    if (userInfo) {
-        lines.push('', userInfo);
-    }
-    lines.push('', `【与你对话的用户】${variables.user}`, `【当前时间】${variables.now}（${variables.weekday}）`);
-    lines.push(
-        '',
-        '【回复规则——必须严格遵守】',
-        '1. 只输出你作为角色要"说出口"的聊天内容本身。',
-        '2. 严禁任何动作、神态、场景或心理描写；严禁使用括号（）()、星号*、破折号旁白或任何小说式叙述。',
-        '3. 像真人发消息一样简短、口语化。把一次要表达的内容拆成若干条短消息，每条单独占一行，用换行分隔，通常 1~4 条。',
-        '4. 不要复述或解释用户的话，不要添加任何前后缀说明。'
-    );
-    const rpRulesTail = buildRpRulesTailPrompt(character);
-    if (rpRulesTail) {
-        lines.push('', rpRulesTail);
-    }
-    return renderPromptTemplate(lines.join('\n'), variables);
-}
-
-// 从 AI 输出里剥掉 <think>...</think> / <thinking>...</thinking>（含未闭合的）
 function stripThinkingTags(text) {
     return String(text || '')
         // 1. 闭合段：成对剥
@@ -4308,9 +4315,30 @@ function buildInternalErrorPayload(error, operation = 'reply') {
     };
 }
 
+const replyTasks = new Map();
+app.post('/api/qq/reply/cancel', (req, res) => {
+    const task = replyTasks.get(req.body?.characterId);
+    if (task?.id === req.body?.generationId) task.controller.abort();
+    res.json({ success: true });
+});
+
 app.post('/api/qq/reply', async (req, res) => {
+    const characterId = req.body?.characterId;
+    if (replyTasks.has(characterId)) return res.status(409).json({ error: '这个聊天正在生成中' });
+    const task = { id: req.body?.generationId, controller: new AbortController() };
+    replyTasks.set(characterId, task);
     try {
-        const { characterId, messages, chatType, generationType } = req.body || {};
+        const { characterId, chatType, generationType, replaceIndex } = req.body || {};
+        const chatFile = fileForId(CHATS_DIR, characterId);
+        requireChatVersion(chatFile, req.body?.version);
+        const chat = readJsonFile(chatFile, { characterId, messages: [] });
+        if (replaceIndex !== undefined && (!Number.isInteger(replaceIndex) || replaceIndex < 0
+            || chat.messages[replaceIndex]?.role !== 'assistant'
+            || QqReplies.getReplyGroup(chat, replaceIndex).start !== replaceIndex
+            || QqReplies.getReplyGroup(chat, replaceIndex).end !== chat.messages.length - 1)) {
+            return res.status(400).json({ error: '只能替换最后一组角色回复' });
+        }
+        const messages = replaceIndex === undefined ? chat.messages : chat.messages.slice(0, replaceIndex);
         const resolvedChatType = chatType === 'group' ? 'group' : 'private';
         const resolvedGenerationType = ['normal', 'continue', 'swipe', 'regenerate', 'quiet'].includes(generationType) ? generationType : 'normal';
         if (!characterId) return res.status(400).json({
@@ -4333,69 +4361,9 @@ app.post('/api/qq/reply', async (req, res) => {
             error: '未找到角色', error_code: 'CHARACTER_NOT_FOUND', error_type: 'not_found_error', operation: 'reply'
         });
 
-        const list = qqSummaryFeature.filterPromptMessages(messages);
-        const userPersona = getCurrentUserPersona();
-        const variables = buildPromptVariables({ characterId, userName: userPersona?.name || '', messages: list });
-
-        // 把 QQ 聊天记录转成 OpenAI 的 messages 格式。
-        // 图片/链接封面只允许本次请求里最后一个视觉附件进入多模态；其它历史图片只保留文本占位。
-        const latestVisualIndex = (() => {
-            for (let i = list.length - 1; i >= 0; i--) {
-                const m = list[i];
-                if (m?.role !== 'assistant' && m?.type === 'image' && /^data:image\//.test(m.image || '')) return i;
-                if (m?.role !== 'assistant' && m?.type === 'link' && m.imageLocal && !shouldCompactRichLinkMessage(list, i)) return i;
-            }
-            return -1;
-        })();
-        const history = list
-            .map((m, idx) => {
-                const role = qqMessageToPromptRole(m);
-                if (role === 'user' && m.type === 'image' && idx === latestVisualIndex) {
-                    return {
-                        role,
-                        content: [
-                            { type: 'text', text: (m.text && m.text !== '[图片]') ? m.text : '[图片]' },
-                            { type: 'image_url', image_url: { url: m.image } }
-                        ]
-                    };
-                }
-                if (role === 'user' && m.type === 'link' && idx === latestVisualIndex) {
-                    const dataUrl = localStaticImageToDataUrl(m.imageLocal);
-                    if (dataUrl) {
-                        return {
-                            role,
-                            content: [
-                                { type: 'text', text: `${qqMessageToPromptText(list, idx)}；封面图：已作为图片附件发送` },
-                                { type: 'image_url', image_url: { url: dataUrl } }
-                            ]
-                        };
-                    }
-                }
-                return { role, content: qqMessageToPromptText(list, idx) };
-            })
-            .filter(m => Array.isArray(m.content) ? m.content.length : m.content);
-
-        // 采样参数来自当前 QQ 预设；预设缺字段时回退到温和默认值
-        const presetId = getCurrentQqPromptPresetId();
-        const presetRaw = presetId ? readJsonFile(stPresetFile(presetId), null) : null;
-        const presetSampling = isSillyTavernPreset(presetRaw) ? presetRaw : {};
-        const pickNum = (val, fallback) => Number.isFinite(parseFloat(val)) ? parseFloat(val) : fallback;
-        const temperature = pickNum(presetSampling.temperature, 1);
-        const top_p = pickNum(presetSampling.top_p, 1);
-        const frequency_penalty = pickNum(presetSampling.frequency_penalty, 0);
-        const presence_penalty = pickNum(presetSampling.presence_penalty, 0);
-        const maxReply = Math.min(Math.max(parseInt(presetSampling.openai_max_tokens, 10) || 2048, 1), 200000);
-        const contextLimit = Math.min(Math.max(parseInt(settings.mainApi_context, 10) || 8192, 1), 200000);
-        const presetPrompt = await buildQqPresetPrompt(character, variables, userPersona, history, resolvedChatType, {
-            generationType: resolvedGenerationType,
-            contextTokens: contextLimit,
-            responseTokens: maxReply,
-            model
-        });
-        // 有可用预设时由 ST 上下文引擎完成位置、深度、世界书和预算装配。
-        const chatMessages = presetPrompt
-            ? presetPrompt.messages
-            : [{ role: 'system', content: buildCharacterSystemPrompt(character, variables, userPersona) }, ...history];
+        const presetPrompt = await prepareQqPrompt(character, messages, resolvedChatType, resolvedGenerationType);
+        const chatMessages = presetPrompt.messages;
+        const { temperature, top_p, frequency_penalty, presence_penalty, max_tokens: maxReply } = presetPrompt.sampling;
 
         const endpoint = apiUrl.endsWith('/chat/completions')
             ? apiUrl
@@ -4408,6 +4376,7 @@ app.post('/api/qq/reply', async (req, res) => {
         async function callUpstream(messages) {
             const upstream = await fetch(endpoint, {
                 method: 'POST',
+                signal: task.controller.signal,
                 headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     model, messages, temperature, max_tokens: maxReply,
@@ -4513,7 +4482,11 @@ app.post('/api/qq/reply', async (req, res) => {
                 timestamp: new Date().toISOString()
             });
         }
-        // 后台推送：SW 收到后决定是否弹（焦点客户端会被 SW 跳过）
+        task.controller.signal.throwIfAborted();
+        requireChatVersion(chatFile, req.body?.version);
+        QqReplies.appendReply(chat, segments, replaceIndex);
+        writeJsonFile(chatFile, chat);
+        // Notify only after the complete structured reply has been saved.
         sendWebPushToAll({
             title: character.name || '蒋幸怜',
             body: String(segments[0] || '').slice(0, 120),
@@ -4523,10 +4496,12 @@ app.post('/api/qq/reply', async (req, res) => {
             avatar: character.avatar || '',
             appId: 'QQ'
         }).catch(err => console.warn('[PUSH after reply]', err));
-        res.json({ segments, reply: cleaned, context_itemization: presetPrompt?.itemization, context_warnings: presetPrompt?.warnings || [] });
+        res.json({ chat: chatResponse(chatFile, chat), segments, reply: cleaned, context_itemization: presetPrompt?.itemization, context_warnings: presetPrompt?.warnings || [] });
     } catch (e) {
         console.error('[QQ reply error]', e);
-        res.status(500).json(buildInternalErrorPayload(e, 'reply'));
+        res.status(e.statusCode || (e.name === 'AbortError' ? 499 : 500)).json(buildInternalErrorPayload(e, 'reply'));
+    } finally {
+        if (replyTasks.get(characterId) === task) replyTasks.delete(characterId);
     }
 });
 
@@ -4600,32 +4575,9 @@ app.post('/api/qq/impersonate', async (req, res) => {
         if (!character) return res.status(404).json({
             error: '未找到角色', error_code: 'CHARACTER_NOT_FOUND', error_type: 'not_found_error', operation: 'impersonate'
         });
-        const list = qqSummaryFeature.filterPromptMessages(messages);
-        const userPersona = getCurrentUserPersona();
-        const variables = buildPromptVariables({ characterId, userName: userPersona?.name || '', messages: list });
-        const history = list
-            .map((m, idx) => ({ role: qqMessageToPromptRole(m), content: qqMessageToPromptText(list, idx) }))
-            .filter(m => m.content);
-        // 采样参数同 reply：走预设
-        const presetId = getCurrentQqPromptPresetId();
-        const presetRaw = presetId ? readJsonFile(stPresetFile(presetId), null) : null;
-        const presetSampling = isSillyTavernPreset(presetRaw) ? presetRaw : {};
-        const pickNum = (val, fallback) => Number.isFinite(parseFloat(val)) ? parseFloat(val) : fallback;
-        const temperature = pickNum(presetSampling.temperature, 1);
-        const top_p = pickNum(presetSampling.top_p, 1);
-        const frequency_penalty = pickNum(presetSampling.frequency_penalty, 0);
-        const presence_penalty = pickNum(presetSampling.presence_penalty, 0);
-        const maxReply = Math.min(Math.max(parseInt(presetSampling.openai_max_tokens, 10) || 2048, 1), 200000);
-        const contextLimit = Math.min(Math.max(parseInt(settings.mainApi_context, 10) || 8192, 1), 200000);
-        const presetPrompt = await buildQqPresetPrompt(character, variables, userPersona, history, resolvedChatType, {
-            generationType: 'impersonate',
-            contextTokens: contextLimit,
-            responseTokens: maxReply,
-            model
-        });
-        const baseMessages = presetPrompt
-            ? presetPrompt.messages
-            : [{ role: 'system', content: buildCharacterSystemPrompt(character, variables, userPersona) }, ...history];
+        const presetPrompt = await prepareQqPrompt(character, messages, resolvedChatType, 'impersonate');
+        const baseMessages = presetPrompt.messages;
+        const { temperature, top_p, frequency_penalty, presence_penalty, max_tokens: maxReply } = presetPrompt.sampling;
 
         // 末尾控制提示保持最终位置；预设中配置了 impersonate trigger 的条目也会同时生效。
         baseMessages.push({

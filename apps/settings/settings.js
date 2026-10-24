@@ -1,5 +1,9 @@
 let settings = {};
-        let settingsVersion = 0;
+        let settingsVersion = '';
+        let confirmedSettings = {};
+        let settingsFormValues = {};
+        let settingsSaveConflict = false;
+        let settingsHasUnsavedChanges = false;
         let settingsReloading = false;
         let settingsSaveTimer = null;
         let settingsSaveInFlight = false;
@@ -145,8 +149,6 @@ let settings = {};
         }
 
         function applySettingsToForm() {
-            // 启动 / 切换设备同步前：合并 carrot 导入资源 + 旧字段迁移
-            mergeImportedAssets();
             renderApiConfigSelects();
             renderBeautyPresetSelects();
             renderSavedSoundsList();
@@ -182,20 +184,26 @@ let settings = {};
             renderWallpaperPreviews();
             renderIconGrid();
             window.toggleCloudStorageProvider?.();
+            settingsFormValues = {};
+            document.querySelectorAll('input, textarea, select').forEach(el => {
+                if (el.id && el.type !== 'file') settingsFormValues[el.id] = el.type === 'checkbox' ? el.checked : el.value;
+            });
         }
 
         async function reloadSettingsIfChanged(force = false) {
-            if (!force && (settingsSaveInFlight || settingsSavePending || settingsSaveTimer)) return false;
+            if (settingsHasUnsavedChanges || settingsSaveConflict || settingsSaveInFlight || settingsSavePending || settingsSaveTimer) return false;
             if (settingsReloading) return false;
             settingsReloading = true;
             try {
                 const res = await fetch('/api/settings', { cache: 'no-store' });
                 if (!res.ok) return false;
                 const next = await res.json();
-                const nextVersion = Number(next?._updatedAt || 0);
+                const nextVersion = next?._version || '';
+                if (settingsSaveInFlight || settingsSavePending || settingsSaveConflict) return false;
                 if (!force && nextVersion && settingsVersion && nextVersion === settingsVersion) return false;
                 settings = next || {};
-                settingsVersion = Number(settings._updatedAt || Date.now());
+                settingsVersion = settings._version;
+                confirmedSettings = JSON.parse(JSON.stringify(settings));
                 applySettingsToForm();
                 notifyThemeUpdated();
                 return true;
@@ -501,14 +509,8 @@ let settings = {};
                 }
             };
             try {
-                // 读现有 settings 合并写回（保留 lastWorking 等字段）
-                const cur = await fetch('/api/settings').then(r => r.ok ? r.json() : {});
-                const merged = { ...cur, imageHost: { ...(cur.imageHost || {}), ...imageHost } };
-                await fetch('/api/settings', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(merged)
-                });
+                settings.imageHost = { ...(settings.imageHost || {}), ...imageHost };
+                await saveData();
             } catch (err) {
                 console.warn('saveImageHostConfig failed', err);
             }
@@ -566,6 +568,14 @@ let settings = {};
             } catch {
                 el.textContent = '统计失败';
             }
+        }
+
+        async function migrateLegacyChatImages() {
+            try {
+                await migrateCachedChatImagesToServer();
+                alert('旧图片已上传并验证');
+                refreshImageCacheStats();
+            } catch (error) { alert('迁移未完成：' + error.message); }
         }
 
         async function clearChatImageCache() {
@@ -916,7 +926,8 @@ let settings = {};
                 const settingsRes = await fetch('/api/settings', { cache: 'no-store' });
                 if (!settingsRes.ok) throw new Error(`设置加载失败：HTTP ${settingsRes.status}`);
                 settings = await settingsRes.json();
-                settingsVersion = Number(settings._updatedAt || Date.now());
+                settingsVersion = settings._version;
+                confirmedSettings = JSON.parse(JSON.stringify(settings));
 
                 // 2. 获取提示词预设
                 const presetsRes = await fetch('/api/presets');
@@ -947,12 +958,22 @@ let settings = {};
         function collectSettingsFromForm() {
             const elements = document.querySelectorAll('input:not(#preset_name):not([type="file"]), textarea, select');
             elements.forEach(el => {
-                settings[el.id] = el.type === 'checkbox' ? el.checked : el.value;
+                if (!el.id) return;
+                const value = el.type === 'checkbox' ? el.checked : el.value;
+                if (value !== settingsFormValues[el.id]) {
+                    settings[el.id] = value;
+                    settingsFormValues[el.id] = value;
+                }
             });
         }
 
         async function flushSettingsSave() {
             if (settingsSaveInFlight || !settingsSavePending) return;
+            if (settingsSaveConflict) {
+                settingsSavePending = false;
+                settingsSaveWaiters.splice(0).forEach(resolve => resolve(false));
+                return;
+            }
             if (settingsSaveTimer) {
                 clearTimeout(settingsSaveTimer);
                 settingsSaveTimer = null;
@@ -961,20 +982,27 @@ let settings = {};
             settingsSavePending = false;
             const waiters = settingsSaveWaiters.splice(0);
             const payload = JSON.parse(JSON.stringify(settings));
+            const changes = Object.fromEntries(Object.entries(payload).filter(([key, value]) =>
+                !['_version', '_updatedAt'].includes(key) && JSON.stringify(value) !== JSON.stringify(confirmedSettings[key])));
             setSettingsSaveStatus('saving', '正在保存…');
             try {
                 const res = await fetch('/api/settings', {
-                    method: 'POST',
+                    method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload),
+                    body: JSON.stringify({ version: settingsVersion, changes }),
                     keepalive: true
                 });
                 const data = await res.json().catch(() => null);
+                if (res.status === 409) settingsSaveConflict = true;
                 if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
                 if (data?.settings) {
-                    settings = data.settings;
-                    settingsVersion = Number(settings._updatedAt || Date.now());
+                    const newerDraft = Object.fromEntries(Object.entries(settings).filter(([key, value]) =>
+                        JSON.stringify(value) !== JSON.stringify(payload[key])));
+                    confirmedSettings = JSON.parse(JSON.stringify(data.settings));
+                    settings = { ...data.settings, ...newerDraft };
+                    settingsVersion = data.settings._version;
                 }
+                settingsHasUnsavedChanges = settingsSavePending;
                 notifyThemeUpdated();
                 setSettingsSaveStatus('saved', '已保存');
                 waiters.forEach(resolve => resolve(true));
@@ -998,6 +1026,7 @@ let settings = {};
         // 保存所有当前界面数据：输入事件合并为一次写入，避免每个按键都覆盖 settings.json。
         function saveData() {
             collectSettingsFromForm();
+            settingsHasUnsavedChanges = true;
             settingsSavePending = true;
             setSettingsSaveStatus('saving', '等待保存…');
             clearTimeout(settingsSaveTimer);
@@ -1194,6 +1223,7 @@ let settings = {};
             handleAppIconUpload,
             handleCarrotImport,
             clearChatImageCache,
+            migrateLegacyChatImages,
             clearSiteCache,
             refreshImageCacheStats,
             loadImageHostConfig,
@@ -1211,7 +1241,6 @@ let settings = {};
             onSelectNotifySound,
             renderSavedSoundsList,
             renderNotifySoundSelects,
-            mergeImportedAssets,
             showJinaReaderHelp,
             subscribePushHere,
             unsubscribePushHere,
@@ -1362,51 +1391,6 @@ let settings = {};
             const hidden = document.getElementById(`notify_${kind}SoundUrl`);
             if (hidden) hidden.value = settings[`notify_${kind}SoundUrl`];
             await saveData();
-        }
-
-        // 启动时把老字段 + carrot 导入的字体/声音合并进各自的库
-        function mergeImportedAssets() {
-            // 老 notify_successSoundUrl / failSoundUrl → savedSounds（"成功-默认" / "失败-默认"）
-            const saved = getSavedSounds();
-            if (settings.notify_successSoundUrl && !settings.notify_successSoundName) {
-                const n = '成功-默认';
-                if (!saved[n]) saved[n] = settings.notify_successSoundUrl;
-                settings.notify_successSoundName = n;
-            }
-            if (settings.notify_failSoundUrl && !settings.notify_failSoundName) {
-                const n = '失败-默认';
-                if (!saved[n]) saved[n] = settings.notify_failSoundUrl;
-                settings.notify_failSoundName = n;
-            }
-            // carrot 导入的提示音
-            const ic = settings.imported_carrot || {};
-            if (ic.notifSounds && typeof ic.notifSounds === 'object') {
-                Object.entries(ic.notifSounds).forEach(([name, url]) => {
-                    if (!saved[name]) saved[name] = url;
-                });
-                // carrot 默认激活的声音
-                if (ic.notifSuccess && saved[ic.notifSuccess] && !settings.notify_successSoundName) {
-                    settings.notify_successSoundName = ic.notifSuccess;
-                    settings.notify_successSoundUrl = saved[ic.notifSuccess];
-                }
-                if (ic.notifFail && saved[ic.notifFail] && !settings.notify_failSoundName) {
-                    settings.notify_failSoundName = ic.notifFail;
-                    settings.notify_failSoundUrl = saved[ic.notifFail];
-                }
-            }
-            // carrot 导入的字体 → 合并到 beautyPresets.font
-            if (ic.fonts && typeof ic.fonts === 'object') {
-                const fontPresets = getBeautyPresets('font');
-                Object.entries(ic.fonts).forEach(([name, def]) => {
-                    if (!fontPresets[name]) {
-                        fontPresets[name] = {
-                            url: (def && def.url) || '',
-                            size: '',
-                            weight: ''
-                        };
-                    }
-                });
-            }
         }
 
         function previewNotifySound(fieldId) {

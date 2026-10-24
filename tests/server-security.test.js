@@ -19,10 +19,14 @@ function copyDirectory(source, destination) {
 }
 
 test('server access, path, chat concurrency and media regressions', { timeout: 20000 }, async t => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bunnyos-server-security-'));
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'bunnyos-server-security-'));
+    const root = path.join(directory, 'code');
+    const storage = path.join(directory, 'storage');
+    fs.mkdirSync(root);
     const repo = path.resolve(__dirname, '..');
     fs.copyFileSync(path.join(repo, 'server.js'), path.join(root, 'server.js'));
     copyDirectory(path.join(repo, 'modules'), path.join(root, 'modules'));
+    copyDirectory(path.join(repo, 'assets', 'scripts'), path.join(root, 'assets', 'scripts'));
     fs.mkdirSync(path.join(root, 'apps', 'QQ'), { recursive: true });
     fs.writeFileSync(path.join(root, 'index.html'), '<html>BunnyOS</html>');
     fs.writeFileSync(path.join(root, 'apps', 'QQ', 'index.html'), '<html>QQ</html>');
@@ -30,7 +34,7 @@ test('server access, path, chat concurrency and media regressions', { timeout: 2
     const password = 'security-test-password-0123456789';
     const child = fork(path.join(root, 'runner.cjs'), [], {
         cwd: root,
-        env: { ...process.env, PORT: '0', BUNNYOS_PASSWORD: password, BUNNYOS_ORIGIN: '', BUNNYOS_UPDATE_TOKEN: '', NODE_PATH: path.join(repo, 'node_modules') },
+        env: { ...process.env, PORT: '0', BUNNYOS_STORAGE_DIR: storage, BUNNYOS_PASSWORD: password, BUNNYOS_ORIGIN: '', BUNNYOS_UPDATE_TOKEN: '', NODE_PATH: path.join(repo, 'node_modules') },
         stdio: ['ignore', 'pipe', 'pipe', 'ipc']
     });
     let output = '';
@@ -43,7 +47,7 @@ test('server access, path, chat concurrency and media regressions', { timeout: 2
             await exited;
         }
         assert.ok(path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep));
-        fs.rmSync(root, { recursive: true, force: true });
+        fs.rmSync(directory, { recursive: true, force: true });
     });
     const [{ port }] = await Promise.race([
         once(child, 'message'),
@@ -217,7 +221,8 @@ test('server access, path, chat concurrency and media regressions', { timeout: 2
         upstream.listen(0, '127.0.0.1');
         await once(upstream, 'listening');
         try {
-            await request('/api/settings', 'POST', { subApi_url: `http://127.0.0.1:${upstream.address().port}`, subApi_key: 'test', subApi_model: 'test' });
+            const currentSettings = await (await request('/api/settings')).json();
+            await request('/api/settings', 'PATCH', { version: currentSettings._version, changes: { subApi_url: `http://127.0.0.1:${upstream.address().port}`, subApi_key: 'test', subApi_model: 'test' } });
             await request('/api/qq/characters', 'POST', { id: 'summary-race', name: 'test' });
             const seeded = await (await request('/api/qq/chats/summary-race', 'POST', { version: null, messages: [{ role: 'user', text: 'one' }, { role: 'assistant', text: 'two' }] })).json();
             const settings = await (await request('/api/qq/summary-settings/summary-race', 'PUT', { version: seeded.version, layerThreshold: 1 })).json();

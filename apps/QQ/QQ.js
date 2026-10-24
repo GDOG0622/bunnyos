@@ -8,9 +8,7 @@
     bindEvents();
     loadPersonas();
     loadPromptPresetSetting();
-    migrateCachedChatImagesToServer()
-        .catch(error => toast('旧图片迁移未完成：' + error.message))
-        .finally(() => loadData());
+    loadData();
     loadGlobalSkin();
     notifyNavState();
 });

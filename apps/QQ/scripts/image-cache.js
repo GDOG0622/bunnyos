@@ -142,7 +142,7 @@ async function migrateCachedChatImagesToServer() {
                 || localStorage.getItem(`qq:img:${message.client_image_id}`);
             if (image) { message.image = image; changed = true; }
         }
-        if (!changed) continue;
+        if (!changed) throw new Error('当前浏览器找不到旧原图，请在保存过原图的设备运行迁移');
         const result = await fetch(`/api/qq/chats/${encodeURIComponent(chat.characterId)}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -152,37 +152,11 @@ async function migrateCachedChatImagesToServer() {
             const data = await result.json().catch(() => ({}));
             throw new Error(data.error || `旧图片上传失败 (HTTP ${result.status})`);
         }
-    }
-}
-
-// 只预加载当前已经显示的消息图片；向上追加20层时再补更早图片。
-async function preloadImagesForActiveChat(startIndex = 0) {
-    if (state.imagePreloadInFlight) return;
-    state.imagePreloadInFlight = true;
-    try {
-        const chat = state.chats.find(c => c.characterId === state.activeChatId);
-        if (!chat) return;
-        const ids = (chat.messages || []).slice(Math.max(0, Number(startIndex) || 0))
-            .filter(m => m?.type === 'image' && m.client_image_id)
-            .map(m => m.client_image_id)
-            .filter(id => !state.imageAttachments?.[id]?.dataUrl);
-        if (!ids.length) return;
-        state.imageAttachments = state.imageAttachments || {};
-        const blobs = await Promise.all(ids.map(getImageBlob));
-        let changed = false;
-        ids.forEach((id, i) => {
-            if (blobs[i]) {
-                state.imageAttachments[id] = { dataUrl: blobs[i], consumed: true, characterId: state.activeChatId };
-                changed = true;
-            }
-        });
-        if (changed && state.activeChatId === chat.characterId) {
-            const box = $('#chat-messages');
-            const previousHeight = box?.scrollHeight || 0;
-            const nearBottom = !box || box.scrollHeight - box.scrollTop - box.clientHeight < 80;
-            renderActiveChat(nearBottom ? {} : { preserveScroll: true, previousHeight });
+        const saved = await result.json();
+        const images = (saved.messages || []).filter(message => message?.type === 'image');
+        if (images.length !== (chat.messages || []).filter(message => message?.type === 'image').length
+            || images.some(message => !message.image_url)) {
+            throw new Error('仍有旧原图未上传，请在保存过原图的设备继续迁移');
         }
-    } finally {
-        state.imagePreloadInFlight = false;
     }
 }

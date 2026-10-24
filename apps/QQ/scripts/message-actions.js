@@ -11,16 +11,12 @@
         const url = normalizeInputLink(urlMatch);
         toast('正在解析链接...');
         try {
-            const frontData = await tryFrontendLinkPreview(url, rawText);
-            if (isUsefulLinkPreview(frontData)) {
-                await appendLinkPreviewMessage(frontData, url, characterId);
-                return true;
-            }
+            const frontend = await fetchFrontendHtml(url).catch(() => null);
 
             const res = await fetch('/api/qq/link-preview', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url, rawText })
+                body: JSON.stringify({ url, rawText, frontend })
             });
             if (res.ok) {
                 const data = await res.json();
@@ -79,50 +75,6 @@ async function appendLinkPreviewMessage(data, fallbackUrl, characterId = state.a
     if (limitedReason && data?.previewType !== 'product') toast(limitedReason);
 }
 
-function isUsefulLinkPreview(data) {
-    if (!data) return false;
-    return Boolean(
-        String(data.description || '').trim()
-        || String(data.image || '').trim()
-        || String(data.title || '').trim()
-    );
-}
-
-async function tryFrontendLinkPreview(url, rawText) {
-    try {
-        // 电商短链需要后端追踪 JS 跳转并提取商品 ID；前端通用 OG 容易只拿到“登录/商品详情页”。
-        if (isShoppingLinkUrl(url, rawText)) return null;
-        const first = await fetchFrontendHtml(url);
-        if (!first?.html) return null;
-        let finalUrl = first.finalUrl || url;
-        let html = first.html;
-        const redirectTarget = extractFrontendHtmlRedirect(html, finalUrl);
-        if (redirectTarget && redirectTarget !== finalUrl) {
-            const second = await fetchFrontendHtml(redirectTarget);
-            if (second?.html) {
-                finalUrl = second.finalUrl || redirectTarget;
-                html = second.html;
-            }
-        }
-        const host = new URL(finalUrl).hostname;
-        if (/(^|\.)xhslink\.com$|(^|\.)xiaohongshu\.com$|(^|\.)xhscdn\.com$/i.test(host)) {
-            const xhs = parseFrontendXhsFromHtml(html, finalUrl);
-            if (isUsefulLinkPreview(xhs)) return xhs;
-        }
-        const og = parseFrontendOgFromHtml(html, finalUrl);
-        if (isUsefulLinkPreview(og)) return og;
-    } catch (err) {
-        console.info('[link-preview frontend failed]', err?.message || err);
-    }
-    return null;
-}
-
-function isShoppingLinkUrl(url, rawText = '') {
-    const value = `${url || ''} ${rawText || ''}`.toLowerCase();
-    return /(^|[\s/.:])(e\.tb\.cn|m\.tb\.cn|taobao\.com|tmall\.com|goofish\.com|2\.taobao\.com|yangkeduo\.com|pinduoduo\.com)(?:[\s/:]|$)/i.test(value)
-        || /【(?:淘宝|闲鱼|拼多多)】/.test(rawText || '');
-}
-
 async function fetchFrontendHtml(url) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 9000);
@@ -137,100 +89,11 @@ async function fetchFrontendHtml(url) {
         });
         const ctype = resp.headers.get('content-type') || '';
         if (!resp.ok || !/text\/html|application\/xhtml/i.test(ctype)) return null;
-        return { finalUrl: resp.url || url, html: await resp.text() };
+        const html = await resp.text();
+        return html.length <= 4 * 1024 * 1024 ? { finalUrl: resp.url || url, html } : null;
     } finally {
         clearTimeout(timer);
     }
-}
-
-function extractFrontendHtmlRedirect(html, baseUrl) {
-    const metaR = html.match(/<meta[^>]+http-equiv=["']refresh["'][^>]+content=["'][^;]*;\s*url=([^"'\s>]+)/i)
-        || html.match(/content=["'][^;]*;\s*url=([^"'\s>]+)[^>]+http-equiv=["']refresh["']/i);
-    const target = metaR?.[1]
-        || html.match(/(?:window\.location(?:\.href)?|location\.replace\()\s*[=\(]\s*["'](https?:\/\/[^"']+)["']/i)?.[1]
-        || '';
-    if (!target) return '';
-    try { return new URL(target, baseUrl).toString(); } catch { return ''; }
-}
-
-function parseFrontendOgFromHtml(html, baseUrl) {
-    const decEnt = (s) => String(s || '')
-        .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-        .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n));
-    const pick = (re) => decEnt(html.match(re)?.[1] || '');
-    const metaC = (prop) => {
-        const r1 = new RegExp(`<meta[^>]+(?:property|name)\\s*=\\s*["']${prop}["'][^>]*content\\s*=\\s*["']([^"']+)["']`, 'i');
-        const r2 = new RegExp(`<meta[^>]+content\\s*=\\s*["']([^"']+)["'][^>]+(?:property|name)\\s*=\\s*["']${prop}["']`, 'i');
-        return pick(r1) || pick(r2);
-    };
-    let host = '';
-    try { host = new URL(baseUrl).hostname; } catch {}
-    const imageRaw = metaC('og:image') || metaC('twitter:image');
-    let image = '';
-    try { image = imageRaw ? new URL(imageRaw, baseUrl).toString() : ''; } catch {}
-    return {
-        url: baseUrl,
-        title: metaC('og:title') || pick(/<title[^>]*>([^<]+)<\/title>/i),
-        description: metaC('og:description') || metaC('description'),
-        image,
-        siteName: metaC('og:site_name') || host,
-        source: 'frontend-og'
-    };
-}
-
-function extractFrontendJsonObjectAfterKey(html, key) {
-    let from = 0;
-    while (true) {
-        const k = html.indexOf(key, from);
-        if (k === -1) return null;
-        const start = k + key.length;
-        from = start;
-        if (html[start] !== '{') continue;
-        let depth = 0, inStr = false, esc = false, end = -1;
-        for (let j = start; j < html.length; j++) {
-            const c = html[j];
-            if (esc) { esc = false; continue; }
-            if (c === '\\') { esc = true; continue; }
-            if (c === '"') { inStr = !inStr; continue; }
-            if (inStr) continue;
-            if (c === '{') depth++;
-            else if (c === '}') {
-                depth--;
-                if (depth === 0) { end = j + 1; break; }
-            }
-        }
-        if (end === -1) continue;
-        try { return JSON.parse(html.slice(start, end)); } catch {}
-    }
-}
-
-function parseFrontendXhsFromHtml(html, baseUrl) {
-    let from = 0;
-    const key = '"noteData":';
-    while (true) {
-        const k = html.indexOf(key, from);
-        if (k === -1) break;
-        from = k + key.length;
-        const note = extractFrontendJsonObjectAfterKey(html.slice(k), key);
-        if (note && (note.title || note.desc)) {
-            const images = Array.isArray(note.imageList) ? note.imageList : [];
-            const image = note.cover?.urlDefault
-                || images[0]?.url
-                || images[0]?.infoList?.find(i => /WB_DFT|H5_DTL|DFT/i.test(i.imageScene))?.url
-                || images[0]?.infoList?.[0]?.url
-                || '';
-            const desc = String(note.desc || '').trim();
-            return {
-                url: baseUrl,
-                title: String(note.title || '').trim() || desc || '小红书笔记',
-                description: desc,
-                image,
-                siteName: '小红书',
-                source: 'frontend-xhs-state'
-            };
-        }
-    }
-    return null;
 }
 
 // 每个角色独立一个生成任务。切换聊天不会中止其他角色的请求。
@@ -251,6 +114,11 @@ async function generateReply(e) {
     // 生成中点击 = 停止
     const runningTask = activeGenerationTask();
     if (runningTask) {
+        runningTask.cancelled = true;
+        await fetch('/api/qq/reply/cancel', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ characterId: state.activeChatId, generationId: runningTask.id }), keepalive: true
+        }).catch(() => {});
         runningTask.controller.abort();
         return;
     }
@@ -272,7 +140,7 @@ async function generateReply(e) {
     await requestAssistantReply(chat);
 }
 
-// 重新生成：从选中的「对方」消息起截断，再基于前文重新请求
+// 基于最后一组回复前的上下文生成新版本，服务端保存后再展示。
 async function regenerateReplyAt(idx) {
     if (activeGenerationTask()) {
         toast('这个对话正在生成中');
@@ -290,12 +158,7 @@ async function regenerateReplyAt(idx) {
         toast('只能重新生成最后一条角色回复');
         return;
     }
-    chat.messages.splice(group.start);
-    if (state.replyDraft?.created_at === msg.created_at) clearReplyDraft();
-    renderChats();
-    renderActiveChat();
-    await saveChat(chat);
-    await requestAssistantReply(chat);
+    await generateMessageVersion(group.end);
 }
 
 // 发送 BUNNY 系统信息：以 user 视角写一条 +xxx+ 元层消息，落聊天记录、传 AI 但 char 不应反应
@@ -387,47 +250,36 @@ async function requestImpersonateReply() {
     }
 }
 
-// 共用：把当前聊天历史发给模型，拿回复逐条显示
+// 服务端使用已保存的聊天生成并提交回复，浏览器接收确认后的记录。
 async function requestAssistantReply(chat) {
     if (!chat?.characterId || generationTasks.has(chat.characterId)) return;
-    const task = { controller: new AbortController(), startedAt: Date.now(), kind: 'reply' };
+    const task = { id: makeClientMessageId('generation'), controller: new AbortController(), startedAt: Date.now(), kind: 'reply' };
     generationTasks.set(chat.characterId, task);
     syncActiveGenerationUi();
     let summaryResult = null;
     try {
         summaryResult = await maybeRunLayerSummary(chat, task.controller.signal);
         if (summaryResult?.failed) return;
-        const { messages: requestMessages, imageIds: sentImageIds } = await prepareMessagesForReply(chat.messages);
-        const res = await fetch('/api/qq/reply', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ characterId: chat.characterId, messages: requestMessages, chatType: 'private' }),
-            signal: task.controller.signal,
-        });
-        const data = await readApiResponse(res);
+        if (task.cancelled) return;
+        const data = await mutateChat(chat.characterId, '/api/qq/reply', 'POST', {
+            characterId: chat.characterId, generationId: task.id, chatType: 'private'
+        }, null, task.controller.signal);
         rememberContextItemization(data);
-        if (!res.ok) {
-            await showBackendError(`生成失败 (HTTP ${res.status})`, data, res);
-            return;
+        renderChats();
+        if (state.activeChatId === chat.characterId) {
+            renderActiveChat();
+            revealSavedReply(chat);
         }
-        const segments = Array.isArray(data.segments) && data.segments.length
-            ? data.segments
-            : (data.reply ? [data.reply] : []);
-        if (!segments.length) {
-            await showBackendError('后台返回了空内容', data);
-            notifyParent('fail', chat, '后台返回空');
-            return;
-        }
-        consumeImageAttachments(chat, sentImageIds);
-        await appendAssistantReplySegments(chat, segments);
-        notifyParent('success', chat, segments[0] || '');
+        notifyParent('success', chat, data.segments?.[0] || '');
         if (summaryResult?.needsBigSummary && state.activeChatId === chat.characterId) {
             setTimeout(() => offerBigSummary(chat.characterId), 250);
         }
     } catch (err) {
         if (err.name === 'AbortError') {
             toast('已停止生成');
-            // user 主动停，不算失败，不响铃
+        } else if (err.payload) {
+            await showBackendError(`生成失败 (HTTP ${err.status})`, err.payload, err.response);
+            notifyParent('fail', chat, err.message);
         } else {
             await showBackendError('网络错误：无法连接 BunnyOS 后端', {
                 error: err.message || '无法连接服务器',
@@ -446,73 +298,6 @@ async function requestAssistantReply(chat) {
 
 // 找最后一张"AI 还没看到"的用户图片（最后 assistant 消息之后的最后一张 user image）
 // async 是为了在 consumed 后能从 IDB 回退取 dataUrl（re-roll 场景）
-async function prepareMessagesForReply(messages) {
-    messages = Array.isArray(messages) ? messages : [];
-
-    // 找最后一条 assistant 消息的下标
-    let lastAssistantIdx = -1;
-    for (let i = messages.length - 1; i >= 0; i--) {
-        if (messages[i]?.role === 'assistant') { lastAssistantIdx = i; break; }
-    }
-
-    // 只在 lastAssistantIdx 之后找最后一张 user 图片（AI 尚未响应过的）
-    let latestImage = null;
-    for (let i = messages.length - 1; i > lastAssistantIdx; i--) {
-        const m = messages[i];
-        if (m?.role !== 'user' || m.type !== 'image') continue;
-        const id = m.client_image_id;
-        const attachment = id ? state.imageAttachments?.[id] : null;
-        let dataUrl = attachment?.dataUrl || m.image || '';
-        // consumed 后内存已清 → 尝试从 IDB 恢复（re-roll 场景）
-        if (!(/^data:image\//.test(dataUrl)) && id) {
-            dataUrl = await getImageBlob(id).catch(() => null) || '';
-        }
-        if (!dataUrl && m.image_url) {
-            const response = await fetch(m.image_url);
-            if (!response.ok) throw new Error('读取聊天原图失败');
-            dataUrl = await fileToDataUrl(await response.blob());
-        }
-        if (/^data:image\//.test(dataUrl)) {
-            latestImage = { id, message: m, dataUrl };
-            break;
-        }
-    }
-
-    return {
-        imageIds: latestImage?.id ? [latestImage.id] : [],
-        messages: messages.map(message => {
-            if (message?.type !== 'image') return message;
-            const copy = { ...message, text: message.text || '[图片]' };
-            if (latestImage && message === latestImage.message) {
-                copy.image = latestImage.dataUrl;
-            } else {
-                delete copy.image;
-            }
-            return copy;
-        })
-    };
-}
-
-function consumeImageAttachments(chat, imageIds = []) {
-    if (!imageIds.length) return;
-    const ids = new Set(imageIds);
-    for (const id of ids) {
-        if (state.imageAttachments[id]) {
-            state.imageAttachments[id].consumed = true;
-            delete state.imageAttachments[id].dataUrl;
-        }
-    }
-    for (const message of chat.messages || []) {
-        if (message?.type === 'image' && ids.has(message.client_image_id)) {
-            // 只清 in-memory dataURL；保留 client_image_id 让 localStorage 还能找回
-            delete message.image;
-            message.text = message.text || '[图片]';
-        }
-    }
-    renderChats();
-    renderActiveChat();
-}
-
 // 通知父窗口（BunnyOS desktop）播提示音 + 决定是否弹横幅
 function notifyParent(kind, chat, snippet) {
     try {
@@ -829,45 +614,24 @@ async function generateMessageVersion(idx) {
         toast('只能给最后一条角色回复生成新版本');
         return;
     }
-    const task = { controller: new AbortController(), startedAt: Date.now(), kind: 'version' };
+    const task = { id: makeClientMessageId('generation'), controller: new AbortController(), startedAt: Date.now(), kind: 'version' };
     generationTasks.set(chat.characterId, task);
     syncActiveGenerationUi();
     try {
         const group = getReplyGroup(chat, idx);
-        const rawContext = chat.messages.slice(0, group.start);
-        // 同 requestAssistantReply：处理图片附件（含 re-roll 后从 IDB 恢复 dataUrl）
-        const { messages: context } = await prepareMessagesForReply(rawContext);
-        const res = await fetch('/api/qq/reply', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ characterId: chat.characterId, messages: context, chatType: 'private', generationType: 'regenerate' }),
-            signal: task.controller.signal,
-        });
-        const data = await readApiResponse(res);
+        if (task.cancelled) return;
+        const data = await mutateChat(chat.characterId, '/api/qq/reply', 'POST', {
+            characterId: chat.characterId, generationId: task.id, chatType: 'private', generationType: 'regenerate', replaceIndex: group.start
+        }, null, task.controller.signal);
         rememberContextItemization(data);
-        if (!res.ok) {
-            await showBackendError(`生成失败 (HTTP ${res.status})`, data, res);
-            return;
-        }
-        const segments = Array.isArray(data.segments) && data.segments.length
-            ? data.segments
-            : (data.reply ? [data.reply] : []);
-        const cleanSegments = normalizeReplySegments(segments);
-        if (!cleanSegments.length) {
-            await showBackendError('没有生成新版本（后台返回空）', data);
-            return;
-        }
-        const versions = ensureGroupVersions(chat, group);
-        versions.push({ segments: cleanSegments, created_at: Date.now() });
-        replaceReplyGroupWithVersion(chat, group, versions.length - 1);
-        chat.updated_at = Date.now();
         renderChats();
-        renderActiveChat();
-        await saveChat(chat);
-        toast(`已生成第 ${versions.length} 个版本`);
+        if (state.activeChatId === chat.characterId) renderActiveChat();
+        toast('已保存新版本');
     } catch (err) {
         if (err.name === 'AbortError') {
             toast('已停止生成');
+        } else if (err.payload) {
+            await showBackendError(`生成失败 (HTTP ${err.status})`, err.payload, err.response);
         } else {
             await showBackendError('网络错误：无法连接 BunnyOS 后端', {
                 error: err.message || '无法连接服务器',
@@ -1011,228 +775,21 @@ function setActiveMessageText(msg, text) {
             const group = getReplyGroup(chat, idx);
             const versions = ensureGroupVersions(chat, group);
             const versionIndex = activeGroupVersionIndex(chat, group);
-            const segmentIndex = idx - group.start;
-            const nextSegments = [...(versions[versionIndex]?.segments || [])];
-            nextSegments[segmentIndex] = text;
-            versions[versionIndex] = { ...versions[versionIndex], segments: nextSegments, updated_at: Date.now() };
-            getGroupCarrier(chat, group).reply_group_version_index = versionIndex;
+            const messageIndex = idx - group.start;
+            versions[versionIndex].messages[messageIndex].text = text;
+            versions[versionIndex].updated_at = Date.now();
+            chat.messages[group.start].reply_group_version_index = versionIndex;
         }
     }
     msg.text = text;
 }
 
-function normalizeReplySegments(segments) {
-    return (Array.isArray(segments) ? segments : [])
-        .map(segment => String(segment || '').trim())
-        .filter(Boolean);
-}
+const { getReplyGroup, normalizedGroupVersions, ensureGroupVersions,
+    activeGroupVersionIndex, replaceReplyGroupWithVersion } = QqReplies;
 
-function createReplyGroupId() {
-    return `rg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function getReplyGroup(chat, idx) {
-    const msg = chat?.messages?.[idx];
-    if (!msg || msg.role !== 'assistant') return { start: idx, end: idx, id: '' };
-    const id = msg.reply_group_id || '';
-    let start = idx;
-    let end = idx;
-    if (id) {
-        while (start > 0 && chat.messages[start - 1]?.role === 'assistant' && chat.messages[start - 1].reply_group_id === id) start--;
-        while (end < chat.messages.length - 1 && chat.messages[end + 1]?.role === 'assistant' && chat.messages[end + 1].reply_group_id === id) end++;
-    } else {
-        while (start > 0 && chat.messages[start - 1]?.role === 'assistant' && !chat.messages[start - 1].reply_group_id) start--;
-        while (end < chat.messages.length - 1 && chat.messages[end + 1]?.role === 'assistant' && !chat.messages[end + 1].reply_group_id) end++;
-    }
-    return { start, end, id: id || createReplyGroupId() };
-}
-
-function canRerollAssistantMessage(chat, idx) {
-    const msg = chat?.messages?.[idx];
-    if (!msg || msg.role !== 'assistant') return false;
-    const group = getReplyGroup(chat, idx);
-    return idx === group.end && group.end === (chat.messages?.length || 0) - 1;
-}
-
-function getGroupCarrier(chat, group) {
-    return chat.messages[group.start];
-}
-
-function normalizedGroupVersions(chat, group) {
-    const carrier = getGroupCarrier(chat, group);
-    if (Array.isArray(carrier?.reply_group_versions) && carrier.reply_group_versions.length) {
-        return carrier.reply_group_versions;
-    }
-    if (Array.isArray(carrier?.versions) && carrier.versions.length) {
-        return carrier.versions.map(version => ({
-            segments: [version.text || ''],
-            created_at: version.created_at,
-            updated_at: version.updated_at
-        }));
-    }
-    return [{
-        segments: chat.messages.slice(group.start, group.end + 1).map(message => message.text || ''),
-        created_at: carrier?.created_at || Date.now()
-    }];
-}
-
-function ensureGroupVersions(chat, group) {
-    const carrier = getGroupCarrier(chat, group);
-    const versions = normalizedGroupVersions(chat, group);
-    const id = carrier.reply_group_id || group.id || createReplyGroupId();
-    carrier.reply_group_versions = versions;
-    carrier.reply_group_version_index = activeGroupVersionIndex(chat, group);
-    for (let i = group.start; i <= group.end; i++) {
-        chat.messages[i].reply_group_id = id;
-    }
-    return carrier.reply_group_versions;
-}
-
-function activeGroupVersionIndex(chat, group) {
-    const carrier = getGroupCarrier(chat, group);
-    const versions = normalizedGroupVersions(chat, group);
-    const index = Number.isInteger(carrier?.reply_group_version_index)
-        ? carrier.reply_group_version_index
-        : (Number.isInteger(carrier?.version_index) ? carrier.version_index : 0);
-    return clamp(index, 0, Math.max(0, versions.length - 1));
-}
-
-function replaceReplyGroupWithVersion(chat, group, versionIndex) {
-    const carrier = getGroupCarrier(chat, group);
-    const versions = ensureGroupVersions(chat, group);
-    const id = carrier.reply_group_id || group.id || createReplyGroupId();
-    const nextIndex = clamp(versionIndex, 0, versions.length - 1);
-    const segments = normalizeReplySegments(versions[nextIndex]?.segments || []);
-    const baseTime = Date.now();
-    const nextMessages = segments.map((text, offset) => ({
-        role: 'assistant',
-        type: 'text',
-        text,
-        created_at: offset === 0 ? (carrier.created_at || baseTime) : baseTime + offset,
-        reply_group_id: id,
-        reply_group_version_index: nextIndex,
-        reply_group_versions: offset === 0 ? versions : undefined
-    })).map(message => {
-        if (message.reply_group_versions === undefined) delete message.reply_group_versions;
-        return message;
-    });
-    chat.messages.splice(group.start, group.end - group.start + 1, ...nextMessages);
-}
-
-// 解析 AI 输出的红包/领取/生活服务语法。详见 QQ美化系统计划.md §1.2
-// 支持：[🧧¥10|备注] / [🧧¥10|] / [🧧领取] / [🎁淘宝|29.8|毛衣] / [🎁淘宝|29.8|毛衣|备注]
-const TRANSFER_SEG_RE = /^\s*\[🧧(?!领取\])([^\d|\]]*)([\d.]+)\|([^\]]*)\]\s*$/;
-const TRANSFER_RECEIVE_RE = /^\s*\[🧧领取\]\s*$/;
-const SERVICE_SEG_RE = /^\s*\[(🎁|🛵|🚕)([^|\]]+)\|([\d]+(?:\.\d{1,2})?)\|([^|\]]+?)(?:\|([^\]]*))?\]\s*$/;
-function parseAssistantSegment(text) {
-    if (TRANSFER_RECEIVE_RE.test(text)) return { kind: 'receive' };
-    const m = text.match(TRANSFER_SEG_RE);
-    if (m) {
-        return {
-            kind: 'transfer',
-            currency: (m[1] || '').trim(),
-            amount: m[2],
-            note: (m[3] || '').trim()
-        };
-    }
-    const service = text.match(SERVICE_SEG_RE);
-    if (service) {
-        const defs = {
-            '🎁': { serviceType: 'gift', platform: '淘宝' },
-            '🛵': { serviceType: 'delivery', platform: '美团' },
-            '🚕': { serviceType: 'ride', platform: '滴滴' },
-        };
-        const def = defs[service[1]];
-        if (def && service[2].trim() === def.platform) {
-            return {
-                kind: 'service',
-                serviceType: def.serviceType,
-                icon: service[1],
-                platform: def.platform,
-                price: service[3],
-                item: service[4].trim(),
-                note: (service[5] || '').trim(),
-            };
-        }
-    }
-    return { kind: 'text' };
-}
-
-function markLatestPendingUserTransferReceived(chat) {
-    const msgs = chat.messages || [];
-    for (let j = msgs.length - 1; j >= 0; j--) {
-        const t = msgs[j];
-        if (t && t.role === 'user' && t.type === 'transfer' && t.status === 'pending') {
-            t.status = 'received';
-            t.settled_at = Date.now();
-            return true;
-        }
-    }
-    return false;
-}
-
-async function appendAssistantReplySegments(chat, segments) {
-    const cleanSegments = normalizeReplySegments(segments);
-    if (!cleanSegments.length) return;
-    const groupId = createReplyGroupId();
-    const createdAt = Date.now();
-    const versions = [{ segments: cleanSegments, created_at: createdAt }];
-    let firstStructured = true;
-    for (let i = 0; i < cleanSegments.length; i++) {
-        const segText = cleanSegments[i];
-        const parsed = parseAssistantSegment(segText);
-
-        if (parsed.kind === 'receive') {
-            // [🧧领取] 不入消息，只动作：把最近一个 pending user→char 红包标 received
-            markLatestPendingUserTransferReceived(chat);
-            chat.updated_at = Date.now();
-            renderChats();
-            renderActiveChat();
-            continue;
-        }
-
-        if (i > 0) await sleep(Math.min(1400, 350 + segText.length * 45));
-
-        const base = {
-            role: 'assistant',
-            created_at: Date.now(),
-            reply_group_id: groupId,
-            reply_group_version_index: 0,
-        };
-        if (firstStructured) base.reply_group_versions = versions;
-        firstStructured = false;
-
-        if (parsed.kind === 'transfer') {
-            chat.messages.push({
-                ...base,
-                type: 'transfer',
-                text: `转账 ${parsed.currency}${parsed.amount}${parsed.note ? ` ${parsed.note}` : ''}`,
-                amount: parsed.amount,
-                currency: parsed.currency,
-                note: parsed.note,
-                status: 'pending',
-                settled_at: null,
-            });
-        } else if (parsed.kind === 'service') {
-            chat.messages.push({
-                ...base,
-                type: 'service',
-                serviceType: parsed.serviceType,
-                icon: parsed.icon,
-                platform: parsed.platform,
-                price: parsed.price,
-                item: parsed.item,
-                note: parsed.note,
-                text: `${parsed.platform} ¥${parsed.price} ${parsed.item}${parsed.note ? ` ${parsed.note}` : ''}`,
-            });
-        } else {
-            chat.messages.push({ ...base, type: 'text', text: segText });
-        }
-        chat.updated_at = Date.now();
-        renderChats();
-        renderActiveChat();
-    }
-    await saveChat(chat);
+function canRerollAssistantMessage(chat, index) {
+    const group = getReplyGroup(chat, index);
+    return chat.messages[index]?.role === 'assistant' && index === group.end && group.end === chat.messages.length - 1;
 }
 
 function setTyping(on) {

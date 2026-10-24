@@ -10,6 +10,8 @@
         const iframeThemeFrames = new WeakMap();
         // appId → iframe element（DOM 中持久存在；关闭/切换只切显示）
         const iframes = new Map();
+        const qqReadiness = new WeakMap();
+        let chatNavigationRequest = 0;
         // QQ 生成任务允许后台继续；普通 App 超出上限后按最近使用顺序释放。
         const openOrder = [];
         const MAX_OPEN = 4;
@@ -388,6 +390,28 @@
         new ResizeObserver(updateAppLayoutMode).observe(appWindow);
 
         // 来自任意 pool iframe 的消息
+        window.bunnyosWaitForQq = function(app, reload = false) {
+            const iframe = window.bunnyosPreloadApp(app);
+            if (!iframe) return Promise.reject(new Error('QQ 页面无法加载'));
+            let ready = qqReadiness.get(iframe);
+            if (!ready || (reload && ready.done)) {
+                ready = { done: false };
+                ready.promise = new Promise(resolve => { ready.resolve = resolve; });
+                qqReadiness.set(iframe, ready);
+            }
+            if (reload) {
+                iframe.src = app.entryUrl;
+            } else {
+                try {
+                    if (iframe.contentWindow?.bunnyosQqCoreReady) {
+                        ready.done = true;
+                        ready.resolve(iframe);
+                    }
+                } catch { /* QQ signals readiness through postMessage as well. */ }
+            }
+            return ready.promise;
+        };
+
         window.addEventListener('message', event => {
             // 找出消息来源是哪个 iframe
             let sourceAppId = '';
@@ -395,7 +419,13 @@
                 if (event.source === ifr.contentWindow) { sourceAppId = appId; break; }
             }
             const data = event.data;
-            if (!data || typeof data !== 'object') return;
+            if (!data || typeof data !== 'object' || event.origin !== location.origin) return;
+            if (sourceAppId === 'QQ' && data.type === 'bunnyos:qq-core-ready') {
+                const iframe = iframes.get('QQ');
+                const ready = qqReadiness.get(iframe);
+                if (ready) { ready.done = true; ready.resolve(iframe); }
+                return;
+            }
 
             // 后台通知：来自任意 iframe 都触发
             if (data.type === 'bunnyos:notify' && sourceAppId) {
@@ -418,17 +448,16 @@
 
         // 外部（横幅）调用：跳到指定 App 并向其转发 open-chat
         window.bunnyosOpenAppAndFocusChat = async function(appId, characterId) {
-            // 找 manifest
+            const request = ++chatNavigationRequest;
             try {
-                const apps = await fetch('/api/apps').then(r => r.json());
-                const app = apps.find(a => a.id === appId);
-                if (!app) return;
+                const apps = window.installedApps?.some(item => item.id === appId && item.entryUrl)
+                    ? window.installedApps : await window.bunnyosAppsReady;
+                const app = apps.find(item => item.id === appId);
+                if (!app || request !== chatNavigationRequest) return;
                 openApp(app);
-                const ifr = getIframeForApp(appId);
-                const send = () => ifr?.contentWindow?.postMessage({ type: 'bunnyos:open-chat', characterId }, '*');
-                // 若 iframe 刚加载完未必接到，延迟重试
-                send();
-                setTimeout(send, 400);
+                const iframe = appId === 'QQ' ? await window.bunnyosWaitForQq(app) : getIframeForApp(appId);
+                if (request !== chatNavigationRequest) return;
+                iframe?.contentWindow?.postMessage({ type: 'bunnyos:open-chat', characterId }, location.origin);
             } catch (e) { console.error(e); }
         };
 

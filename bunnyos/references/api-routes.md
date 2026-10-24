@@ -2,17 +2,14 @@
 
 Backend file: `server.js`.
 
-The server uses Express on fixed port `3000` and serves the entire project root through:
-
-```js
-app.use(express.static(path.join(__dirname)));
-```
+The server uses Express on `PORT` (default `3000`). Authenticated static serving exposes frontend files and sandboxed media only. User data and PM2 configuration live in `BUNNYOS_STORAGE_DIR`, outside the program directory.
 
 ## Important Constants
 
 | Constant | Path |
 | --- | --- |
 | `APPS_DIR` | `apps/` |
+| `STORAGE_ROOT` | `BUNNYOS_STORAGE_DIR`, default `<code-directory>-data` |
 | `DATA_DIR` | `data/` |
 | `ASSETS_DIR` | `assets/` |
 | `BACKGROUNDS_DIR` | `assets/backgrounds/` |
@@ -21,14 +18,18 @@ app.use(express.static(path.join(__dirname)));
 | `PRESETS_FILE` | `data/presets/image-prompts.json` |
 
 `ensureFileExist(filePath, defaultData = {})` creates missing parent directories and JSON files.
+All paths except `APPS_DIR` in the table are relative to `STORAGE_ROOT`.
 
 ## Routes
 
 | Method | Route | Behavior |
 | --- | --- | --- |
 | `GET` | `/api/apps` | Scan `apps/*/manifest.json`, add `folder` and `entryUrl`, sort by `order`. |
-| `GET` | `/api/settings` | Read root `settings.json`. |
-| `POST` | `/api/settings` | Replace root `settings.json` with request body. |
+| `GET` | `/api/settings` | Read settings and `_version`. |
+| `PATCH` | `/api/settings` | Apply `{version, changes}`; reject stale writes with 409. |
+| `PATCH` | `/api/worldbooks/books/:id` | Apply versioned name/entries changes to one book. |
+| `POST` | `/api/qq/prompt-preview` | Build the selected preset against a character's saved chat using the generation context builder. |
+| `POST` | `/api/qq/reply` | Generate, validate chat version and save structured reply versions before responding or notifying. |
 | `POST` | `/api/assets/upload` | Upload beauty assets from image Data URLs. |
 | `GET` | `/api/qq/chats?summary=1` | Return chat metadata, last message, message count, and favorite count without returning full histories. |
 | `GET` | `/api/qq/chats/:characterId` | Return one complete chat after the user opens it. |
@@ -60,7 +61,7 @@ or:
 
 Rules:
 
-- JSON body limit is currently `100mb`.
+- JSON body limit is currently `200mb`.
 - Only image Data URLs are accepted.
 - Backgrounds are slot based:
   - portrait -> `assets/backgrounds/thin-back.<ext>`

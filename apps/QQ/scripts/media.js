@@ -209,12 +209,9 @@ async function onChatImagePicked(e) {
     const characterId = state.activeChatId;
     try {
         const image = await fileToDataUrl(file);
-        const clientImageId = `img_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-        state.imageAttachments[clientImageId] = { dataUrl: image, consumed: false, characterId };
-        putImageBlob(clientImageId, image).catch(err => console.warn('[QQ] IDB 写入图片失败', err));
         await appendChatMessage({
             role: 'user', type: 'image', text: '[图片]', image,
-            client_image_id: clientImageId, created_at: Date.now()
+            created_at: Date.now()
         }, characterId);
     } catch (error) {
         toast('图片尚未保存到服务器：' + error.message);
@@ -457,11 +454,10 @@ async function saveAsrLastWorking(name) {
         if (!res.ok) return;
         const s = await res.json();
         if (s.asr_lastWorking === name) return;
-        s.asr_lastWorking = name;
         await fetch('/api/settings', {
-            method: 'POST',
+            method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(s),
+            body: JSON.stringify({ version: s._version, changes: { asr_lastWorking: name } }),
         });
     } catch {}
 }
@@ -674,9 +670,6 @@ function mergeSavedChat(saved, chat, expectedRevision) {
         if (srvMsg && srvMsg.type === 'transfer' && srvMsg.status === 'returned' && local.status === 'pending') {
             walletNeedsRefresh = true;
         }
-        if (srvMsg?.type === 'image' && local.type === 'image' && local.image) {
-            return { ...srvMsg, image: local.image, client_image_id: local.client_image_id };
-        }
         return srvMsg;
     });
     let localChat = {
@@ -707,7 +700,6 @@ async function saveChat(chat) {
             if (message?.type !== 'image') return { ...message };
             const clean = { ...message, text: message.text || '[图片]' };
             if (clean.image_url) delete clean.image;
-            else if (!clean.image) clean.image = await getImageBlob(clean.client_image_id);
             return clean;
         }));
         const res = await fetch(`/api/qq/chats/${encodeURIComponent(characterId)}`, {
@@ -723,7 +715,7 @@ async function saveChat(chat) {
 }
 
 async function readChatMutationResponse(response, chat) {
-    const data = await response.json().catch(() => null);
+    const data = await readApiResponse(response);
     if (data?.error_code === 'CHAT_VERSION_CONFLICT') {
         chat._saveConflict = true;
         toast(data.error);
@@ -732,6 +724,8 @@ async function readChatMutationResponse(response, chat) {
         const error = new Error(data?.error || `HTTP ${response.status}`);
         error.status = response.status;
         error.balance = data?.balance;
+        error.payload = data;
+        error.response = response;
         throw error;
     }
     return data;

@@ -7,7 +7,7 @@ const vm = require('vm');
 function mediaRuntime(fetch) {
     const chat = { characterId: 'test', messages: [], version: null, _messagesLoaded: true };
     const context = vm.createContext({
-        state: { chats: [chat], activeChatId: null }, fetch,
+        state: { chats: [chat], activeChatId: null }, fetch, readApiResponse: response => response.json(),
         getImageBlob: async () => null, toast() {}, renderActiveChat() {},
         loadWalletBalance: async () => {}, ensureChatLoaded: async () => chat,
     });
@@ -57,6 +57,16 @@ test('a conflicting save keeps local messages and prevents later queued requests
     await assert.rejects(context.saveChat(chat), /保存已暂停/);
     assert.equal(calls, 1);
     assert.equal(chat.messages[0].text, 'keep my unsaved message');
+});
+
+test('queued chat operations preserve full upstream errors for the existing error dialog', async () => {
+    const payload = { error: 'provider unavailable', upstream_status: 503, request_id: 'upstream-request', detail: 'provider response' };
+    const { context } = mediaRuntime(async () => ({ ok: false, status: 424, json: async () => payload }));
+    await assert.rejects(context.mutateChat('test', '/api/qq/reply', 'POST'), error => {
+        assert.equal(error.payload, payload);
+        assert.equal(error.status, 424);
+        return true;
+    });
 });
 
 function imageRuntime({ failWrite = false, abort = false, loseWrite = false } = {}) {

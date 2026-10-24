@@ -14,26 +14,51 @@ function ensureBeautyStyleNodes() {
     });
 }
 
+let beautyLibraryPromise = null;
+let beautyLoadSequence = 0;
+const charBeautyCache = new Map();
+
+function invalidateBeautyLibrary() {
+    beautyLibraryPromise = null;
+    charBeautyCache.clear();
+}
+
+function getBeautyLibrary() {
+    if (!beautyLibraryPromise) {
+        beautyLibraryPromise = fetch('/api/qq/beauties').then(async response => {
+            if (!response.ok) throw new Error('读取美化库失败');
+            return response.json();
+        }).catch(error => { beautyLibraryPromise = null; throw error; });
+    }
+    return beautyLibraryPromise;
+}
+
 // 进入 char 聊天时调用：拉 char-beauty + 美化库，注入当前选中项的 CSS / 资源
-async function applyCharBeauty(characterId) {
+async function applyCharBeauty(characterId, refresh = false) {
+    if (refresh) invalidateBeautyLibrary();
+    if (characterId && state.activeChatId !== characterId) return;
+    const sequence = ++beautyLoadSequence;
     ensureBeautyStyleNodes();
     const frameStyle = document.getElementById('bunny-style-frame');
     const bubbleStyle = document.getElementById('bunny-style-bubble');
     const bgStyle = document.getElementById('bunny-style-bg');
-    if (!characterId) {
-        if (frameStyle) frameStyle.textContent = '';
-        if (bubbleStyle) bubbleStyle.textContent = '';
-        if (bgStyle) bgStyle.textContent = '';
-        return;
-    }
+    state.charBeautyCurrent = null;
+    state.charBeautyAvatars = null;
+    if (frameStyle) frameStyle.textContent = '';
+    if (bubbleStyle) bubbleStyle.textContent = '';
+    if (bgStyle) bgStyle.textContent = '';
+    if (!characterId) return;
     try {
-        const [cbRes, beautyRes] = await Promise.all([
-            fetch(`/api/qq/char-beauty/${encodeURIComponent(characterId)}`),
-            fetch('/api/qq/beauties'),
+        const [cb, beauties] = await Promise.all([
+            charBeautyCache.get(characterId) || fetch(`/api/qq/char-beauty/${encodeURIComponent(characterId)}`).then(async response => {
+                if (!response.ok) throw new Error('读取聊天美化失败');
+                const data = await response.json();
+                return data;
+            }),
+            getBeautyLibrary()
         ]);
-        if (!cbRes.ok || !beautyRes.ok) return;
-        const cb = await cbRes.json();
-        const beauties = await beautyRes.json();
+        if (sequence !== beautyLoadSequence || state.activeChatId !== characterId) return;
+        charBeautyCache.set(characterId, cb);
         state.charBeautyCurrent = { characterId, ...cb };
 
         // 头像框（拆 char/user 两侧）：分别命中 .bunny-qq-frame-char/-user::after
@@ -109,6 +134,7 @@ async function renderChatSettings() {
         if (!cbRes.ok || !beautyRes.ok || !worldbookRes.ok || !summaryRes.ok) throw new Error('加载失败');
         const cb = await cbRes.json();
         const beauties = await beautyRes.json();
+        if (state.chatSettingsCharId !== charId) return;
         const worldbooks = (await worldbookRes.json()).books || [];
         const summarySettings = await summaryRes.json();
         const frames = beauties.frames || [];
@@ -303,7 +329,7 @@ function uploadCharBackground(fileInput) {
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) { toast(data.error || '上传失败'); return; }
-            await applyCharBeauty(charId);
+            await applyCharBeauty(charId, true);
             renderChatSettings();
             toast('已上传聊天背景');
         } catch (err) {
@@ -324,7 +350,7 @@ async function clearCharBackground() {
             toast(d.error || '清除失败');
             return;
         }
-        await applyCharBeauty(charId);
+        await applyCharBeauty(charId, true);
         renderChatSettings();
         toast('已清除背景');
     } catch (err) {
@@ -346,7 +372,7 @@ async function onChatSettingsBeautyChange(field, value) {
             toast(d.error || '保存失败');
             return;
         }
-        await applyCharBeauty(charId);
+        await applyCharBeauty(charId, true);
         toast('已更新');
     } catch (err) {
         toast('保存失败：' + (err.message || '未知错误'));

@@ -113,7 +113,7 @@ async function loadBeautyPanel(type) {
                 const made = await fetch('/api/qq/beauties/backgrounds', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: '背景' })
+                    body: JSON.stringify({ name: '背景', requestId: makeClientMessageId('beauty') })
                 });
                 if (made.ok) list.push(await made.json());
             } catch {}
@@ -405,13 +405,17 @@ async function createBeautySlot(type) {
         if (!input) return;
         name = input.trim();
     }
+    const purchaseKey = `${type}:${name}`;
+    state.beautyPurchaseIds ||= {};
+    const requestId = state.beautyPurchaseIds[purchaseKey] ||= makeClientMessageId('beauty');
     try {
         const res = await fetch(`/api/qq/beauties/${type}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name })
+            body: JSON.stringify({ name, requestId })
         });
         const data = await res.json().catch(() => ({}));
+        if (res.ok) invalidateBeautyLibrary();
         if (!res.ok) {
             if (res.status === 402) {
                 toast(`余额不足：${data.balance}cc，需要 ${data.price}cc`);
@@ -420,6 +424,7 @@ async function createBeautySlot(type) {
             }
             return;
         }
+        delete state.beautyPurchaseIds[purchaseKey];
         await refreshBeautyBalance();
         await loadBeautyPanel(type);
         toast(`已创建 ${data.name}（-${def.price}cc）`);
@@ -635,6 +640,8 @@ async function flushBeautyAutoSave() {
             return;
         }
         const saved = await res.json();
+        invalidateBeautyLibrary();
+        if (state.activeChatId) applyCharBeauty(state.activeChatId);
         // 同步缓存
         const list = (state.beautyListCache || {})[type] || [];
         const idx = list.findIndex(x => x.id === id);
@@ -740,6 +747,7 @@ async function deleteSelectedBeauties(type) {
     for (const id of ids) {
         try {
             const r = await fetch(`/api/qq/beauties/${type}/${id}`, { method: 'DELETE' });
+            if (r.ok) invalidateBeautyLibrary();
             if (!r.ok) {
                 const d = await r.json().catch(() => ({}));
                 errors.push(`${id}: ${d.error || r.status}`);
@@ -752,6 +760,8 @@ async function deleteSelectedBeauties(type) {
     state.beautySelected = new Set();
     updateSelectToggleLabel();
     loadBeautyPanel(type);
+    if (state.activeChatId) applyCharBeauty(state.activeChatId);
+    if (type === 'skins') loadGlobalSkin();
 }
 
 // ========== 皮肤全局应用 ==========
