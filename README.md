@@ -16,6 +16,10 @@ npm start
 
 访问 `http://localhost:3000/index.html`。文件统一 UTF-8。需要 Node.js v18+。
 
+### GitHub Pages 项目说明
+
+Pages 发布来源为 `main` 分支的 `/docs`，入口是 `docs/index.md`，展示启动说明和完整文档链接。聊天、存储与推送需要通过上面的 Node.js 服务或 VPS 部署运行。修改文档或构建检查工作流的 PR 会先运行同一 Jekyll 构建并检查生成的首页和样式文件；合并后继续由 GitHub Pages 发布。
+
 ### 登录与公网部署
 
 首次访问会显示浏览器登录框，用户名是 `bunnyos`。默认启动时自动生成随机密码，保存在独立存储目录的 `data/access.json`；也可以用至少 16 字符的环境变量 `BUNNYOS_PASSWORD` 指定密码。密码不会打印到日志，不会进入云备份，恢复备份也不会替换本机登录密码。
