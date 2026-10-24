@@ -1,0 +1,32 @@
+name: Pages build check
+
+on:
+  pull_request:
+    paths:
+      - 'docs/**'
+      - '.github/workflows/pages-build-check.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/pages-build-check.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Check publishing source
+        run: test -f docs/index.md
+      - name: Build with Jekyll
+        uses: actions/jekyll-build-pages@v1
+        with:
+          source: ./docs
+          destination: ./_site
+      - name: Check generated page and stylesheet
+        run: |
+          test -s _site/index.html
+          test -s _site/assets/css/style.css
