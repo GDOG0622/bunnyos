@@ -153,3 +153,54 @@ test('worldbook saves retain a conflicting draft across an editor reload', async
     assert.equal(vm.runInContext('state.worldbookBooks[0]._version', context), 'v1');
     assert.equal(vm.runInContext('state.worldbookBooks[0]._saveConflict', context), true);
 });
+
+test('Suki keeps completed actions disabled, retries failures and allows a newly saved answer', async () => {
+    const nodes = new Map();
+    const get = id => { if (!nodes.has(id)) nodes.set(id, { ...element(), disabled: false, value: '', reset() {} }); return nodes.get(id); };
+    const document = { querySelector: get, getElementById: id => get('#' + id), querySelectorAll: () => [], activeElement: null };
+    const window = { addEventListener() {} };
+    const today = '2026-10-24';
+    const saved = { _version: 'v1', today, question: 'How was today?', anniversaries: [], daysTogether: 1,
+        space: { title: 'Our home', userName: 'Me', startDate: today, moods: {}, answers: { [today]: { user: 'Sunset' } },
+            pet: { name: 'Bunny', careDates: [] }, entries: [], anniversaries: [], wishes: [] } };
+    let failGeneration = true;
+    const context = vm.createContext({ window, document, console, setTimeout() {}, clearTimeout() {},
+        requestAnimationFrame: callback => callback(), fetch: async (url, options) => {
+            // Leave the automatic startup request pending; seed this test's saved state below.
+            if (!options.body) return new Promise(() => {});
+            if (url.endsWith('/generate') && failGeneration) return { ok: false, status: 500, json: async () => ({ error: 'Try again' }) };
+            if (url.endsWith('/pet')) saved.space.pet.careDates.push(today);
+            if (url.endsWith('/generate')) saved.space.answers[today].partner = 'Together';
+            if (url.endsWith('/answer')) saved.space.answers[today] = { user: JSON.parse(options.body).text };
+            return { ok: true, json: async () => structuredClone(saved) };
+        } });
+    vm.runInContext(source('assets/scripts/companion.js'), context);
+    context.BunnyApp = window.BunnyApp;
+    vm.runInContext(source('apps/suki/suki.js'), context);
+    context.saved = structuredClone(saved);
+    vm.runInContext("data = saved; currentId = 'partner'; render();", context);
+    const click = id => get(id).onclick({ currentTarget: get(id), preventDefault() {} });
+
+    const caring = click('#care-pet');
+    assert.equal(get('#care-pet').disabled, true, 'in-flight care is disabled');
+    await caring;
+    assert.equal(get('#care-pet').disabled, true, 'completed care stays disabled');
+
+    const failed = click('#partner-answer');
+    assert.equal(get('#partner-answer').disabled, true, 'in-flight generation is disabled');
+    await failed;
+    assert.equal(get('#partner-answer').disabled, false, 'failed generation can be retried');
+    assert.equal(get('#status').textContent, 'Try again');
+    failGeneration = false;
+    await click('#partner-answer');
+    assert.equal(get('#partner-answer').disabled, true, 'completed generation stays disabled');
+    assert.equal(get('#partner-answer').textContent, 'TA 已经认真回答了');
+
+    get('#answer-text').value = 'A new answer';
+    get('#answer-text').oninput();
+    const submitter = { disabled: false };
+    await get('#answer-form').onsubmit({ submitter, preventDefault() {} });
+    assert.equal(submitter.disabled, false, 'ordinary submit buttons are restored');
+    assert.equal(get('#partner-answer').disabled, false, 'saving a new answer allows another reply');
+    assert.equal(get('#care-pet').disabled, true, 'unrelated changes keep completed care disabled');
+});

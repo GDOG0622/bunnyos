@@ -102,6 +102,7 @@ async function activateChat(characterId) {
     renderActiveChat();
     try {
         const chat = await ensureChatLoaded(characterId);
+        if (typeof loadChatToolActions === 'function') loadChatToolActions(characterId);
         if (state.activeChatId === characterId) {
             renderChats();
             renderActiveChat();

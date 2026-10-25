@@ -178,6 +178,21 @@
 
     // 启动时静默注册 SW（不申请权限、不订阅）
     registerServiceWorker();
+    let reminderEvents;
+    function connectReminders() {
+        if (typeof EventSource !== 'function' || reminderEvents && reminderEvents.readyState !== EventSource.CLOSED) return;
+        reminderEvents = new EventSource('/api/reminders/events');
+        reminderEvents.addEventListener('reminder', event => {
+            try {
+                const payload = JSON.parse(event.data);
+                window.bunnyosNotify({ kind: 'success', characterName: payload.title, snippet: payload.body,
+                    sourceAppId: 'tools', forceBanner: true });
+            } catch (error) { console.warn('[reminder event]', error); }
+        });
+    }
+    connectReminders();
+    window.addEventListener('pageshow', connectReminders);
+    window.addEventListener('pagehide', () => reminderEvents?.close());
 
     // SW 点击通知后的跳转消息
     navigator.serviceWorker?.addEventListener?.('message', (event) => {

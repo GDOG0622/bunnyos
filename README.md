@@ -16,6 +16,14 @@ npm start
 
 访问 `http://localhost:3000/index.html`。文件统一 UTF-8。需要 Node.js v18+。
 
+### MCP 工具与情侣空间
+
+- **工具**：从桌面「工具」或「设置 → 工具、MCP 与提醒」进入，开启聊天工具后，QQ 可以调用内置提醒、Tavily 联网搜索和外接 MCP。支持 HTTP、SSE、stdio；外部操作先显示确认卡片。搜索需配置密钥或搜索 MCP，真实点单需接入相应商家服务。
+- **Suki**：选择已有 AI 角色建立小家，记录相恋天数、心情、图文日记、纪念日和共同心愿，参与每日问答与小兔养成。日记和问答可邀请角色回应，近期空间记录会进入 QQ 聊天上下文。
+- 更新后请运行 `npm install` 并重启后端。提醒需要服务持续运行；系统通知还需开启本设备推送。MCP 凭据和执行回执仅保存在当前机器，不进入可移植备份。
+
+参考项目、设计选择、配置步骤及限制见 [MCP 与 Suki 调研和使用说明](docs/mcp-suki-research.md)。
+
 ### GitHub Pages 项目说明
 
 Pages 发布来源为 `main` 分支的 `/docs`，入口是 `docs/index.md`，展示启动说明和完整文档链接。聊天、存储与推送需要通过上面的 Node.js 服务或 VPS 部署运行。修改文档或构建检查工作流的 PR 会先运行同一 Jekyll 构建并检查生成的首页和样式文件；合并后继续由 GitHub Pages 发布。
@@ -62,10 +70,13 @@ BunnyOS/
 │  ├─ settings/            通用 API、美化（含提示音+推送）、生图、语音、存储、关于
 │  ├─ QQ/                  聊天主战场（总结前端集中在 scripts/summary.js）
 │  ├─ prompt-manager/      预设、世界书、变量手册（QQ 内置打开，桌面 hidden）
-│  ├─ suki/                占位
+│  ├─ tools/               MCP 连接、搜索、提醒与调用记录
+│  ├─ suki/                AI 角色情侣空间
 │  └─ X/                   占位
 ├─ modules/
 │  ├─ qq-summary.js         QQ 分层总结后端
+│  ├─ tool-assistant.js     MCP 客户端、工具调用循环、确认回执与提醒
+│  ├─ suki.js               按角色保存的情侣空间与 AI 回应
 │  └─ st-context/           ST 风格上下文、世界书与 tokenizer/token 预算引擎
 └─ tests/                   node:test 聚焦测试
 

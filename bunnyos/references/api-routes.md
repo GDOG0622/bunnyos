@@ -30,6 +30,15 @@ All paths except `APPS_DIR` in the table are relative to `STORAGE_ROOT`.
 | `PATCH` | `/api/worldbooks/books/:id` | Apply versioned name/entries changes to one book. |
 | `POST` | `/api/qq/prompt-preview` | Build the selected preset against a character's saved chat using the generation context builder. |
 | `POST` | `/api/qq/reply` | Generate, validate chat version and save structured reply versions before responding or notifying. |
+| `GET / PATCH` | `/api/tools` | Read redacted tool configuration / update with version; chat tool use defaults off. |
+| `POST / PUT / DELETE` | `/api/tools/servers[/:id]` | Manage versioned MCP connections; secrets are not echoed. |
+| `POST` | `/api/tools/servers/:id/test` | Connect through SDK and discover tools. |
+| `GET / POST` | `/api/tools/actions`, `/api/tools/actions/:id/decide` | Read execution records / approve or reject one immutable, expiring action. |
+| `GET / POST` | `/api/reminders`, `/api/reminders/:id/cancel` | Read, create and cancel persistent reminders. |
+| `GET` | `/api/reminders/events` | Authenticated SSE for foreground reminders. |
+| `GET / PATCH` | `/api/suki/:characterId` | Read or configure a versioned character couple space. |
+| `POST` | `/api/suki/:characterId/{entries,anniversaries,wishes,mood,pet,answer,generate}` | Add records, update daily interactions or ask the configured role to respond. |
+| `POST` | `/api/suki/image` | Persist a diary photo using the existing protected image asset store. |
 | `POST` | `/api/assets/upload` | Upload beauty assets from image Data URLs. |
 | `GET` | `/api/qq/chats?summary=1` | Return chat metadata, last message, message count, and favorite count without returning full histories. |
 | `GET` | `/api/qq/chats/:characterId` | Return one complete chat after the user opens it. |

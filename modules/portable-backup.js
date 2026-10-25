@@ -12,7 +12,9 @@ const EXCLUDED_PATHS = new Set([
     'data/backups',
     'data/access.json',
     'data/vapid.json',
-    'data/push-subscriptions.json'
+    'data/push-subscriptions.json',
+    // MCP commands, credentials and execution receipts belong to this installation.
+    'data/tools'
 ]);
 
 function normalizedRelative(rootDir, filePath) {

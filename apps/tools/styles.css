@@ -1,0 +1,13 @@
+:root { --accent: #527c71; --soft: #edf5f1; }
+.intro { background: linear-gradient(110deg, var(--paper), var(--soft)); }
+.intro h2 { margin-bottom: 3px; }
+.intro > p { margin-top: 15px; }
+.tabs { margin: 2px 0 4px; }
+.tabs button { background: transparent; border-color: transparent; }
+.tabs .active { background: var(--paper); border-color: var(--line); color: var(--accent); }
+.server-title { display: flex; align-items: center; gap: 10px; }
+.connection-result { margin-top: 14px; }
+.action-result { color: var(--muted); }
+.reminder-at { font-variant-numeric: tabular-nums; }
+@media (max-width: 620px) { .intro .row { align-items: flex-start; } .intro label { white-space: nowrap; } }
+@media (prefers-color-scheme: dark) { :root { --accent: #a8cbbb; --button: #476f60; --soft: #283d36; } }

@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>工具 · BunnyOS</title>
+    <link rel="stylesheet" href="/assets/styles/companion.css?v=20261024.1"><link rel="stylesheet" href="styles.css?v=20261024.1">
+</head>
+<body>
+<main class="shell">
+    <header class="page-header"><div><div class="eyebrow">A LITTLE HELP, EVERY DAY</div><h1>让聊天帮你做点事</h1><p>连接工具，搜索世界，记住重要的小事。</p></div><button id="refresh" aria-label="刷新工具数据">刷新</button></header>
+    <p id="loading" class="empty">正在加载工具…</p>
+    <div id="content" class="stack" hidden>
+        <section class="card intro"><div class="row"><div><h2>在 QQ 聊天中使用工具</h2><p class="muted small">需要支持 function calling 的主 API 模型。</p></div><label class="check"><input id="enabled" type="checkbox"> 启用</label></div><p class="small">试着说「十分钟后提醒我喝水」或「帮我查一下今天的天气」。提醒可直接使用，联网搜索需配置搜索密钥或 MCP。</p></section>
+        <nav class="pills tabs" aria-label="工具页面"><button data-tab="connections" class="active">工具连接</button><button data-tab="reminders">提醒</button><button data-tab="actions">调用记录 <span id="pending-count" class="badge">0</span></button></nav>
+        <section id="connections" class="stack">
+            <div class="grid"><section class="card"><h2>联网搜索</h2><form id="search-form"><label>Tavily API Key<input id="search-key" type="password" autocomplete="new-password" placeholder="tvly-…"></label><p id="key-state" class="muted small"></p><div class="pills"><button class="primary" type="submit">保存搜索配置</button><button id="clear-key" type="button">清除密钥</button></div><p class="muted small">也可以连接搜索类 MCP；搜索结果和来源会返回给角色。</p></form></section>
+                <section class="card"><h2>内置提醒</h2><p>通过聊天或「提醒」页设置，到点后在 BunnyOS 显示横幅，并向已订阅设备推送。</p><p class="muted small" style="margin:12px 0">服务需持续运行；停机期间错过的提醒会在启动后补发。浏览器通知受设备权限影响。</p><button id="subscribe">开启本设备推送</button></section></div>
+            <section><div class="row section-heading"><h2>MCP 服务</h2><button class="primary" id="add-server">＋ 添加服务</button></div><div id="servers" class="stack"></div></section>
+            <section class="card small"><h3>从哪里开始</h3><p class="muted">远程服务使用 Streamable HTTP 或旧版 SSE；本机服务使用 stdio，在 BunnyOS 服务所在的电脑运行。点单、发送、付款等操作会先显示确认卡片。只读自动调用需要你为该服务单独开启。</p><p style="margin-top:8px"><a href="https://github.com/tavily-ai/tavily-mcp" target="_blank" rel="noopener noreferrer">Tavily 搜索 MCP</a> · <a href="https://github.com/modelcontextprotocol/servers" target="_blank" rel="noopener noreferrer">MCP 参考服务</a></p></section>
+        </section>
+        <section id="reminders" class="stack" hidden><section class="card"><h2>留一件事给未来的自己</h2><form id="reminder-form"><label>提醒什么<input id="reminder-title" required maxlength="200" placeholder="喝水、休息，或者一件期待的小事"></label><label>什么时候<input id="reminder-at" type="datetime-local" required></label><p class="muted small" id="timezone"></p><button class="primary" type="submit">添加提醒</button></form></section><div id="reminder-list" class="stack"></div></section>
+        <section id="actions" class="stack" hidden><p class="muted small">确认前请核对商品、金额、地址和参数。确认卡片 15 分钟后过期；执行结果未知时先去服务方核对。</p><div id="action-list" class="stack"></div></section>
+    </div>
+</main>
+<dialog id="server-dialog"><form id="server-form"><h2 id="server-title">添加 MCP 服务</h2><label>名称<input id="server-name" required maxlength="80" placeholder="例如：我的搜索工具"></label><label>连接方式<select id="server-transport"><option value="http">Streamable HTTP</option><option value="sse">SSE（旧版）</option><option value="stdio">stdio（本机命令）</option></select></label><label id="url-field">服务地址<input id="server-url" type="url" placeholder="https://example.com/mcp"></label><div id="command-fields" class="stack" hidden><label>命令<input id="server-command" placeholder="npx / uvx / node"></label><label>参数（JSON 数组）<textarea id="server-args" spellcheck="false" placeholder='["-y", "tavily-mcp"]'></textarea></label><p class="muted small">保存并测试会在服务器上运行此命令，请只使用你信任的 MCP 服务。</p></div><label id="secrets-label">请求头（JSON 字典）<textarea id="server-secrets" spellcheck="false" placeholder='{"Authorization": "Bearer …"}'></textarea></label><p id="secrets-note" class="muted small"></p><label class="check"><input id="server-enabled" type="checkbox" checked> 允许聊天发现此服务</label><label class="check"><input id="server-auto" type="checkbox"> 自动执行此服务声明的只读工具</label><div class="pills"><button class="primary" type="submit">保存</button><button id="cancel-server" type="button">取消</button></div></form></dialog>
+<div id="status" role="status" aria-live="polite"></div>
+<script src="/assets/scripts/companion.js?v=20261024.2"></script><script src="tools.js?v=20261024.1"></script>
+</body>
+</html>

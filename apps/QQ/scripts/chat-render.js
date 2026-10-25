@@ -132,7 +132,7 @@ function renderActiveChat(options = {}) {
             : 'qq-message-avatar bunny-qq-frame bunny-qq-frame-user';
         const avatarHtmlStr = `<span class="${avatarWrapClass}"><span class="qq-avatar">${avatarHtml(avatarUrl)}</span></span>`;
         item.innerHTML = avatarHtmlStr
-            + `<div class="qq-msg-col">${messageContentHtml(msg, i)}${versionNavHtml(chat, i)}</div>${metaHtml(msg)}`
+            + `<div class="qq-msg-col">${messageContentHtml(msg, i)}${typeof toolActionsHtml === 'function' ? toolActionsHtml(msg) : ''}${versionNavHtml(chat, i)}</div>${metaHtml(msg)}`
             + (isAssistant ? msgActionsHtml(chat, i) : '');
         // 气泡包裹类：让 user 自定义气泡 CSS 命中（§1.6）
         item.querySelectorAll('.qq-message').forEach(el => {

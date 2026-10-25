@@ -35,7 +35,8 @@ BunnyOS/
 ├─ apps/
 │  ├─ settings/index.html, styles.css, settings.js, manifest.json
 │  ├─ QQ/manifest.json
-│  ├─ suki/manifest.json
+│  ├─ suki/                 AI character couple space: diary, dates, wishes, daily questions, pet
+│  ├─ tools/                MCP connections, web search, reminders and execution records
 │  ├─ X/manifest.json
 │  └─ prompt-manager/manifest.json
 └─ data/
@@ -60,6 +61,10 @@ BunnyOS/
 | `assets/scripts/theme.js` | Apply global wallpaper, font, dark mode, and icon theme settings. |
 | `apps/settings/` | Settings App UI and logic. |
 | `apps/*/manifest.json` | App package metadata consumed by `/api/apps`. |
+| `modules/tool-assistant.js` | MCP SDK clients, bounded model/tool loop, durable approval receipts and reminder scheduler. |
+| `modules/suki.js` | Versioned per-character couple space, relationship context and AI responses. |
+
+See `docs/mcp-suki-research.md` for feature research, configuration and data boundaries. MCP machine credentials and execution receipts under `data/tools/` are excluded from portable backups; Suki records and reminders are included.
 
 ## App Package Manifest
 

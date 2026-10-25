@@ -1,0 +1,9 @@
+{
+  "id": "tools",
+  "name": "工具",
+  "entry": "index.html",
+  "icon": "bi-tools",
+  "bg": "bg-settings",
+  "iconColor": "#70978F",
+  "order": 25
+}
