@@ -24,6 +24,7 @@ const { createEconomyStore } = require('./modules/economy-store');
 const { migrateSettings } = require('./modules/settings-migration');
 const { createToolAssistant, runToolLoop } = require('./modules/tool-assistant');
 const { createSuki } = require('./modules/suki');
+const browserRuntime = typeof BUNNYOS_BROWSER !== 'undefined' && BUNNYOS_BROWSER;
 const STORAGE_ROOT = storageRoot(__dirname);
 requireExternalStorage(__dirname, STORAGE_ROOT);
 
@@ -31,6 +32,13 @@ const app = express();
 const PORT = Number(process.env.PORT ?? 3000);
 
 app.disable('x-powered-by');
+// Optional, generated public edition. Its APIs exist only in the visitor's
+// service worker. Never let a missing worker fall through to private APIs.
+if (!browserRuntime) {
+    app.use('/play', express.static(path.join(__dirname, 'dist', 'browser'), { index: 'index.html', dotfiles: 'deny',
+        setHeaders(res) { res.setHeader('Cache-Control', 'no-cache'); } }));
+    app.use('/play', (_req, res) => res.status(404).json({ error: '网页版资源不存在，请重新打开网页版入口。' }));
+}
 installAccessControl(app, { rootDir: STORAGE_ROOT });
 app.use((req, res, next) => {
     res.setHeader('Permissions-Policy', 'microphone=(self), camera=(self)');
@@ -273,8 +281,8 @@ function ensureVapidKeys() {
     }
     return pair;
 }
-const VAPID_KEYS = ensureVapidKeys();
-webpush.setVapidDetails(
+const VAPID_KEYS = browserRuntime ? null : ensureVapidKeys();
+if (!browserRuntime) webpush.setVapidDetails(
     'mailto:bunnyos@localhost',
     VAPID_KEYS.publicKey,
     VAPID_KEYS.privateKey
@@ -292,6 +300,7 @@ function shellQuote(value) {
     return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
 async function sendWebPushToAll(payload) {
+    if (browserRuntime) return globalThis.bunnyBrowserNotify(payload);
     const subs = readPushSubscriptions();
     if (!subs.length) return { sent: 0, removed: 0 };
     let sent = 0;
@@ -431,6 +440,8 @@ async function assertPublicRemoteUrl(rawUrl) {
     const parsed = rawUrl instanceof URL ? rawUrl : new URL(String(rawUrl));
     if (!/^https?:$/.test(parsed.protocol)) throw new Error('仅支持 http/https');
     if (isPrivateNetworkAddress(parsed.hostname)) throw new Error('禁止访问内网地址');
+    // Browsers cannot resolve DNS themselves; fetch applies CORS and the browser's network restrictions.
+    if (browserRuntime) return parsed;
     const addresses = await dns.lookup(parsed.hostname, { all: true, verbatim: true });
     if (!addresses.length || addresses.some(item => isPrivateNetworkAddress(item.address))) {
         throw new Error('禁止访问内网地址');
@@ -2074,7 +2085,7 @@ app.post('/api/admin/update-from-github', (req, res) => {
         'BRANCH="${BUNNYOS_UPDATE_BRANCH:-main}"',
         'git fetch origin "$BRANCH"',
         'git reset --hard "origin/$BRANCH"',
-        'npm install --omit=dev',
+        'if [ -f dist/browser/index.html ]; then npm ci --include=dev && npm run build:browser && npm prune --omit=dev; else npm ci --omit=dev; fi',
         'pm2 startOrRestart ecosystem.config.js --update-env',
         'pm2 save'
     ].join(' && ');
@@ -4745,4 +4756,4 @@ const bunnyosHttpServer = app.listen(PORT, () => {
 });
 bunnyosHttpServer.on('close', () => { toolAssistant.close().catch(error => console.warn('[tools close]', error.message)); });
 
-module.exports = { app, bunnyosHttpServer };
+module.exports = { app, bunnyosHttpServer, tickBrowser: browserRuntime ? () => toolAssistant.tick() : undefined };

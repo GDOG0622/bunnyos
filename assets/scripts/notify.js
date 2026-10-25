@@ -94,6 +94,7 @@
 
     async function registerServiceWorker() {
         if (!('serviceWorker' in navigator)) return null;
+        if (window.BunnyBrowser) { swRegistration = await navigator.serviceWorker.ready; return swRegistration; }
         try {
             const reg = await navigator.serviceWorker.register('/service-worker.js', { scope: '/' });
             swRegistration = reg;
@@ -111,6 +112,11 @@
     }
 
     async function subscribeWebPush() {
+        if (window.BunnyBrowser) {
+            if (!('Notification' in window)) return { ok: false, error: '浏览器不支持通知' };
+            const permission = await Notification.requestPermission();
+            return permission === 'granted' ? { ok: true } : { ok: false, error: '通知权限未开启' };
+        }
         if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
             return { ok: false, error: '浏览器不支持 Web Push' };
         }
@@ -139,6 +145,7 @@
     }
 
     async function unsubscribeWebPush() {
+        if (window.BunnyBrowser) return { ok: false, error: '请在浏览器的站点权限中关闭通知。' };
         try {
             const sub = await getPushSubscription();
             if (!sub) return { ok: true };
@@ -155,6 +162,8 @@
     }
 
     async function getPushStatus() {
+        if (window.BunnyBrowser) return { notifSupported: 'Notification' in window, swSupported: true,
+            perm: window.Notification?.permission || 'unsupported', subscribed: window.Notification?.permission === 'granted' };
         const notifSupported = 'Notification' in window;
         const swSupported = 'serviceWorker' in navigator && 'PushManager' in window;
         const perm = notifSupported ? Notification.permission : 'unsupported';

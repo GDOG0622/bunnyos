@@ -18,10 +18,10 @@ function installAccessControl(app, { rootDir, env = process.env }) {
             fs.writeFileSync(authFile, JSON.stringify({ password: crypto.randomBytes(24).toString('base64url') }), { mode: 0o600, flag: 'wx' });
         }
         password = JSON.parse(fs.readFileSync(authFile, 'utf8')).password;
-        if (typeof password !== 'string' || password.length < 16) throw new Error('data/access.json 中的登录密码无效');
+        if (typeof password !== 'string' || password.length < 8) throw new Error('data/access.json 中的登录密码无效');
         console.log('[BunnyOS] 登录用户名：bunnyos；密码保存在 data/access.json，可用 BUNNYOS_PASSWORD 设置。');
     }
-    if (password.length < 16) throw new Error('BUNNYOS_PASSWORD 至少需要 16 个字符');
+    if (password.length < 8) throw new Error('BUNNYOS_PASSWORD 至少需要 8 个字符');
     const configuredUrl = env.BUNNYOS_ORIGIN ? new URL(env.BUNNYOS_ORIGIN) : null;
     if (configuredUrl && !/^https?:$/.test(configuredUrl.protocol)) throw new Error('BUNNYOS_ORIGIN 必须使用 http 或 https');
     const configuredOrigin = configuredUrl?.origin;

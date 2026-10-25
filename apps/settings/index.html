@@ -634,6 +634,16 @@
             <button type="button" class="back-btn" onclick="navBack()"><i class="bi bi-chevron-left"></i>返回</button>
             <span class="breadcrumb-title">设置 / 存储配置</span>
         </div>
+        <div class="section" id="browser-storage-section" hidden>
+            <div class="section-title">当前浏览器的存档</div>
+            <div class="list"><div class="item vertical">
+                <p>网页版的角色、聊天、图片、API 设置保存在本设备的浏览器中。不同设备、浏览器、网址的存档各自独立；换设备可导入备份或加载自己的云端备份。</p>
+                <p id="browser-storage-status" role="status">正在检查存储…</p>
+                <div class="button-row"><button type="button" class="pill-btn" id="browser-persist">申请持久存储</button><button type="button" class="pill-btn" id="browser-export">导出完整备份</button></div>
+                <label>导入 BunnyOS 备份<input id="browser-import" type="file" accept="application/json,.json"></label>
+                <p>API 由浏览器直接请求，需要接口支持跨域访问。关掉网页后生成和提醒可能暂停。</p>
+            </div></div>
+        </div>
         <div class="section" id="cloud-storage-section">
             <div class="section-title">云端备份
                 <button class="btn-text" type="button" onclick="showCloudStorageHelp()" aria-label="云端备份配置教程" style="margin-left:6px;"><i class="bi bi-exclamation-circle"></i></button>

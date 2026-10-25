@@ -87,8 +87,14 @@
 
         async downloadBackup() {
             const current = await this.existingFile();
-            if (!current?.content) throw new Error('云端还没有 BunnyOS 备份');
-            return JSON.parse(base64ToText(current.content));
+            if (!current) throw new Error('云端还没有 BunnyOS 备份');
+            if (current.content) return JSON.parse(base64ToText(current.content));
+            // Contents metadata omits base64 content for larger image backups.
+            // Fetch raw content through the authenticated API, not a public URL.
+            const { branch, filePath } = this.values();
+            return this.request(this.api(`/contents/${filePath.split('/').map(encodeURIComponent).join('/')}?ref=${encodeURIComponent(branch)}`), {
+                headers: { Accept: 'application/vnd.github.raw+json' }
+            });
         }
     }
 

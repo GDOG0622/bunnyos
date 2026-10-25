@@ -4,6 +4,8 @@
 
 ## 启动
 
+**直接开放给访客使用**：运行 `npm ci`、`npm run build:browser`，把生成的 `dist/browser/` 发布到 HTTPS 静态托管。每位访客的数据保存在自己的浏览器 IndexedDB，可手动导出或备份到自己的 GitHub / Supabase。Node.js 部署也会在 `/play/` 提供这个独立公开入口；原 `/` 仍使用私人服务器存档。使用差异、迁移和限制见 [网页版说明](docs/browser-edition.md)。
+
 **Windows 一键**：双击 `start.bat`。首次会自动 `npm install`（约 1-2 分钟），之后两秒后自动打开浏览器。关窗口即停服务。
 
 **macOS / Linux 一键**：`./start.sh`（必要时 `chmod +x start.sh`）。Ctrl+C 停。
@@ -24,13 +26,15 @@ npm start
 
 参考项目、设计选择、配置步骤及限制见 [MCP 与 Suki 调研和使用说明](docs/mcp-suki-research.md)。
 
-### GitHub Pages 项目说明
+### GitHub Pages 网页版
 
-Pages 发布来源为 `main` 分支的 `/docs`，入口是 `docs/index.md`，展示启动说明和完整文档链接。聊天、存储与推送需要通过上面的 Node.js 服务或 VPS 部署运行。修改文档或构建检查工作流的 PR 会先运行同一 Jekyll 构建并检查生成的首页和样式文件；合并后继续由 GitHub Pages 发布。
+公开网页版：[https://gdog0622.github.io/bunnyos/](https://gdog0622.github.io/bunnyos/)。打开即可使用，每位访客的存档保存在自己的浏览器。
+
+Pages 使用 GitHub Actions 发布：`main` 更新后，`.github/workflows/browser-build.yml` 运行测试、构建 `dist/browser/` 并部署。仓库 Settings → Pages → Source 应选择 **GitHub Actions**。Fork 后同样选择 GitHub Actions，并在 Actions 中运行 Browser edition 工作流即可；构建支持仓库子路径。`docs/` 保留项目文档，不再作为公开网站的发布目录。
 
 ### 登录与公网部署
 
-首次访问会显示浏览器登录框，用户名是 `bunnyos`。默认启动时自动生成随机密码，保存在独立存储目录的 `data/access.json`；也可以用至少 16 字符的环境变量 `BUNNYOS_PASSWORD` 指定密码。密码不会打印到日志，不会进入云备份，恢复备份也不会替换本机登录密码。
+首次访问会显示浏览器登录框，用户名是 `bunnyos`。默认启动时自动生成随机密码，保存在独立存储目录的 `data/access.json`；也可以用至少 8 字符的环境变量 `BUNNYOS_PASSWORD` 指定密码。密码不会打印到日志，不会进入云备份，恢复备份也不会替换本机登录密码。
 
 公网访问请使用 HTTPS 反向代理，并设置 `BUNNYOS_ORIGIN` 为浏览器使用的完整来源（例如 `https://bunny.example.com`，含非默认端口时也要写端口）。未设置时按请求的协议和 Host 检查来源；HTTPS 代理后若未配置外部来源，写入请求可能被拒绝。页面、API、图片和设置事件流均需要登录，只允许同源访问。更新 webhook 仍单独校验 `BUNNYOS_UPDATE_TOKEN`。
 
@@ -350,7 +354,7 @@ npm install --omit=dev
 
 ```json
 {
-  "BUNNYOS_PASSWORD": "至少16字符的登录密码",
+  "BUNNYOS_PASSWORD": "至少8字符的登录密码",
   "BUNNYOS_ORIGIN": "https://你的域名",
   "BUNNYOS_UPDATE_TOKEN": "换成一长串随机字符"
 }

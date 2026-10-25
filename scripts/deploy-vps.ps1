@@ -1,7 +1,7 @@
 param(
-    [string]$HostName = "107.175.234.49",
+    [string]$HostName = "107.175.235.198",
     [string]$User = "root",
-    [int]$Port = 22,
+    [int]$Port = 50122,
     [string]$RemotePath = "/opt/bunnyos",
     [string]$StoragePath = "",
     [switch]$SkipInstall
@@ -10,6 +10,11 @@ param(
 $ErrorActionPreference = "Stop"
 
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+Push-Location $Root
+try {
+    & npm.cmd run build:browser
+    if ($LASTEXITCODE -ne 0) { throw "Browser build failed; run npm ci before deploying." }
+} finally { Pop-Location }
 $Stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $TempRoot = Join-Path ([System.IO.Path]::GetTempPath()) "bunnyos-deploy-$Stamp"
 $Stage = Join-Path $TempRoot "bundle"

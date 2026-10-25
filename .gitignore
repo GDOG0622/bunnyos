@@ -1,4 +1,7 @@
 node_modules/
+dist/
+test-results/
+playwright-report/
 
 # 用户数据：本地优先，git 不带走
 data/

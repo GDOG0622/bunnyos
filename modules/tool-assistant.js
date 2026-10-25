@@ -121,7 +121,7 @@ function createToolAssistant({ app, dataDir, notify, isChatBusy = () => false, n
         }
     }
     const timer = setInterval(() => tick().catch(error => console.warn('[reminders]', error.message)), 1000);
-    timer.unref();
+    timer.unref?.();
     tick().catch(error => console.warn('[reminders]', error.message));
 
     async function connection(server) {

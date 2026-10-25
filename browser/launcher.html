@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BunnyOS 网页版</title>
+<link rel="icon" href="icon.png"><link rel="manifest" href="manifest.webmanifest">
+<style>body{margin:0;min-height:100dvh;display:grid;place-items:center;background:#edf8f2;color:#264c49;font:16px/1.8 system-ui}main{max-width:440px;margin:24px;padding:36px;border-radius:28px;background:#ffffffdd;box-shadow:0 12px 45px #264c4910}h1{margin:0}p{color:#58716d}button,a{color:#26776b}button{border:0;border-radius:16px;background:#d8eee5;padding:12px 20px;font:inherit;cursor:pointer}#status{white-space:pre-line}small{display:block;margin-top:20px;color:#6c807b}</style></head>
+<body><main><h1>BunnyOS</h1><p>你的小手机，保存在你自己的浏览器里。</p><p id="status" role="status">正在准备本机存储…</p><button id="retry" hidden onclick="location.reload()">重新尝试</button><small>角色、聊天和设置只保存在当前浏览器。可在「设置 → 存储配置」导出备份，或连接你自己的云存储。首次加载需要联网。</small></main>
+<script>
+(async () => {
+    try {
+        if (!isSecureContext || !navigator.serviceWorker || !window.indexedDB) throw new Error('请使用支持 IndexedDB 的浏览器，并通过 HTTPS 或 localhost 打开。');
+        const registration = await navigator.serviceWorker.register('./browser-sw.js', { scope: './' });
+        await navigator.serviceWorker.ready;
+        if (!navigator.serviceWorker.controller || !navigator.serviceWorker.controller.scriptURL.endsWith('/browser-sw.js')) {
+            await new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => reject(new Error('启动未完成，请关闭此站点的其他窗口后重试。')), 20000);
+                navigator.serviceWorker.addEventListener('controllerchange', () => { clearTimeout(timeout); resolve(); }, { once: true });
+                if (registration.active) registration.active.postMessage({ type: 'bunnyos:keepalive' });
+            });
+        }
+        const response = await fetch('./api/runtime', { cache: 'no-store' });
+        const runtime = await response.json();
+        if (!response.ok || runtime.mode !== 'browser') throw new Error(runtime.error || '无法启动浏览器存储');
+        location.replace('./desktop.html' + location.search + location.hash);
+    } catch (error) { document.getElementById('status').textContent = error.message; document.getElementById('retry').hidden = false; }
+})();
+</script></body></html>

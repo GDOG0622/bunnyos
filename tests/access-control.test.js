@@ -20,7 +20,7 @@ test('default startup generates a persistent private password and excludes it fr
     installAccessControl(express(), { rootDir: root, env: {} });
     assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).password, password);
     assert.equal(createPortableBackup(root).files['data/access.json'], undefined);
-    assert.throws(() => installAccessControl(express(), { rootDir: root, env: { BUNNYOS_PASSWORD: 'short' } }), /至少需要 16/);
+    assert.throws(() => installAccessControl(express(), { rootDir: root, env: { BUNNYOS_PASSWORD: 'short' } }), /至少需要 8/);
 });
 
 test('an explicit HTTPS origin supports reverse proxies without trusting forwarded headers', () => {

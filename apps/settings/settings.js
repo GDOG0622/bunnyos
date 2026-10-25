@@ -1279,6 +1279,7 @@ let settings = {};
             try {
                 const res = await fetch('/api/notify/test', { method: 'POST' });
                 const data = await res.json();
+                if (!res.ok) throw new Error(data.error || '通知测试失败');
                 alert('已向 ' + data.sent + ' 个订阅推送测试。（剔除失效订阅 ' + data.removed + ' 个）');
             } catch (e) { alert('测试推送失败：' + e.message); }
         }
