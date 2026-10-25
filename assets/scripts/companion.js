@@ -16,12 +16,15 @@
         if (!response.ok) throw Object.assign(new Error(data.error || `HTTP ${response.status}`), { status: response.status });
         return data;
     }
-    function handle(action) { return async event => {
+    function handle(action, onSettled) { return async event => {
         event?.preventDefault(); const button = event?.submitter || event?.currentTarget;
         if (button && 'disabled' in button) button.disabled = true;
         try { await action(event); }
         catch (error) { status(error.message, error.status === 409); }
-        finally { if (button && 'disabled' in button) button.disabled = false; }
+        finally {
+            if (button && 'disabled' in button) button.disabled = false;
+            onSettled?.();
+        }
     }; }
     function openApp(id, characterId = '') {
         if (window.parent !== window && window.parent.bunnyosOpenAppAndFocusChat) window.parent.bunnyosOpenAppAndFocusChat(id, characterId);

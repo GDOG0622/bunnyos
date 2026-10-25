@@ -82,10 +82,10 @@ $('#settings-form').onsubmit = handle(async () => {
 document.querySelectorAll('[data-close]').forEach(button => button.onclick = () => $('#' + button.dataset.close).close());
 document.querySelectorAll('[data-page]').forEach(button => button.onclick = () => { switchPage(button.dataset.page); window.scrollTo({ top: 0 }); });
 $('#moods').onclick = handle(async event => { const mood = event.target.closest('[data-mood]')?.dataset.mood; if (mood) await mutate('/mood', 'POST', { mood }); });
-$('#care-pet').onclick = handle(async () => { await mutate('/pet', 'POST'); $('.pet-card').classList.remove('cared'); requestAnimationFrame(() => $('.pet-card').classList.add('cared')); status('小兔收到了你们的心意 ♡'); });
+$('#care-pet').onclick = handle(async () => { await mutate('/pet', 'POST'); $('.pet-card').classList.remove('cared'); requestAnimationFrame(() => $('.pet-card').classList.add('cared')); status('小兔收到了你们的心意 ♡'); }, render);
 $('#answer-text').oninput = () => { $('#answer-text').dataset.dirty = 'true'; };
 $('#answer-form').onsubmit = handle(async () => { await mutate('/answer', 'POST', { text: $('#answer-text').value }); delete $('#answer-text').dataset.dirty; status('你的回答已经收好'); });
-$('#partner-answer').onclick = handle(async () => { status('TA 正在认真想你的问题…'); await mutate('/generate', 'POST', { kind: 'answer' }); status('TA 的回答来了'); });
+$('#partner-answer').onclick = handle(async () => { status('TA 正在认真想你的问题…'); await mutate('/generate', 'POST', { kind: 'answer' }); status('TA 的回答来了'); }, render);
 $('#diary-image').onchange = () => { $('#photo-name').textContent = $('#diary-image').files[0]?.name || ''; };
 $('#diary-form').onsubmit = handle(async () => {
     const file = $('#diary-image').files[0]; let image = '';
