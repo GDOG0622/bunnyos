@@ -3163,3 +3163,14 @@ html:not([data-app-layout="desktop"]) #qq-root.chat-open .qq-tabbar {
         -webkit-backdrop-filter: none;
     }
 }
+/* Real tool calls remain separate from roleplay service cards. */
+.qq-tool-card { margin-top: 8px; padding: 12px; max-width: min(390px, 100%); background: var(--qq-panel-bg, #f4f7f6); border: 1px solid #b8ccc8; border-radius: 12px; color: #3e5b55; font-size: 12px; overflow-wrap: anywhere; user-select: text; }
+.qq-tool-title { display: grid; gap: 3px; margin-bottom: 8px; }
+.qq-tool-title > span { font-weight: 600; }
+.qq-tool-card summary { cursor: pointer; }
+.qq-tool-card pre { white-space: pre-wrap; word-break: break-word; max-height: 180px; overflow: auto; margin: 5px 0 8px; font: 11px/1.5 ui-monospace, Consolas, monospace; user-select: text; }
+.qq-tool-buttons { display: flex; gap: 7px; flex-wrap: wrap; margin: 10px 0 6px; }
+.qq-tool-buttons button { cursor: pointer; border: 1px solid #93afa8; border-radius: 8px; background: white; color: #35594e; padding: 7px 10px; font: inherit; }
+.qq-tool-buttons button:disabled { opacity: .5; cursor: wait; }
+.qq-tool-sources { display: grid; gap: 5px; margin-top: 8px; }
+.qq-tool-sources a { color: #386b7d; text-decoration: underline; }

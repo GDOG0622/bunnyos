@@ -1,7 +1,7 @@
 {
   "id": "suki",
   "name": "Suki",
-  "entry": "",
+  "entry": "index.html",
   "icon": "bi-suit-heart-fill",
   "bg": "bg-suki",
   "iconColor": "#FF6B6B",
